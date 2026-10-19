@@ -3,7 +3,8 @@ package com.keyspaceapps.goodtv.ui
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.test.core.app.ActivityScenario
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsNodeInteraction
@@ -30,13 +31,19 @@ import org.junit.Test
  */
 class SourcesFlowTest {
     @get:Rule
-    val composeRule = createAndroidComposeRule<MainActivity>()
+    val composeRule = createEmptyComposeRule()
+    private var scenario: ActivityScenario<MainActivity>? = null
 
     private val server = MockWebServer()
 
+    /** Clear state first, then launch, so HomeViewModel resolves "no sources" against real data. */
     @Before
     fun setUp() {
-        runBlocking { ApplicationProvider.getApplicationContext<android.content.Context>().appGraph().db.clearAllTables() }
+        runBlocking {
+            val graph = ApplicationProvider.getApplicationContext<android.content.Context>().appGraph()
+            graph.db.clearAllTables()
+            graph.settings.setLastTab("LIVE")
+        }
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse = when (request.url.queryParameter("action")) {
                 null -> json("""{"user_info":{"auth":1,"status":"Active","exp_date":"1893456000","max_connections":"2","allowed_output_formats":["m3u8"]},"server_info":{}}""")
@@ -50,10 +57,14 @@ class SourcesFlowTest {
             }
         }
         server.start()
+        scenario = ActivityScenario.launch(MainActivity::class.java)
     }
 
     @After
-    fun tearDown() = server.close()
+    fun tearDown() {
+        scenario?.close()
+        server.close()
+    }
 
     private fun json(body: String, code: Int = 200) = MockResponse(code = code, body = body)
 

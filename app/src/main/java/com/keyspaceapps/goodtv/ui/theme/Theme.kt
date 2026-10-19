@@ -1,7 +1,9 @@
 package com.keyspaceapps.goodtv.ui.theme
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
+import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.darkColorScheme
 
@@ -18,5 +20,8 @@ private val GoodTvColors = darkColorScheme(
 
 @Composable
 fun GoodTvTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = GoodTvColors, content = content)
+    MaterialTheme(colorScheme = GoodTvColors) {
+        // Plain Text outside a Surface/ListItem would otherwise default to black on our black background.
+        CompositionLocalProvider(LocalContentColor provides GoodTvColors.onBackground, content = content)
+    }
 }

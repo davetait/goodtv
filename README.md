@@ -2,6 +2,8 @@
 
 Android TV / Google TV IPTV player, built for the Google TV Streamer. Kotlin, Jetpack Compose for TV, Media3 ExoPlayer.
 
+Add one or more **sources** (Xtream Codes today, M3U later) and browse one merged library: Live (category sidebar + channel list), Movies and Series (category rows with "See all" grids and detail pages). Everything is cached in Room, so the app opens from cache and refreshes sources in the background when they are older than 12 hours.
+
 ## Prerequisites
 
 - JDK 17+ on `PATH` (the project builds with Homebrew OpenJDK 21). If Gradle picks the wrong Java, set `JAVA_HOME`, for example to Android Studio's bundled runtime:
@@ -39,6 +41,31 @@ adb shell am start -n com.keyspaceapps.goodtv/.MainActivity
 
 Useful while poking at it: `adb shell input keyevent KEYCODE_DPAD_DOWN` / `KEYCODE_DPAD_CENTER` / `KEYCODE_BACK`, and `adb exec-out screencap -p > shot.png`.
 
+## Sources and the fake Xtream panel
+
+The on-TV Sources tab is where real providers go: **Add source → Nickname / Server URL / Username / Password → Test & save**. The server URL can be typed without a scheme (`panel.example:8080`).
+
+For development there is a stdlib-only fake panel in `tools/fake-xtream/` that serves a fixed catalog and redirects streams to public HLS test streams:
+
+```sh
+python3 tools/fake-xtream/server.py --port 8089 --name Home      # first provider
+python3 tools/fake-xtream/server.py --port 8090 --name Second    # optional second provider
+```
+
+Credentials are `demo` / `demo`. From the emulator the host is `http://10.0.2.2:<port>`.
+
+To skip typing on the emulator, debug builds read a prefilled source from `local.properties` (gitignored) and insert it once into an empty library:
+
+```properties
+GOODTV_XTREAM_SERVER=http://10.0.2.2:8089
+GOODTV_XTREAM_USERNAME=demo
+GOODTV_XTREAM_PASSWORD=demo
+```
+
+Release builds compile these as empty. Instrumented tests always start with no sources.
+
+Stream format: live channels use `.ts` when the panel lists it in `allowed_output_formats` (most reliable on real panels), otherwise `.m3u8`. Movies and episodes use the panel's `container_extension`.
+
 ## Real Google TV Streamer (adb over Wi-Fi)
 
 The Streamer has no USB data port, so debugging is over the network. These steps come from community guides rather than Google's own docs, so menu names may differ slightly by firmware:
@@ -54,15 +81,22 @@ Enabling **Stay awake** in Developer options avoids the connection dropping when
 
 ```
 app/src/main/java/com/keyspaceapps/goodtv/
-  MainActivity.kt        two-screen state: channel list or player
-  model/Channel.kt       Channel data class + sample public test streams
-  ui/HomeScreen.kt       focusable channel list (Compose for TV ListItem)
-  ui/PlayerScreen.kt     full-screen ExoPlayer via media3-ui-compose
-  ui/theme/Theme.kt      dark TV colour scheme
-app/src/androidTest/     Compose UI test for focus and D-pad behaviour
+  GoodTvApp.kt, AppGraph.kt       Application + manual dependency graph
+  domain/Models.kt                Channel, Movie, Series, Episode, Catalog, PlayableItem, ...
+  data/source/                    SourceConfig (per-type settings), ChannelSource interface, SourceRegistry
+  data/xtream/                    Xtream Codes client: lenient DTOs, URL building, API, mapping
+  data/db/                        Room cache (entities, DAOs, RoomLibraryStore)
+  data/repo/                      LibraryStore interface, SyncManager, LibraryRepository
+  data/settings/, data/debug/     DataStore settings, debug prefilled source
+  ui/nav/                         Navigation 3 keys and NavDisplay
+  ui/home/, ui/live/, ui/movies/, ui/series/, ui/sources/, ui/browse/, ui/player/
+tools/fake-xtream/                fake Xtream panel for development
+docs/superpowers/                 design spec and implementation plan
 ```
+
+Tests: `./gradlew :app:testDebugUnitTest` (JVM: parsing, URLs, sync, view models) and `./gradlew :app:connectedDebugAndroidTest` (emulator: Room, Sources flow against a MockWebServer, Live/Movies/Series screens).
 
 ## Next
 
-- Xtream Codes playlist source (server, username, password) behind a `ChannelRepository`.
-- Player controls overlay, channel switching with D-pad up/down while playing, EPG.
+- M3U playlist sources (implement `ChannelSource` + a form).
+- EPG (now/next), search, resume position, favourites.

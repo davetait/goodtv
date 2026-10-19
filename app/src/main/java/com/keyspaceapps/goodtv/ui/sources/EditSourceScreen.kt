@@ -46,7 +46,7 @@ fun EditSourceScreen(sourceId: Long?, onDone: () -> Unit) {
         Spacer(Modifier.height(16.dp))
         TvTextField(form.username, { vm.update(username = it) }, stringResource(R.string.field_username), fieldWidth)
         Spacer(Modifier.height(16.dp))
-        TvTextField(form.password, { vm.update(password = it) }, stringResource(R.string.field_password), fieldWidth, password = true)
+        TvTextField(form.password, { vm.update(password = it) }, stringResource(R.string.field_password), fieldWidth, password = true, last = true)
         Spacer(Modifier.height(24.dp))
         Button(onClick = { vm.testAndSave() }, enabled = !form.testing) {
             Text(stringResource(if (form.testing) R.string.testing else R.string.test_and_save))
