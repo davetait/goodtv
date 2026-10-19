@@ -1,6 +1,9 @@
 package com.keyspaceapps.goodtv
 
 import android.content.Context
+import com.keyspaceapps.goodtv.data.db.GoodTvDatabase
+import com.keyspaceapps.goodtv.data.db.RoomLibraryStore
+import com.keyspaceapps.goodtv.data.repo.LibraryStore
 import com.keyspaceapps.goodtv.data.source.SourceRegistry
 import com.keyspaceapps.goodtv.data.xtream.XtreamApi
 import com.keyspaceapps.goodtv.data.xtream.XtreamChannelSource
@@ -27,6 +30,9 @@ class AppGraph(val context: Context) {
             chain.proceed(chain.request().newBuilder().header("User-Agent", USER_AGENT).build())
         }
         .build()
+
+    val db: GoodTvDatabase by lazy { GoodTvDatabase.create(context) }
+    val store: LibraryStore by lazy { RoomLibraryStore(db, json) }
 
     val sourceRegistry: SourceRegistry by lazy {
         SourceRegistry(listOf(XtreamChannelSource(XtreamApi(okHttp, XtreamJson.instance))))
