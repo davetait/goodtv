@@ -1,5 +1,6 @@
 package com.keyspaceapps.goodtv.testing
 
+import com.keyspaceapps.goodtv.data.repo.CategoryKey
 import com.keyspaceapps.goodtv.data.repo.LibraryStore
 import com.keyspaceapps.goodtv.domain.Catalog
 import com.keyspaceapps.goodtv.domain.CategoryWithSource
@@ -77,6 +78,22 @@ class FakeLibraryStore : LibraryStore {
 
     override fun observeSeries(sourceId: Long, categoryId: String, limit: Int): Flow<List<Series>> =
         catalogs.map { it[sourceId]?.series?.filter { m -> m.categoryId == categoryId }?.take(limit) ?: emptyList() }
+
+    override fun observeMoviesByCategory(limitPerCategory: Int): Flow<Map<CategoryKey, List<Movie>>> = combine(sources, catalogs) { s, c ->
+        s.filter { it.enabled }.flatMap { r -> c[r.id]?.movies ?: emptyList() }
+            .filter { it.categoryId != null }
+            .sortedWith(compareByDescending<Movie> { it.addedAt ?: Long.MIN_VALUE }.thenBy { it.name })
+            .groupBy { CategoryKey(it.sourceId, it.categoryId!!) }
+            .mapValues { (_, v) -> v.take(limitPerCategory) }
+    }
+
+    override fun observeSeriesByCategory(limitPerCategory: Int): Flow<Map<CategoryKey, List<Series>>> = combine(sources, catalogs) { s, c ->
+        s.filter { it.enabled }.flatMap { r -> c[r.id]?.series ?: emptyList() }
+            .filter { it.categoryId != null }
+            .sortedBy { it.name }
+            .groupBy { CategoryKey(it.sourceId, it.categoryId!!) }
+            .mapValues { (_, v) -> v.take(limitPerCategory) }
+    }
 
     override suspend fun getMovie(sourceId: Long, id: String): Movie? = catalogs.value[sourceId]?.movies?.firstOrNull { it.id == id }
     override suspend fun getSeries(sourceId: Long, id: String): Series? = catalogs.value[sourceId]?.series?.firstOrNull { it.id == id }

@@ -12,6 +12,8 @@ import com.keyspaceapps.goodtv.domain.SourceRecord
 import com.keyspaceapps.goodtv.domain.SourceSummary
 import kotlinx.coroutines.flow.Flow
 
+data class CategoryKey(val sourceId: Long, val categoryId: String)
+
 /** The on-device library cache. The UI reads only from here; sync writes into it. */
 interface LibraryStore {
     fun observeSources(): Flow<List<SourceRecord>>
@@ -32,6 +34,13 @@ interface LibraryStore {
     fun observeLiveChannels(sourceId: Long, categoryId: String): Flow<List<LiveChannel>>
     fun observeMovies(sourceId: Long, categoryId: String, limit: Int): Flow<List<Movie>>
     fun observeSeries(sourceId: Long, categoryId: String, limit: Int): Flow<List<Series>>
+
+    /**
+     * Every enabled source's movies grouped by category, newest first, at most [limitPerCategory]
+     * per category. One query for the whole Movies screen instead of one per category.
+     */
+    fun observeMoviesByCategory(limitPerCategory: Int): Flow<Map<CategoryKey, List<Movie>>>
+    fun observeSeriesByCategory(limitPerCategory: Int): Flow<Map<CategoryKey, List<Series>>>
 
     suspend fun getMovie(sourceId: Long, id: String): Movie?
     suspend fun getSeries(sourceId: Long, id: String): Series?

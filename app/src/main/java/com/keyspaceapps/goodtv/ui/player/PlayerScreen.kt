@@ -29,6 +29,8 @@ import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -101,6 +103,21 @@ fun PlayerScreen(
     LaunchedEffect(lastInteraction) {
         delay(OVERLAY_HIDE_MS)
         overlayVisible = false
+    }
+
+    // Pause when the user leaves the app (Home), resume on return if it was playing.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle, player) {
+        var resumeOnStart = false
+        val observer = LifecycleEventObserver { _, event ->
+            when (PlayerLifecycle.actionFor(event)) {
+                PlayerLifecycleAction.PAUSE -> { resumeOnStart = player.playWhenReady; player.pause() }
+                PlayerLifecycleAction.RESUME -> if (resumeOnStart) player.play()
+                null -> Unit
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
     }
 
     BackHandler(onBack = onBack)

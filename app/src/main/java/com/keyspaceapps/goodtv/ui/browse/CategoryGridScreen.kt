@@ -13,11 +13,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
@@ -29,8 +25,8 @@ import com.keyspaceapps.goodtv.ui.nav.CategoryGridKey
 fun CategoryGridScreen(key: CategoryGridKey, onItem: (RowItem) -> Unit) {
     val vm = goodTvViewModel(key = "grid-${key.sourceId}-${key.kind}-${key.categoryId}") { CategoryGridViewModel(it.repository, key) }
     val items by vm.items.collectAsState()
-    val firstFocus = remember { FocusRequester() }
-    var initialFocusDone by remember { mutableStateOf(false) }
+    val requested = remember { mutableStateOf(false) }
+    val target = vm.focus.targetIn(items.map { it.id }, items.firstOrNull()?.id)
 
     Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 24.dp)) {
         Text(key.title, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(bottom = 16.dp))
@@ -40,15 +36,11 @@ fun CategoryGridScreen(key: CategoryGridKey, onItem: (RowItem) -> Unit) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(bottom = 48.dp),
         ) {
-            itemsIndexed(items, key = { _, it -> it.id }) { index, item ->
-                val focusModifier = if (index == 0) {
-                    Modifier.focusRequester(firstFocus).onPlaced {
-                        if (!initialFocusDone) { initialFocusDone = true; firstFocus.requestFocus() }
-                    }
-                } else {
-                    Modifier
-                }
-                PosterCard(title = item.title, imageUrl = item.imageUrl, onClick = { onItem(item) }, modifier = focusModifier)
+            itemsIndexed(items, key = { _, it -> it.id }) { _, item ->
+                PosterCard(
+                    title = item.title, imageUrl = item.imageUrl, onClick = { onItem(item) },
+                    modifier = Modifier.rememberedFocus(vm.focus, item.id, isTarget = item.id == target, requested = requested),
+                )
             }
         }
     }

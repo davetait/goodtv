@@ -24,14 +24,16 @@ fun SeriesScreen(onSeries: (SeriesDetailKey) -> Unit, onSeeAll: (CategoryGridKey
     val rows by vm.rows.collectAsState()
     val multiSource by vm.multiSource.collectAsState()
 
-    if (rows.isEmpty()) {
+    val loaded = rows ?: return // still loading: show nothing rather than a misleading empty state
+    if (loaded.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(stringResource(R.string.no_sources_yet), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }
     CategoryRows(
-        rows = rows,
+        rows = loaded,
+        focus = vm.focus,
         multiSource = multiSource,
         onItem = { _, item -> onSeries(SeriesDetailKey(item.sourceId, item.id)) },
         onSeeAll = { row ->

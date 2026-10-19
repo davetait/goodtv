@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
 class CategoryGridViewModel(repo: LibraryRepository, val key: CategoryGridKey) : ViewModel() {
+    val focus = FocusMemory()
     val items: StateFlow<List<RowItem>> = when (key.kind) {
         ContentKind.MOVIE -> repo.movies(key.sourceId, key.categoryId, Int.MAX_VALUE).map { list -> list.map { RowItem(it.sourceId, it.id, it.name, it.posterUrl) } }
         ContentKind.SERIES -> repo.series(key.sourceId, key.categoryId, Int.MAX_VALUE).map { list -> list.map { RowItem(it.sourceId, it.id, it.name, it.coverUrl) } }

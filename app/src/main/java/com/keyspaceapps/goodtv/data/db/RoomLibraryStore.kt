@@ -1,6 +1,7 @@
 package com.keyspaceapps.goodtv.data.db
 
 import androidx.room.withTransaction
+import com.keyspaceapps.goodtv.data.repo.CategoryKey
 import com.keyspaceapps.goodtv.data.repo.LibraryStore
 import com.keyspaceapps.goodtv.domain.Catalog
 import com.keyspaceapps.goodtv.domain.CategoryWithSource
@@ -13,6 +14,7 @@ import com.keyspaceapps.goodtv.domain.SeriesDetail
 import com.keyspaceapps.goodtv.domain.SourceRecord
 import com.keyspaceapps.goodtv.domain.SourceSummary
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
 
@@ -68,6 +70,16 @@ class RoomLibraryStore(
 
     override fun observeSeries(sourceId: Long, categoryId: String, limit: Int): Flow<List<Series>> =
         library.observeSeries(sourceId, categoryId, limit).map { rows -> rows.map { it.toDomain() } }
+
+    override fun observeMoviesByCategory(limitPerCategory: Int): Flow<Map<CategoryKey, List<Movie>>> =
+        library.observeEnabledMovies()
+            .map { rows -> rows.groupBy { CategoryKey(it.sourceId, it.categoryId!!) }.mapValues { (_, v) -> v.take(limitPerCategory).map { it.toDomain() } } }
+            .distinctUntilChanged()
+
+    override fun observeSeriesByCategory(limitPerCategory: Int): Flow<Map<CategoryKey, List<Series>>> =
+        library.observeEnabledSeries()
+            .map { rows -> rows.groupBy { CategoryKey(it.sourceId, it.categoryId!!) }.mapValues { (_, v) -> v.take(limitPerCategory).map { it.toDomain() } } }
+            .distinctUntilChanged()
 
     override suspend fun getMovie(sourceId: Long, id: String): Movie? = library.getMovie(sourceId, id)?.toDomain()
     override suspend fun getSeries(sourceId: Long, id: String): Series? = library.getSeries(sourceId, id)?.toDomain()

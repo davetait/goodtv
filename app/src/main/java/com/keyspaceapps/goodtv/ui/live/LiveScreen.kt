@@ -15,13 +15,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.ListItem
@@ -30,12 +26,15 @@ import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.keyspaceapps.goodtv.R
 import com.keyspaceapps.goodtv.ui.browse.Labels
+import com.keyspaceapps.goodtv.ui.browse.rememberedFocus
+import com.keyspaceapps.goodtv.ui.browse.targetIn
 import com.keyspaceapps.goodtv.ui.goodTvViewModel
 import com.keyspaceapps.goodtv.ui.nav.PlayerKey
 
 /**
  * Live TV: category sidebar on the left (selection follows focus), channels of the selected
- * category on the right. The first channel takes focus once on first load.
+ * category on the right. Focus returns to the channel the user last had (e.g. after the player
+ * pops), else the first channel takes it once on load.
  */
 @Composable
 fun LiveScreen(onPlay: (PlayerKey) -> Unit) {
@@ -44,8 +43,8 @@ fun LiveScreen(onPlay: (PlayerKey) -> Unit) {
     val selected by vm.selected.collectAsState()
     val channels by vm.channels.collectAsState()
     val multiSource by vm.multiSource.collectAsState()
-    val firstChannelFocus = remember { FocusRequester() }
-    var initialFocusDone by remember { mutableStateOf(false) }
+    val requested = remember { mutableStateOf(false) }
+    val target = vm.focus.targetIn(channels.map { it.id }, channels.firstOrNull()?.id)
 
     if (categories.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -68,17 +67,8 @@ fun LiveScreen(onPlay: (PlayerKey) -> Unit) {
             }
         }
         LazyColumn(Modifier.weight(1f).fillMaxHeight().padding(start = 24.dp, end = 48.dp)) {
-            itemsIndexed(channels, key = { _, ch -> ch.id }) { index, ch ->
-                val focusModifier = if (index == 0) {
-                    Modifier.focusRequester(firstChannelFocus).onPlaced {
-                        if (!initialFocusDone) {
-                            initialFocusDone = true
-                            firstChannelFocus.requestFocus()
-                        }
-                    }
-                } else {
-                    Modifier
-                }
+            itemsIndexed(channels, key = { _, ch -> ch.id }) { _, ch ->
+                val focusModifier = Modifier.rememberedFocus(vm.focus, ch.id, isTarget = ch.id == target, requested = requested)
                 ListItem(
                     selected = false,
                     onClick = { onPlay(PlayerKey(ch.sourceId, PlayerKey.KIND_LIVE, ch.id, null, ch.name)) },

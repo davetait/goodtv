@@ -2,6 +2,7 @@ package com.keyspaceapps.goodtv.data.db
 
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import com.keyspaceapps.goodtv.data.repo.CategoryKey
 import com.keyspaceapps.goodtv.data.source.SourceConfig
 import com.keyspaceapps.goodtv.data.source.SourceType
 import com.keyspaceapps.goodtv.domain.Catalog
@@ -182,5 +183,22 @@ class RoomLibraryStoreTest {
         val updated = store.getSource(id)!!.copy(nickname = "Renamed", config = SourceConfig.Xtream("http://t", "x", "y"))
         store.updateSource(updated)
         assertEquals(updated, store.getSource(id))
+    }
+
+    @Test
+    fun moviesByCategoryLimitsPerCategoryNewestFirstAndSkipsDisabledSources() = runBlocking {
+        val a = store.insertSource(record("A"))
+        val b = store.insertSource(record("B", enabled = false))
+        val movies = (1..5).map { Movie(a, "M$it", "m1", "Movie $it", null, "mkv", null, addedAt = it.toLong()) } +
+            listOf(Movie(a, "X1", "m2", "Other 1", null, "mkv", null, null))
+        store.replaceCatalog(a, catalog(a, live = 0).copy(movies = movies))
+        store.replaceCatalog(b, catalog(b, live = 0))
+
+        val grouped = store.observeMoviesByCategory(3).first()
+
+        assertEquals(setOf(CategoryKey(a, "m1"), CategoryKey(a, "m2")), grouped.keys)
+        assertEquals(listOf("M5", "M4", "M3"), grouped[CategoryKey(a, "m1")]!!.map { it.id })
+        assertEquals(listOf("X1"), grouped[CategoryKey(a, "m2")]!!.map { it.id })
+        assertEquals(1, store.observeSeriesByCategory(3).first()[CategoryKey(a, "s1")]!!.size)
     }
 }

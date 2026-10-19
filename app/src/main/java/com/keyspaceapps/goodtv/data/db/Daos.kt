@@ -61,6 +61,18 @@ interface LibraryDao {
     @Query("SELECT * FROM series WHERE sourceId = :sourceId AND categoryId = :categoryId ORDER BY name LIMIT :limit")
     fun observeSeries(sourceId: Long, categoryId: String, limit: Int): Flow<List<SeriesEntity>>
 
+    @Query(
+        """SELECT m.* FROM movies m JOIN sources s ON s.id = m.sourceId
+           WHERE s.enabled = 1 AND m.categoryId IS NOT NULL ORDER BY m.sourceId, m.categoryId, m.addedAt DESC, m.name""",
+    )
+    fun observeEnabledMovies(): Flow<List<MovieEntity>>
+
+    @Query(
+        """SELECT x.* FROM series x JOIN sources s ON s.id = x.sourceId
+           WHERE s.enabled = 1 AND x.categoryId IS NOT NULL ORDER BY x.sourceId, x.categoryId, x.name""",
+    )
+    fun observeEnabledSeries(): Flow<List<SeriesEntity>>
+
     @Query("SELECT * FROM movies WHERE sourceId = :sourceId AND id = :id") suspend fun getMovie(sourceId: Long, id: String): MovieEntity?
     @Query("SELECT * FROM series WHERE sourceId = :sourceId AND id = :id") suspend fun getSeries(sourceId: Long, id: String): SeriesEntity?
 

@@ -11,12 +11,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
@@ -30,20 +25,28 @@ data class RowItem(val sourceId: Long, val id: String, val title: String, val im
 
 data class CategoryRow(val category: CategoryWithSource, val items: List<RowItem>, val hasMore: Boolean)
 
-/** Vertical stack of category rails. The first poster of the first row takes focus once on load. */
+fun rowKey(row: CategoryRow) = "${row.category.category.sourceId}:${row.category.category.id}"
+
+/**
+ * Vertical stack of category rails. Focus goes to the item the user last had focused (remembered in
+ * [focus] across the player push), else to the first poster of the first row.
+ */
 @Composable
 fun CategoryRows(
     rows: List<CategoryRow>,
+    focus: FocusMemory,
     multiSource: Boolean,
     onItem: (CategoryRow, RowItem) -> Unit,
     onSeeAll: (CategoryRow) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val firstFocus = remember { FocusRequester() }
-    var initialFocusDone by remember { mutableStateOf(false) }
+    val requested = remember { mutableStateOf(false) }
+    val present = rows.flatMap { r -> r.items.map { "${rowKey(r)}:${it.id}" } + (if (r.hasMore) listOf("${rowKey(r)}:see-all") else emptyList()) }
+    val default = rows.firstOrNull { it.items.isNotEmpty() }?.let { "${rowKey(it)}:${it.items.first().id}" }
+    val target = focus.targetIn(present, default)
 
     LazyColumn(modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 48.dp)) {
-        itemsIndexed(rows, key = { _, r -> "${r.category.category.sourceId}:${r.category.category.id}" }) { rowIndex, row ->
+        itemsIndexed(rows, key = { _, r -> rowKey(r) }) { _, row ->
             Column(Modifier.fillMaxWidth().padding(top = 16.dp)) {
                 Text(
                     Labels.categoryLabel(row.category.category.name, row.category.sourceNickname, multiSource),
@@ -54,22 +57,20 @@ fun CategoryRows(
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 48.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    itemsIndexed(row.items, key = { _, it -> it.id }) { index, item ->
-                        val focusModifier = if (rowIndex == 0 && index == 0) {
-                            Modifier.focusRequester(firstFocus).onPlaced {
-                                if (!initialFocusDone) {
-                                    initialFocusDone = true
-                                    firstFocus.requestFocus()
-                                }
-                            }
-                        } else {
-                            Modifier
-                        }
-                        PosterCard(title = item.title, imageUrl = item.imageUrl, onClick = { onItem(row, item) }, modifier = focusModifier)
+                    itemsIndexed(row.items, key = { _, it -> it.id }) { _, item ->
+                        val key = "${rowKey(row)}:${item.id}"
+                        PosterCard(
+                            title = item.title, imageUrl = item.imageUrl, onClick = { onItem(row, item) },
+                            modifier = Modifier.rememberedFocus(focus, key, isTarget = key == target, requested = requested),
+                        )
                     }
                     if (row.hasMore) {
                         item(key = "see-all") {
-                            PosterCard(title = stringResource(R.string.see_all), imageUrl = null, onClick = { onSeeAll(row) }, placeholderLabel = "→")
+                            val key = "${rowKey(row)}:see-all"
+                            PosterCard(
+                                title = stringResource(R.string.see_all), imageUrl = null, onClick = { onSeeAll(row) }, placeholderLabel = "→",
+                                modifier = Modifier.rememberedFocus(focus, key, isTarget = key == target, requested = requested),
+                            )
                         }
                     }
                 }

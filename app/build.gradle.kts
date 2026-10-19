@@ -43,6 +43,9 @@ android {
             buildConfigField("String", "XTREAM_SERVER", "\"\"")
             buildConfigField("String", "XTREAM_USERNAME", "\"\"")
             buildConfigField("String", "XTREAM_PASSWORD", "\"\"")
+            // Debug-signed so the minified build can be installed and exercised locally. Replace
+            // with a real signing config before any distribution.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
@@ -57,10 +60,15 @@ android {
     }
 }
 
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.navigation3)
     implementation(libs.androidx.activity.compose)
 

@@ -6,6 +6,7 @@ import com.keyspaceapps.goodtv.data.repo.LibraryRepository
 import com.keyspaceapps.goodtv.domain.CategoryWithSource
 import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.domain.LiveChannel
+import com.keyspaceapps.goodtv.ui.browse.FocusMemory
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.stateIn
 @OptIn(ExperimentalCoroutinesApi::class)
 class LiveViewModel(repo: LibraryRepository) : ViewModel() {
     private val sharing = SharingStarted.WhileSubscribed(5_000)
+    val focus = FocusMemory()
 
     val categories: StateFlow<List<CategoryWithSource>> =
         repo.categories(ContentKind.LIVE).stateIn(viewModelScope, sharing, emptyList())

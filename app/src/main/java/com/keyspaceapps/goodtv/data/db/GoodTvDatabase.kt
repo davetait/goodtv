@@ -11,7 +11,7 @@ import androidx.room.RoomDatabase
         MovieDetailEntity::class, SeriesInfoEntity::class, SeasonEntity::class, EpisodeEntity::class,
     ],
     version = 1,
-    exportSchema = false,
+    exportSchema = true, // schemas/ holds the baseline every future migration is written against
 )
 abstract class GoodTvDatabase : RoomDatabase() {
     abstract fun sources(): SourceDao

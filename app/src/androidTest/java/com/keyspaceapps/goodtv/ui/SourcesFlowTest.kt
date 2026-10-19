@@ -92,6 +92,10 @@ class SourcesFlowTest {
         composeRule.onNodeWithText("Username").performTextInput("u")
         composeRule.onNodeWithText("Password").performTextInput("p")
         composeRule.onNodeWithText("Test & save").tvClick()
+        // Sign-in result stays on screen until the user presses Done; the sync runs in the background.
+        composeRule.waitUntil(10_000) { composeRule.onAllNodes(hasText("Done")).fetchSemanticsNodes().isNotEmpty() }
+        composeRule.onNodeWithText("Active", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Done").assertIsFocused().tvClick()
 
         try {
             composeRule.waitUntil(15_000) {
