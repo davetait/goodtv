@@ -23,6 +23,7 @@ import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.ui.browse.CategoryGridScreen
 import com.keyspaceapps.goodtv.ui.home.HomeScreen
 import com.keyspaceapps.goodtv.ui.movies.MovieDetailScreen
+import com.keyspaceapps.goodtv.ui.series.SeriesDetailScreen
 import com.keyspaceapps.goodtv.ui.player.PlayerScreen
 import com.keyspaceapps.goodtv.ui.sources.EditSourceScreen
 
@@ -53,7 +54,7 @@ fun GoodTvNavigation() {
                 }
             }
             entry<MovieDetailKey> { key -> MovieDetailScreen(key = key, onPlay = { backStack.add(it) }) }
-            entry<SeriesDetailKey> { ComingSoon("Series detail") }
+            entry<SeriesDetailKey> { key -> SeriesDetailScreen(key = key, onPlay = { backStack.add(it) }) }
             entry<CategoryGridKey> { key ->
                 CategoryGridScreen(key = key, onItem = { item ->
                     backStack.add(if (key.kind == ContentKind.SERIES) SeriesDetailKey(item.sourceId, item.id) else MovieDetailKey(item.sourceId, item.id))
@@ -61,9 +62,4 @@ fun GoodTvNavigation() {
             }
         },
     )
-}
-
-@Composable
-private fun ComingSoon(what: String) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("$what: coming soon") }
 }

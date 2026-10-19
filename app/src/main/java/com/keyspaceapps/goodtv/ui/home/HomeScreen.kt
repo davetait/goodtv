@@ -24,6 +24,7 @@ import com.keyspaceapps.goodtv.data.settings.AppSettings
 import com.keyspaceapps.goodtv.ui.goodTvViewModel
 import com.keyspaceapps.goodtv.ui.live.LiveScreen
 import com.keyspaceapps.goodtv.ui.movies.MoviesScreen
+import com.keyspaceapps.goodtv.ui.series.SeriesScreen
 import com.keyspaceapps.goodtv.ui.nav.GoodTvKey
 import com.keyspaceapps.goodtv.ui.nav.HomeTab
 import com.keyspaceapps.goodtv.ui.sources.SourcesScreen
@@ -84,7 +85,7 @@ fun HomeScreen(onNavigate: (GoodTvKey) -> Unit) {
             when (current) {
                 HomeTab.LIVE -> LiveScreen(onPlay = onNavigate)
                 HomeTab.MOVIES -> MoviesScreen(onMovie = onNavigate, onSeeAll = onNavigate)
-                HomeTab.SERIES -> Placeholder(stringResource(R.string.coming_soon))
+                HomeTab.SERIES -> SeriesScreen(onSeries = onNavigate, onSeeAll = onNavigate)
                 HomeTab.SOURCES -> SourcesScreen(onNavigate = onNavigate)
             }
         }
