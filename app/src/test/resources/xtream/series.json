@@ -1,0 +1,4 @@
+[
+  { "num": 1, "name": "Series Title", "series_id": 789, "cover": "http://x/cover.jpg", "plot": "Series description...", "cast": "Actor 1", "director": "Dir", "genre": "Drama", "releaseDate": "2025-01-01", "last_modified": "1609459200", "rating": "9.0", "rating_5based": 4.5, "backdrop_path": ["http://x/backdrop.jpg"], "youtube_trailer": "abc123", "episode_run_time": "45", "category_id": "20" },
+  { "num": 2, "name": "Other Series", "series_id": "790", "cover": null, "rating": 7, "category_id": 20 }
+]

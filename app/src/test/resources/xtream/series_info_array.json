@@ -1,0 +1,8 @@
+{
+  "seasons": [],
+  "info": { "name": "Array Series", "category_id": "20" },
+  "episodes": [
+    [ { "id": "3001", "episode_num": 1, "title": "A1", "container_extension": "mp4" }, { "id": "3002", "episode_num": 2, "title": "A2", "container_extension": "mp4" } ],
+    [ { "id": "3101", "episode_num": 1, "title": "B1", "container_extension": "mp4" } ]
+  ]
+}
