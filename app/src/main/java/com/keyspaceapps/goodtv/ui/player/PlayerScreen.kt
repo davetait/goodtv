@@ -21,7 +21,6 @@ import androidx.compose.ui.unit.dp
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.compose.PlayerSurface
 import androidx.media3.ui.compose.SURFACE_TYPE_SURFACE_VIEW
 import androidx.tv.material3.MaterialTheme
@@ -44,7 +43,7 @@ fun PlayerScreen(
     var isBuffering by remember { mutableStateOf(true) }
 
     val player = remember(item.url) {
-        ExoPlayer.Builder(context).build().apply {
+        PlayerFactory.create(context).apply {
             setMediaItem(MediaItem.fromUri(item.url))
             playWhenReady = true
             prepare()
