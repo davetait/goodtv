@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GoodTV</string>
+    <string name="home_title">GoodTV</string>
+    <string name="home_subtitle">Select a channel</string>
+    <string name="player_loading">Loading…</string>
+</resources>
