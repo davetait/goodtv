@@ -23,6 +23,8 @@ class FakeLibraryStore : LibraryStore {
     private val movieDetails = mutableMapOf<Pair<Long, String>, MovieDetail>()
     private val seriesDetails = mutableMapOf<Pair<Long, String>, SeriesDetail>()
     private var nextId = 1L
+    /** When set, replaceCatalog throws it (simulates a DB failure or a cascade-deleted source). */
+    var replaceCatalogError: Throwable? = null
 
     override fun observeSources(): Flow<List<SourceRecord>> = sources
     override suspend fun getSources(): List<SourceRecord> = sources.value
@@ -44,6 +46,7 @@ class FakeLibraryStore : LibraryStore {
     }
 
     override suspend fun replaceCatalog(sourceId: Long, catalog: Catalog) {
+        replaceCatalogError?.let { throw it }
         catalogs.value = catalogs.value + (sourceId to catalog)
     }
 

@@ -43,19 +43,24 @@ class LibraryRepository(
 
     suspend fun validate(config: SourceConfig): Result<SourceInfo> = registry.forType(config.type).validate(config)
 
+    /** Inserts and starts the first sync in the background; the Sources screen shows its progress. */
     suspend fun addSource(nickname: String, config: SourceConfig): Long {
         val id = store.insertSource(SourceRecord(0, config.type, nickname, config, enabled = true, lastSyncAt = null, lastError = null))
-        sync.refreshNow(id)
+        sync.refresh(id)
         return id
     }
 
     suspend fun updateSource(id: Long, nickname: String, config: SourceConfig) {
         val existing = store.getSource(id) ?: return
+        sync.cancel(id) // a refresh of the old config must not report against the new one
         store.updateSource(existing.copy(nickname = nickname, config = config, type = config.type))
-        sync.refreshNow(id)
+        sync.refresh(id)
     }
 
-    suspend fun removeSource(id: Long) = store.deleteSource(id)
+    suspend fun removeSource(id: Long) {
+        sync.cancel(id) // otherwise the in-flight refresh would insert rows for a deleted source
+        store.deleteSource(id)
+    }
 
     suspend fun movieDetail(sourceId: Long, movieId: String): Result<MovieDetail> {
         store.getMovieDetail(sourceId, movieId)?.let { return Result.success(it) }

@@ -2,6 +2,7 @@ package com.keyspaceapps.goodtv.data.repo
 
 import com.keyspaceapps.goodtv.data.source.SourceException
 import com.keyspaceapps.goodtv.data.source.SourceRegistry
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -12,7 +13,8 @@ import kotlinx.coroutines.launch
 
 /**
  * Refreshes sources into the [LibraryStore]. One in-flight refresh per source; sources refresh
- * independently so one failing never blocks another. A failed refresh keeps the old rows.
+ * independently so one failing never blocks another. A failed refresh keeps the old rows. Nothing
+ * thrown inside a refresh escapes: every failure becomes a recorded error, never a crash.
  */
 class SyncManager(
     private val store: LibraryStore,
@@ -35,15 +37,26 @@ class SyncManager(
         val job = scope.launch {
             val result = doRefresh(sourceId)
             synchronized(lock) {
-                jobs.remove(sourceId)
                 results[sourceId] = result
                 result.exceptionOrNull()?.let { lastError = SyncState.Error(sourceId, it.message ?: "Unknown error") }
-                publish()
             }
         }
         jobs[sourceId] = job
+        // Runs on normal completion, failure and cancellation alike, so the in-flight set stays honest.
+        job.invokeOnCompletion {
+            synchronized(lock) {
+                if (jobs[sourceId] === job) jobs.remove(sourceId)
+                publish()
+            }
+        }
         publish()
         job
+    }
+
+    /** Stops an in-flight refresh (used before a source is edited or removed). */
+    fun cancel(sourceId: Long) {
+        val job = synchronized(lock) { jobs[sourceId] }
+        job?.cancel()
     }
 
     /** Enabled sources never synced, or synced longer than [staleAfterMs] ago. */
@@ -65,19 +78,27 @@ class SyncManager(
     }
 
     private suspend fun doRefresh(sourceId: Long): Result<Unit> {
-        val record = store.getSource(sourceId) ?: return Result.failure(SourceException("Source not found"))
-        val source = registry.forType(record.type)
-        return source.fetchCatalog(sourceId, record.config).fold(
-            onSuccess = { catalog ->
-                store.replaceCatalog(sourceId, catalog)
-                store.markSync(sourceId, clock(), null)
-                Result.success(Unit)
-            },
-            onFailure = { e ->
-                store.markSync(sourceId, null, e.message ?: "Unknown error")
-                Result.failure(e)
-            },
-        )
+        try {
+            val record = store.getSource(sourceId) ?: return Result.failure(SourceException("Source not found"))
+            val source = registry.forType(record.type)
+            return source.fetchCatalog(sourceId, record.config).fold(
+                onSuccess = { catalog ->
+                    store.replaceCatalog(sourceId, catalog)
+                    store.markSync(sourceId, clock(), null)
+                    Result.success(Unit)
+                },
+                onFailure = { e ->
+                    store.markSync(sourceId, null, e.message ?: "Unknown error")
+                    Result.failure(e)
+                },
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val message = e.message ?: e.javaClass.simpleName
+            runCatching { store.markSync(sourceId, null, message) }
+            return Result.failure(SourceException(message, e))
+        }
     }
 
     private fun publish() {

@@ -62,4 +62,13 @@ class XtreamUrlsTest {
     fun serverInConfigIsNormalizedWhenBuilding() {
         assertEquals("http://p.com/live/u/p/1.ts", XtreamUrls.stream(cfg(server = "p.com/"), PlayableRef.Live("1")))
     }
+
+    @Test
+    fun normalizeStripsPastedPanelEndpointsAndQueries() {
+        assertEquals("http://host:8080", XtreamUrls.normalizeServer("http://host:8080/player_api.php?username=u&password=p"))
+        assertEquals("http://host:8080", XtreamUrls.normalizeServer("http://host:8080/get.php?username=u&password=p&type=m3u_plus"))
+        assertEquals("https://host", XtreamUrls.normalizeServer("https://host/xmltv.php"))
+        assertEquals("http://host/base", XtreamUrls.normalizeServer("host/base/player_api.php"))
+        assertEquals("http://host", XtreamUrls.normalizeServer("host/#frag"))
+    }
 }

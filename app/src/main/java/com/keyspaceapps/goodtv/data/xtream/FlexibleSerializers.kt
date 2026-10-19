@@ -39,7 +39,12 @@ object FlexStringSerializer : KSerializer<String?> {
 
 object FlexIntSerializer : KSerializer<Int?> {
     override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("FlexInt", PrimitiveKind.INT).nullable
-    override fun deserialize(decoder: Decoder): Int? = decoder.primitiveContent()?.toDoubleOrNull()?.toInt()
+    override fun deserialize(decoder: Decoder): Int? = when (val c = decoder.primitiveContent()) {
+        null -> null
+        "true" -> 1 // some panels answer "auth": true
+        "false" -> 0
+        else -> c.toDoubleOrNull()?.toInt()
+    }
     override fun serialize(encoder: Encoder, value: Int?) =
         if (value == null) encoder.encodeNull() else encoder.encodeInt(value)
 }

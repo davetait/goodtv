@@ -8,10 +8,18 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 object XtreamUrls {
     private val schemeRegex = Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://")
 
-    /** Trims, adds `http://` when no scheme was typed, and strips trailing slashes. Keeps port and path. */
+    private val pastedEndpoint = Regex("/(player_api|get|xmltv|panel_api)\\.php$", RegexOption.IGNORE_CASE)
+
+    /**
+     * Trims, adds `http://` when no scheme was typed, drops a query/fragment and a pasted panel
+     * endpoint (`/player_api.php`, `/get.php`, ...), and strips trailing slashes. Keeps port and path,
+     * so `my.panel.com:8080/player_api.php?username=u` becomes `http://my.panel.com:8080`.
+     */
     fun normalizeServer(input: String): String {
-        var s = input.trim()
+        var s = input.trim().substringBefore('#').substringBefore('?')
         if (!schemeRegex.containsMatchIn(s)) s = "http://$s"
+        s = s.trimEnd('/')
+        s = pastedEndpoint.replace(s, "")
         return s.trimEnd('/')
     }
 

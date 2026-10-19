@@ -83,4 +83,12 @@ class XtreamDtosTest {
         assertEquals(7.0, list[1].rating!!, 0.0)
         assertNull(list[1].cover)
     }
+
+    @Test
+    fun authBooleanParsesAsOneOrZero() {
+        val yes = json.decodeFromString(XtAuthResponse.serializer(), """{"user_info":{"auth":true}}""")
+        val no = json.decodeFromString(XtAuthResponse.serializer(), """{"user_info":{"auth":false}}""")
+        assertEquals(1, yes.user_info?.auth)
+        assertEquals(0, no.user_info?.auth)
+    }
 }

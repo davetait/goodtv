@@ -117,4 +117,37 @@ class SyncManagerTest {
 
         assertEquals(listOf(a), source.fetchCatalogCalls)
     }
+
+    @Test
+    fun exceptionInsideRefreshBecomesFailureNotCrash() = runTest {
+        val id = addSource("A")
+        source.catalogResults[id] = { Result.success(FakeChannelSource.catalog(id, "A")) }
+        store.replaceCatalogError = IllegalStateException("FOREIGN KEY constraint failed")
+        val sync = SyncManager(store, registry, this, { now })
+
+        val result = sync.refreshNow(id)
+
+        assertTrue(result.isFailure)
+        assertEquals("FOREIGN KEY constraint failed", store.getSource(id)!!.lastError)
+        assertEquals(SyncState.Error(id, "FOREIGN KEY constraint failed"), sync.state.value)
+    }
+
+    @Test
+    fun cancelStopsInFlightRefreshAndWritesNothing() = runTest {
+        val id = addSource("A")
+        val gate = CompletableDeferred<Unit>()
+        source.catalogResults[id] = { gate.await(); Result.success(FakeChannelSource.catalog(id, "A")) }
+        val sync = SyncManager(store, registry, this, { now })
+
+        val job = sync.refresh(id)
+        testScheduler.runCurrent()
+        assertEquals(SyncState.Syncing(setOf(id)), sync.state.value)
+        sync.cancel(id)
+        gate.complete(Unit)
+        job.join()
+
+        assertTrue(job.isCancelled)
+        assertEquals(null, store.catalogs.value[id])
+        assertEquals(SyncState.Idle, sync.state.value)
+    }
 }
