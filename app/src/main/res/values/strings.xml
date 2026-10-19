@@ -2,6 +2,9 @@
 <resources>
     <string name="app_name">GoodTV</string>
     <string name="player_loading">Loading…</string>
+    <string name="live_badge">LIVE</string>
+    <string name="paused">Paused</string>
+    <string name="playback_error">Playback failed: %1$s</string>
 
     <string name="tab_live">Live</string>
     <string name="tab_movies">Movies</string>
