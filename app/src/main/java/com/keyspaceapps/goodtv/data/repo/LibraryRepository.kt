@@ -37,6 +37,7 @@ class LibraryRepository(
     fun series(sourceId: Long, categoryId: String, limit: Int): Flow<List<Series>> = store.observeSeries(sourceId, categoryId, limit)
     fun enabledSourceCount(): Flow<Int> = store.observeSources().map { list -> list.count { it.enabled } }
 
+    suspend fun source(id: Long): SourceRecord? = store.getSource(id)
     fun refresh(sourceId: Long) = sync.refresh(sourceId)
     fun refreshStale() = sync.refreshStale()
 

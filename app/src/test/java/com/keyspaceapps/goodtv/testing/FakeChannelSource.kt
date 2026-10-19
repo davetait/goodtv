@@ -19,13 +19,14 @@ class FakeChannelSource : ChannelSource {
     override val type = SourceType.XTREAM
 
     var validateResult: Result<SourceInfo> = Result.success(SourceInfo("Active", null, 1, listOf("ts")))
+    var validateCalls = 0
     val catalogResults = mutableMapOf<Long, suspend () -> Result<Catalog>>()
     val fetchCatalogCalls = mutableListOf<Long>()
     val movieDetailCalls = mutableListOf<String>()
     var movieDetail: MovieDetail? = null
     var seriesDetail: SeriesDetail? = null
 
-    override suspend fun validate(config: SourceConfig): Result<SourceInfo> = validateResult
+    override suspend fun validate(config: SourceConfig): Result<SourceInfo> { validateCalls++; return validateResult }
 
     override suspend fun fetchCatalog(sourceId: Long, config: SourceConfig): Result<Catalog> {
         fetchCatalogCalls += sourceId

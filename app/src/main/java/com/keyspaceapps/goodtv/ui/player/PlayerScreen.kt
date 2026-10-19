@@ -1,4 +1,4 @@
-package com.keyspaceapps.goodtv.ui
+package com.keyspaceapps.goodtv.ui.player
 
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn

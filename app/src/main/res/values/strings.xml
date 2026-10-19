@@ -1,7 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">GoodTV</string>
-    <string name="home_title">GoodTV</string>
-    <string name="home_subtitle">Select a channel</string>
     <string name="player_loading">Loading…</string>
+
+    <string name="tab_live">Live</string>
+    <string name="tab_movies">Movies</string>
+    <string name="tab_series">Series</string>
+    <string name="tab_sources">Sources</string>
+    <string name="coming_soon">Coming soon</string>
+    <string name="no_sources_yet">No sources yet. Add one to start watching.</string>
+
+    <string name="add_source">Add source</string>
+    <string name="edit_source">Edit source</string>
+    <string name="field_nickname">Nickname</string>
+    <string name="field_server">Server URL</string>
+    <string name="field_username">Username</string>
+    <string name="field_password">Password</string>
+    <string name="test_and_save">Test &amp; save</string>
+    <string name="testing">Testing…</string>
+    <string name="refresh">Refresh</string>
+    <string name="edit">Edit</string>
+    <string name="remove">Remove</string>
+    <string name="remove_confirm">Remove %1$s?</string>
+    <string name="confirm">Confirm</string>
+    <string name="cancel">Cancel</string>
 </resources>
