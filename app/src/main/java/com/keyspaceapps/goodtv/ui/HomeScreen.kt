@@ -24,7 +24,7 @@ import androidx.tv.material3.ListItem
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.keyspaceapps.goodtv.R
-import com.keyspaceapps.goodtv.model.Channel
+import com.keyspaceapps.goodtv.domain.PlayableItem
 
 /**
  * Channel list. The first row takes focus as soon as it is laid out, so the D-pad works
@@ -34,8 +34,8 @@ import com.keyspaceapps.goodtv.model.Channel
  */
 @Composable
 fun HomeScreen(
-    channels: List<Channel>,
-    onChannelSelected: (Channel) -> Unit,
+    channels: List<PlayableItem>,
+    onChannelSelected: (PlayableItem) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val firstItemFocus = remember { FocusRequester() }
@@ -60,7 +60,7 @@ fun HomeScreen(
         Spacer(Modifier.height(24.dp))
 
         LazyColumn(modifier = Modifier.fillMaxWidth()) {
-            itemsIndexed(channels, key = { _, channel -> channel.id }) { index, channel ->
+            itemsIndexed(channels, key = { _, channel -> channel.url }) { index, channel ->
                 val itemModifier = if (index == 0) {
                     Modifier
                         .focusRequester(firstItemFocus)
@@ -76,8 +76,8 @@ fun HomeScreen(
                 ListItem(
                     selected = false,
                     onClick = { onChannelSelected(channel) },
-                    headlineContent = { Text(channel.name) },
-                    supportingContent = channel.group?.let { group -> { Text(group) } },
+                    headlineContent = { Text(channel.title) },
+                    supportingContent = { Text(if (channel.isLive) "Live" else "On demand") },
                     modifier = itemModifier
                         .fillMaxWidth()
                         .padding(vertical = 4.dp),

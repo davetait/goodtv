@@ -27,7 +27,7 @@ import androidx.media3.ui.compose.SURFACE_TYPE_SURFACE_VIEW
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.keyspaceapps.goodtv.R
-import com.keyspaceapps.goodtv.model.Channel
+import com.keyspaceapps.goodtv.domain.PlayableItem
 
 /**
  * Full-screen live player for one channel. Back returns to the channel list.
@@ -36,16 +36,16 @@ import com.keyspaceapps.goodtv.model.Channel
 @OptIn(UnstableApi::class)
 @Composable
 fun PlayerScreen(
-    channel: Channel,
+    item: PlayableItem,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     var isBuffering by remember { mutableStateOf(true) }
 
-    val player = remember(channel.streamUrl) {
+    val player = remember(item.url) {
         ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(channel.streamUrl))
+            setMediaItem(MediaItem.fromUri(item.url))
             playWhenReady = true
             prepare()
         }
@@ -77,7 +77,7 @@ fun PlayerScreen(
             modifier = Modifier.fillMaxSize(),
         )
         Text(
-            text = channel.name,
+            text = item.title,
             style = MaterialTheme.typography.titleMedium,
             color = Color.White,
             modifier = Modifier
