@@ -8,6 +8,8 @@
     <string name="tab_series">Series</string>
     <string name="tab_sources">Sources</string>
     <string name="coming_soon">Coming soon</string>
+    <string name="see_all">See all</string>
+    <string name="play">Play</string>
     <string name="no_sources_yet">No sources yet. Add one to start watching.</string>
 
     <string name="add_source">Add source</string>

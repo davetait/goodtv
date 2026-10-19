@@ -19,7 +19,10 @@ import androidx.navigation3.ui.NavDisplay
 import androidx.tv.material3.Text
 import com.keyspaceapps.goodtv.appGraph
 import com.keyspaceapps.goodtv.domain.PlayableItem
+import com.keyspaceapps.goodtv.domain.ContentKind
+import com.keyspaceapps.goodtv.ui.browse.CategoryGridScreen
 import com.keyspaceapps.goodtv.ui.home.HomeScreen
+import com.keyspaceapps.goodtv.ui.movies.MovieDetailScreen
 import com.keyspaceapps.goodtv.ui.player.PlayerScreen
 import com.keyspaceapps.goodtv.ui.sources.EditSourceScreen
 
@@ -49,9 +52,13 @@ fun GoodTvNavigation() {
                     PlayerScreen(item = current, onBack = pop)
                 }
             }
-            entry<MovieDetailKey> { ComingSoon("Movie detail") }
+            entry<MovieDetailKey> { key -> MovieDetailScreen(key = key, onPlay = { backStack.add(it) }) }
             entry<SeriesDetailKey> { ComingSoon("Series detail") }
-            entry<CategoryGridKey> { key -> ComingSoon(key.title) }
+            entry<CategoryGridKey> { key ->
+                CategoryGridScreen(key = key, onItem = { item ->
+                    backStack.add(if (key.kind == ContentKind.SERIES) SeriesDetailKey(item.sourceId, item.id) else MovieDetailKey(item.sourceId, item.id))
+                })
+            }
         },
     )
 }
