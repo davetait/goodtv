@@ -1,0 +1,4 @@
+{
+  "info": { "movie_image": "http://x/a.jpg", "tmdb_id": "12345", "backdrop_path": "http://x/backdrop.jpg", "youtube_trailer": "dQw4w9WgXcQ", "genre": "Action, Adventure", "plot": "Movie description...", "cast": "Actor 1, Actor 2", "rating": "8.5", "director": "Director Name", "releasedate": "2025-01-01", "duration_secs": "7200", "duration": "02:00:00" },
+  "movie_data": { "stream_id": 456, "name": "Movie A", "added": "1609459200", "category_id": "10", "container_extension": "mkv" }
+}

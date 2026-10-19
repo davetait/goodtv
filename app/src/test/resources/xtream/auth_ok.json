@@ -1,0 +1,11 @@
+{
+  "user_info": {
+    "username": "u", "password": "p", "message": "Welcome", "auth": 1, "status": "Active",
+    "exp_date": "1735689600", "is_trial": "0", "active_cons": "1", "created_at": "1609459200",
+    "max_connections": "2", "allowed_output_formats": ["ts", "m3u8"]
+  },
+  "server_info": {
+    "url": "server.example.com", "port": "25461", "https_port": "25463", "server_protocol": "http",
+    "rtmp_port": "25462", "timezone": "Europe/London", "timestamp_now": 1735084800, "time_now": "2025-12-24 12:00:00"
+  }
+}

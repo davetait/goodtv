@@ -1,0 +1,16 @@
+{
+  "seasons": [
+    { "air_date": "2025-01-01", "episode_count": 2, "id": 1, "name": "Season 1", "overview": "", "season_number": 1, "cover": "http://x/s1.jpg", "cover_big": "http://x/s1b.jpg" },
+    { "air_date": "2025-06-01", "episode_count": 1, "id": 2, "name": "Season 2", "overview": "", "season_number": "2", "cover": "" }
+  ],
+  "info": { "name": "Series Title", "cover": "http://x/cover.jpg", "plot": "Series description...", "cast": "Actor 1", "director": "Dir", "genre": "Drama", "releaseDate": "2025-01-01", "rating": "9.0", "backdrop_path": ["http://x/backdrop.jpg"], "episode_run_time": "45", "category_id": "20" },
+  "episodes": {
+    "1": [
+      { "id": "1001", "episode_num": 1, "title": "Episode 1", "container_extension": "mkv", "season": 1, "info": { "movie_image": "http://x/ep1.jpg", "plot": "E1", "releasedate": "2025-01-01", "rating": "8.5", "duration_secs": 2700, "duration": "00:45:00" } },
+      { "id": 1002, "episode_num": "2", "title": "Episode 2", "container_extension": "mp4", "season": 1, "info": { "duration_secs": "2600" } }
+    ],
+    "2": [
+      { "id": "2001", "episode_num": 1, "title": "S2 Episode 1", "container_extension": "mkv", "info": { "plot": "S2E1" } }
+    ]
+  }
+}
