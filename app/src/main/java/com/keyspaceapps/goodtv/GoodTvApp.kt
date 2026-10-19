@@ -11,6 +11,12 @@ class GoodTvApp : Application() {
         super.onCreate()
         graph = AppGraph(this)
     }
+
+    companion object {
+        /** Set by the instrumented test runner before the Application is created. */
+        @JvmStatic
+        var skipDebugSource: Boolean = false
+    }
 }
 
 fun Context.appGraph(): AppGraph = (applicationContext as GoodTvApp).graph

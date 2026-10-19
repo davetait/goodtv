@@ -1,6 +1,8 @@
 package com.keyspaceapps.goodtv
 
 import android.content.Context
+import androidx.datastore.preferences.preferencesDataStore
+import com.keyspaceapps.goodtv.data.settings.AppSettings
 import com.keyspaceapps.goodtv.data.db.GoodTvDatabase
 import com.keyspaceapps.goodtv.data.db.RoomLibraryStore
 import com.keyspaceapps.goodtv.data.repo.LibraryStore
@@ -13,6 +15,8 @@ import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
 const val USER_AGENT = "GoodTV/0.2"
+
+private val Context.settingsDataStore by preferencesDataStore(name = "settings")
 
 /** Manual dependency graph. One instance per process, owned by [GoodTvApp]. */
 class AppGraph(val context: Context) {
@@ -30,6 +34,8 @@ class AppGraph(val context: Context) {
             chain.proceed(chain.request().newBuilder().header("User-Agent", USER_AGENT).build())
         }
         .build()
+
+    val settings: AppSettings by lazy { AppSettings(context.settingsDataStore) }
 
     val db: GoodTvDatabase by lazy { GoodTvDatabase.create(context) }
     val store: LibraryStore by lazy { RoomLibraryStore(db, json) }
