@@ -5,11 +5,16 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.keyspaceapps.goodtv.data.settings.AppSettings
 import com.keyspaceapps.goodtv.data.db.GoodTvDatabase
 import com.keyspaceapps.goodtv.data.db.RoomLibraryStore
+import com.keyspaceapps.goodtv.data.repo.LibraryRepository
 import com.keyspaceapps.goodtv.data.repo.LibraryStore
+import com.keyspaceapps.goodtv.data.repo.SyncManager
 import com.keyspaceapps.goodtv.data.source.SourceRegistry
 import com.keyspaceapps.goodtv.data.xtream.XtreamApi
 import com.keyspaceapps.goodtv.data.xtream.XtreamChannelSource
 import com.keyspaceapps.goodtv.data.xtream.XtreamJson
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
@@ -43,4 +48,8 @@ class AppGraph(val context: Context) {
     val sourceRegistry: SourceRegistry by lazy {
         SourceRegistry(listOf(XtreamChannelSource(XtreamApi(okHttp, XtreamJson.instance))))
     }
+
+    val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    val syncManager: SyncManager by lazy { SyncManager(store, sourceRegistry, appScope) }
+    val repository: LibraryRepository by lazy { LibraryRepository(store, sourceRegistry, syncManager, settings) }
 }

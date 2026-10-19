@@ -2,6 +2,8 @@ package com.keyspaceapps.goodtv
 
 import android.app.Application
 import android.content.Context
+import com.keyspaceapps.goodtv.data.debug.DebugSource
+import kotlinx.coroutines.launch
 
 class GoodTvApp : Application() {
     lateinit var graph: AppGraph
@@ -10,6 +12,11 @@ class GoodTvApp : Application() {
     override fun onCreate() {
         super.onCreate()
         graph = AppGraph(this)
+        graph.appScope.launch {
+            graph.repository.ensureDebugSource(
+                DebugSource.fromBuildConfig(BuildConfig.XTREAM_SERVER, BuildConfig.XTREAM_USERNAME, BuildConfig.XTREAM_PASSWORD, skipDebugSource),
+            )
+        }
     }
 
     companion object {
