@@ -5,7 +5,9 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.core.app.ApplicationProvider
 import com.keyspaceapps.goodtv.AppGraph
@@ -113,6 +115,7 @@ class TmdbUiTest {
         composeRule.onNodeWithText("★ 8.2 TMDB", substring = true).assertIsDisplayed()
         composeRule.onAllNodesWithText("Provider plot in German.").assertCountEquals(0)
         composeRule.onNodeWithText("Rating and summary from TMDB", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("TMDB").assertIsDisplayed()
     }
 
     @Test
@@ -122,6 +125,7 @@ class TmdbUiTest {
         composeRule.onNodeWithText("★ 6.0", substring = true).assertIsDisplayed()
         composeRule.waitForIdle()
         composeRule.onAllNodesWithText("TMDB", substring = true).assertCountEquals(0)
+        composeRule.onAllNodesWithContentDescription("TMDB").assertCountEquals(0)
     }
 
     @Test
