@@ -26,6 +26,7 @@ import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.keyspaceapps.goodtv.R
 import com.keyspaceapps.goodtv.ui.browse.Labels
+import com.keyspaceapps.goodtv.ui.browse.messageRes
 import com.keyspaceapps.goodtv.ui.browse.rememberedFocus
 import com.keyspaceapps.goodtv.ui.browse.targetIn
 import com.keyspaceapps.goodtv.ui.goodTvViewModel
@@ -43,13 +44,13 @@ fun LiveScreen(onPlay: (PlayerKey) -> Unit) {
     val selected by vm.selected.collectAsState()
     val channels by vm.channels.collectAsState()
     val multiSource by vm.multiSource.collectAsState()
-    val hasSources by vm.hasSources.collectAsState()
+    val emptyState by vm.emptyState.collectAsState()
     val requested = remember { mutableStateOf(false) }
     val target = vm.focus.targetIn(channels.map { it.id }, channels.firstOrNull()?.id)
 
     if (categories.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(stringResource(if (hasSources) R.string.everything_hidden else R.string.no_sources_yet), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(emptyState.messageRes), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }

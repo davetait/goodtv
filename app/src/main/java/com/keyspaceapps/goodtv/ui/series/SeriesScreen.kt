@@ -14,6 +14,7 @@ import com.keyspaceapps.goodtv.R
 import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.ui.browse.CategoryRows
 import com.keyspaceapps.goodtv.ui.browse.Labels
+import com.keyspaceapps.goodtv.ui.browse.messageRes
 import com.keyspaceapps.goodtv.ui.goodTvViewModel
 import com.keyspaceapps.goodtv.ui.nav.CategoryGridKey
 import com.keyspaceapps.goodtv.ui.nav.SeriesDetailKey
@@ -23,12 +24,12 @@ fun SeriesScreen(onSeries: (SeriesDetailKey) -> Unit, onSeeAll: (CategoryGridKey
     val vm = goodTvViewModel { SeriesViewModel(it.repository) }
     val rows by vm.rows.collectAsState()
     val multiSource by vm.multiSource.collectAsState()
-    val hasSources by vm.hasSources.collectAsState()
+    val emptyState by vm.emptyState.collectAsState()
 
     val loaded = rows ?: return // still loading: show nothing rather than a misleading empty state
     if (loaded.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(stringResource(if (hasSources) R.string.everything_hidden else R.string.no_sources_yet), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(emptyState.messageRes), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }

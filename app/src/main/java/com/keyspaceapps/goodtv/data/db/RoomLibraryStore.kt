@@ -94,6 +94,8 @@ class RoomLibraryStore(
     override fun observeHiddenCategories(sourceId: Long): Flow<Set<Pair<ContentKind, String>>> =
         hidden.observeForSource(sourceId).map { rows -> rows.map { ContentKind.valueOf(it.kind) to it.categoryId }.toSet() }
 
+    override fun observeHiddenCount(kind: ContentKind): Flow<Int> = hidden.observeHiddenCount(kind.name)
+
     override suspend fun setCategoriesHidden(sourceId: Long, kind: ContentKind, ids: Collection<String>, hidden: Boolean) {
         if (ids.isEmpty()) return
         if (hidden) this.hidden.insertAll(ids.map { HiddenCategoryEntity(sourceId, kind.name, it) })

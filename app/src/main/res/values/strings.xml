@@ -37,4 +37,5 @@
     <string name="clear_all">Clear all</string>
     <string name="categories_refresh_first">Refresh this source first</string>
     <string name="everything_hidden">Everything is hidden. Sources → Categories to show some.</string>
+    <string name="nothing_yet">Nothing here yet. A source may still be syncing; check the Sources tab.</string>
 </resources>

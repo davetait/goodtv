@@ -46,6 +46,8 @@ interface LibraryStore {
     /** Every category of one source and kind, hidden or not, in name order (for the Categories screen). */
     fun observeAllCategories(sourceId: Long, kind: ContentKind): Flow<List<Category>>
     fun observeHiddenCategories(sourceId: Long): Flow<Set<Pair<ContentKind, String>>>
+    /** Hidden categories of [kind] that still exist, across enabled sources. */
+    fun observeHiddenCount(kind: ContentKind): Flow<Int>
     suspend fun setCategoriesHidden(sourceId: Long, kind: ContentKind, ids: Collection<String>, hidden: Boolean)
 
     suspend fun getMovie(sourceId: Long, id: String): Movie?

@@ -241,9 +241,10 @@ class RoomLibraryStoreTest {
         store.replaceCatalog(a, catalog(a, live = 1))
         store.setCategoriesHidden(a, ContentKind.LIVE, listOf("c1"), hidden = true)
         store.deleteSource(a)
+        // Assert on the deleted id: a fresh autoincrement id would be empty whether or not the cascade ran.
+        assertTrue(store.observeHiddenCategories(a).first().isEmpty())
         val again = store.insertSource(record("A"))
         store.replaceCatalog(again, catalog(again, live = 1))
-        assertTrue(store.observeHiddenCategories(again).first().isEmpty())
         assertEquals(1, store.observeCategories(ContentKind.LIVE).first().size)
     }
 

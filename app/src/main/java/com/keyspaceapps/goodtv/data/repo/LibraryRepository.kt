@@ -40,6 +40,7 @@ class LibraryRepository(
     fun seriesByCategory(limitPerCategory: Int): Flow<Map<CategoryKey, List<Series>>> = store.observeSeriesByCategory(limitPerCategory)
     fun allCategories(sourceId: Long, kind: ContentKind): Flow<List<Category>> = store.observeAllCategories(sourceId, kind)
     fun hiddenCategories(sourceId: Long): Flow<Set<Pair<ContentKind, String>>> = store.observeHiddenCategories(sourceId)
+    fun hiddenCount(kind: ContentKind): Flow<Int> = store.observeHiddenCount(kind)
     suspend fun setCategoriesHidden(sourceId: Long, kind: ContentKind, ids: Collection<String>, hidden: Boolean) =
         store.setCategoriesHidden(sourceId, kind, ids, hidden)
     fun enabledSourceCount(): Flow<Int> = store.observeSources().map { list -> list.count { it.enabled } }

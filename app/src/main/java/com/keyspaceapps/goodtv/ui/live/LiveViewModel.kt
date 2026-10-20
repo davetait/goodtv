@@ -6,6 +6,8 @@ import com.keyspaceapps.goodtv.data.repo.LibraryRepository
 import com.keyspaceapps.goodtv.domain.CategoryWithSource
 import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.domain.LiveChannel
+import com.keyspaceapps.goodtv.ui.browse.BrowseEmptyState
+import com.keyspaceapps.goodtv.ui.browse.EmptyStates
 import com.keyspaceapps.goodtv.ui.browse.FocusMemory
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,7 +24,9 @@ class LiveViewModel(repo: LibraryRepository) : ViewModel() {
     private val sharing = SharingStarted.WhileSubscribed(5_000)
     val focus = FocusMemory()
 
-    val hasSources: StateFlow<Boolean> = repo.enabledSourceCount().map { it > 0 }.stateIn(viewModelScope, sharing, false)
+    val emptyState: StateFlow<BrowseEmptyState> = combine(repo.enabledSourceCount(), repo.hiddenCount(ContentKind.LIVE)) { n, hidden ->
+        EmptyStates.forBrowse(hasSources = n > 0, hiddenCount = hidden)
+    }.stateIn(viewModelScope, sharing, BrowseEmptyState.NOTHING_YET)
 
     val categories: StateFlow<List<CategoryWithSource>> =
         repo.categories(ContentKind.LIVE).stateIn(viewModelScope, sharing, emptyList())

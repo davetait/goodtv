@@ -112,6 +112,15 @@ interface HiddenCategoryDao {
     @Query("DELETE FROM hidden_categories WHERE sourceId = :sourceId AND kind = :kind")
     suspend fun deleteKind(sourceId: Long, kind: String)
 
+    /** Hidden categories of one kind that still exist, across enabled sources (drives the "everything hidden" state). */
+    @Query(
+        """SELECT COUNT(*) FROM hidden_categories h
+           JOIN sources s ON s.id = h.sourceId
+           JOIN categories c ON c.sourceId = h.sourceId AND c.kind = h.kind AND c.id = h.categoryId
+           WHERE s.enabled = 1 AND h.kind = :kind""",
+    )
+    fun observeHiddenCount(kind: String): Flow<Int>
+
     /** Drops hidden rows whose category no longer exists for this source and kind. */
     @Query(
         """DELETE FROM hidden_categories WHERE sourceId = :sourceId AND kind = :kind

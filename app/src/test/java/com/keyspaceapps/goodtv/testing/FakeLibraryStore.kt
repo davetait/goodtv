@@ -80,6 +80,12 @@ class FakeLibraryStore : LibraryStore {
     override fun observeHiddenCategories(sourceId: Long): Flow<Set<Pair<ContentKind, String>>> =
         hidden.map { set -> set.filter { it.first == sourceId }.map { it.second to it.third }.toSet() }
 
+    override fun observeHiddenCount(kind: ContentKind): Flow<Int> = combine(sources, catalogs, hidden) { s, c, h ->
+        s.filter { it.enabled }.sumOf { r ->
+            (c[r.id]?.categories ?: emptyList()).count { it.kind == kind && h.contains(Triple(r.id, kind, it.id)) }
+        }
+    }
+
     override suspend fun setCategoriesHidden(sourceId: Long, kind: ContentKind, ids: Collection<String>, hidden: Boolean) {
         val rows = ids.map { Triple(sourceId, kind, it) }.toSet()
         this.hidden.value = if (hidden) this.hidden.value + rows else this.hidden.value - rows

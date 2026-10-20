@@ -120,4 +120,16 @@ class LiveScreenTest {
         composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasText("Everything is hidden", substring = true)).fetchSemanticsNodes().isNotEmpty() }
         assertEquals(0, composeRule.onAllNodes(hasText("No sources yet", substring = true)).fetchSemanticsNodes().size)
     }
+
+    @Test
+    fun emptyCatalogWithASourceShowsNothingYetNotEverythingHidden() {
+        runBlocking {
+            val graph = ApplicationProvider.getApplicationContext<android.content.Context>().appGraph()
+            graph.store.replaceCatalog(sourceA, Catalog(emptyList(), emptyList(), emptyList(), emptyList()))
+            graph.store.replaceCatalog(sourceB, Catalog(emptyList(), emptyList(), emptyList(), emptyList()))
+        }
+        composeRule.setContent { GoodTvTheme { LiveScreen(onPlay = {}) } }
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasText("Nothing here yet", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(0, composeRule.onAllNodes(hasText("Everything is hidden", substring = true)).fetchSemanticsNodes().size)
+    }
 }
