@@ -137,7 +137,9 @@ class TmdbRepositoryTest {
         assertEquals(2L, TmdbRepository.pickMatch(CleanTitle("Heat", 1995, true), list))
         assertEquals(1L, TmdbRepository.pickMatch(CleanTitle("Heat", 1996, true), listOf(c(1, "Heat Wave", 1995))))
         assertNull(TmdbRepository.pickMatch(CleanTitle("Heat", 2010, true), list))
-        assertEquals(2L, TmdbRepository.pickMatch(CleanTitle("heat", null, true), list))
+        // Without a year an exact title must be the only one: "Heat" appears twice, so no guess.
+        assertNull(TmdbRepository.pickMatch(CleanTitle("heat", null, true), list))
+        assertEquals(2L, TmdbRepository.pickMatch(CleanTitle("heat", null, true), list.take(2)))
         assertNull(TmdbRepository.pickMatch(CleanTitle("Heat 2", null, true), list))
     }
 }

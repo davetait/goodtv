@@ -123,7 +123,8 @@ class TmdbRepository(
         /**
          * With a year: the first result (TMDB orders by relevance) released within a year of it, if
          * one of the top results' titles matches exactly; else the first within a year at all.
-         * Without a year: only an exact title match. Otherwise no match.
+         * Without a year: only an exact title match, and only when it is the sole one; a bare "Domino"
+         * has several, and guessing would show the wrong rating. Otherwise no match.
          */
         internal fun pickMatch(clean: CleanTitle, candidates: List<Candidate>): Long? {
             val want = TitleCleaner.normalize(clean.title)
@@ -133,7 +134,7 @@ class TmdbRepository(
             return if (clean.year != null) {
                 (top.firstOrNull { exact(it) && yearOk(it) } ?: top.firstOrNull { yearOk(it) })?.id
             } else {
-                top.firstOrNull { exact(it) }?.id
+                top.filter { exact(it) }.singleOrNull()?.id
             }
         }
     }

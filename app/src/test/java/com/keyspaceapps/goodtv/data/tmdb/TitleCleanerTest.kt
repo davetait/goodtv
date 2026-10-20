@@ -42,7 +42,8 @@ class TitleCleanerTest {
     }
 
     @Test fun nonLatinTitlesStaySearchable() {
-        check("AR - فيلم زيارة سرية", "فيلم زيارة سرية", null)
+        check("AR - فيلم زيارة سرية", "زيارة سرية", null)
+        check("AR-EG - مسلسل ابن صابرة", "ابن صابرة", null)
     }
 
     @Test fun datedSportsEventsAreNotSearchable() {
@@ -53,5 +54,6 @@ class TitleCleanerTest {
     @Test fun normalizeIgnoresCaseAccentsAndPunctuation() {
         assertEquals("pokemon the movie", TitleCleaner.normalize("Pokémon: The Movie!"))
         assertEquals(TitleCleaner.normalize("Ghost in the Shell"), TitleCleaner.normalize("GHOST IN THE SHELL"))
+        assertEquals(TitleCleaner.normalize("My Grandfathers Wife"), TitleCleaner.normalize("My Grandfather’s Wife"))
     }
 }

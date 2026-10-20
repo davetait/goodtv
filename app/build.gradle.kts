@@ -63,6 +63,15 @@ android {
 
     // Exported Room schemas feed the migration test.
     sourceSets.getByName("androidTest").assets.srcDirs("$projectDir/schemas")
+
+    // TmdbLiveTest calls the real TMDB API; it only runs with -PtmdbLive (and a key in local.properties).
+    testOptions.unitTests.all { test ->
+        if (project.hasProperty("tmdbLive")) {
+            test.systemProperty("goodtv.tmdbLiveKey", localProp("GOODTV_TMDB_API_KEY"))
+            (project.findProperty("tmdbSample") as String?)?.let { test.systemProperty("goodtv.tmdbSample", it) }
+            test.outputs.upToDateWhen { false }
+        }
+    }
 }
 
 ksp {

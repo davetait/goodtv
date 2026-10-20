@@ -19,10 +19,13 @@ object TitleCleaner {
     private val trailingYear = Regex("""[\s.]((?:19|20)\d{2})$""")
     private val trailingTag = Regex("""(?:\s*\([A-Z]{2,3}\)|\s+(?:4K|UHD|FHD|HD|SD|HEVC|H\.?265|MULTI|RAW|\d{3,4}p))$""", RegexOption.IGNORE_CASE)
     private val eventDate = Regex("""\b\d{1,2}\.\d{1,2}\.\d{2,4}\b""")
+    // Arabic catalogs label titles "film …" / "series …"; TMDB titles don't carry the label.
+    private val arabicLabel = Regex("""^(?:فيلم|مسلسل)\s+""")
 
     fun clean(raw: String): CleanTitle {
         var s = raw.trim().replace(Regex("""\s+"""), " ")
         prefix.find(s)?.let { m -> s.substring(m.range.last + 1).trim().takeIf { it.isNotEmpty() }?.let { s = it } }
+        s = arabicLabel.replace(s, "").ifEmpty { s }
         val event = eventDate.containsMatchIn(s)
         if (' ' !in s && ('.' in s || '_' in s)) s = s.replace('.', ' ').replace('_', ' ')
 
@@ -40,10 +43,11 @@ object TitleCleaner {
         return CleanTitle(s, year, searchable = !event && s.any { it.isLetterOrDigit() })
     }
 
-    /** Comparison form: lower case, accents and punctuation dropped, single spaces. */
+    /** Comparison form: lower case, accents, apostrophes and punctuation dropped, single spaces. */
     fun normalize(title: String): String =
         Normalizer.normalize(title.lowercase(), Normalizer.Form.NFD)
             .replace(Regex("""\p{M}+"""), "")
+            .replace(Regex("""['’`]"""), "")
             .replace(Regex("""[^\p{L}\p{N}]+"""), " ")
             .trim()
 }
