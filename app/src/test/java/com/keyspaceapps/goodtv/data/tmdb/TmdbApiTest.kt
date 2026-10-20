@@ -121,4 +121,23 @@ class TmdbApiTest {
         server.close()
         expectFailure(TmdbException.Reason.NETWORK) { dead.movie(1, "en-US") }
     }
+
+    @Test fun discoverAsksForSubscriptionStreamingByPopularity() = runTest {
+        server.enqueue(ok("""{"page":2,"total_pages":53,"total_results":1057,"results":[{"id":1148365,"title":"Matchbox the Movie","release_date":"2026-10-05","popularity":311.2}]}"""))
+        val page = api().discoverStreamingMovies("US", listOf(8, 9, 337), "2025-10-20", "2026-10-20", 50, 2, "en-US")
+        val url = server.takeRequest().url
+        assertEquals("/3/discover/movie", url.encodedPath)
+        assertEquals("US", url.queryParameter("watch_region"))
+        assertEquals("8|9|337", url.queryParameter("with_watch_providers"))
+        assertEquals("flatrate", url.queryParameter("with_watch_monetization_types"))
+        assertEquals("2025-10-20", url.queryParameter("primary_release_date.gte"))
+        assertEquals("2026-10-20", url.queryParameter("primary_release_date.lte"))
+        assertEquals("50", url.queryParameter("vote_count.gte"))
+        assertEquals("popularity.desc", url.queryParameter("sort_by"))
+        assertEquals("2", url.queryParameter("page"))
+        assertEquals("false", url.queryParameter("include_adult"))
+        assertEquals(53, page.total_pages)
+        assertEquals(listOf(1148365L), page.results.map { it.id })
+    }
 }
+

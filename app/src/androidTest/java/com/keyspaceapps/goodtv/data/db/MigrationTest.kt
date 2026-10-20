@@ -114,4 +114,20 @@ class MigrationTest {
         }
         db.close()
     }
+
+    /** v7 → v8 adds ranked TMDB lists; existing data is untouched. */
+    @Test
+    fun migrate7To8AddsTmdbLists() {
+        helper.createDatabase(dbName, 7).apply {
+            execSQL("INSERT INTO sources (id, type, nickname, configJson, enabled, lastSyncAt, lastError, createdAt) VALUES (1, 'XTREAM', 'Home', '{\"type\":\"xtream\",\"server\":\"http://s\",\"username\":\"u\",\"password\":\"p\"}', 1, 1, NULL, 0)")
+            close()
+        }
+        val db = helper.runMigrationsAndValidate(dbName, 8, true, MIGRATION_7_8)
+        db.execSQL("INSERT INTO tmdb_lists (listKey, fetchedAt) VALUES ('k', 1)")
+        db.execSQL("INSERT INTO tmdb_list_items (listKey, rank, tmdbId) VALUES ('k', 0, 603)")
+        db.query("SELECT tmdbId FROM tmdb_list_items").use { c -> c.moveToFirst(); assertEquals(603L, c.getLong(0)) }
+        db.query("SELECT COUNT(*) FROM sources").use { c -> c.moveToFirst(); assertEquals(1, c.getInt(0)) }
+        db.close()
+    }
 }
+

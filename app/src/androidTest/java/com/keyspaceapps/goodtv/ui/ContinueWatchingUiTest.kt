@@ -105,7 +105,7 @@ class ContinueWatchingUiTest {
         openDialog().performKeyInput { pressKey(Key.DirectionCenter) }
         composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasText("Continue Watching")).fetchSemanticsNodes().isEmpty() }
         assertNull(runBlocking { graph.watchProgress.observe(movie).first() })
-        waitFocused { composeRule.onNodeWithText("Movie 1") }
+        waitFocused { composeRule.onNodeWithText("Show 1") }
     }
 
     @Test

@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
@@ -285,3 +286,34 @@ data class ContinueRow(
     val itemTmdbId: Long?,
     val rawName: String,
 )
+
+@Dao
+interface PopularDao {
+    @Query("SELECT fetchedAt FROM tmdb_lists WHERE listKey = :listKey") suspend fun fetchedAt(listKey: String): Long?
+    @Query("DELETE FROM tmdb_lists") suspend fun deleteAll()
+    @Insert suspend fun insertList(row: TmdbListEntity)
+    @Insert suspend fun insertItems(rows: List<TmdbListItemEntity>)
+
+    @Transaction
+    suspend fun replace(listKey: String, tmdbIds: List<Long>, fetchedAt: Long) {
+        deleteAll() // items go with their list (cascade)
+        insertList(TmdbListEntity(listKey, fetchedAt))
+        insertItems(tmdbIds.mapIndexed { rank, id -> TmdbListItemEntity(listKey, rank, id) })
+    }
+
+    // Per ranked id, the copy to show: English, then untagged, then any language; standard quality
+    // before 4K; enabled sources and visible categories only. (A correlated subquery: API 28's
+    // SQLite has no window functions.)
+    @Query(
+        """SELECT m.* FROM tmdb_list_items i
+           JOIN movies m ON m.rowid = (
+               SELECT c.rowid FROM movies c JOIN sources s ON s.id = c.sourceId
+               WHERE c.tmdbId = i.tmdbId AND s.enabled = 1
+                 AND NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = c.sourceId AND h.kind = 'MOVIE' AND h.categoryId = c.categoryId)
+               ORDER BY CASE WHEN c.language = 'EN' THEN 0 WHEN c.language IS NULL THEN 1 ELSE 2 END, c.quality IS NOT NULL, c.sourceId, c.id
+               LIMIT 1)
+           WHERE i.listKey = :listKey ORDER BY i.rank LIMIT :limit""",
+    )
+    fun observeMovies(listKey: String, limit: Int): Flow<List<MovieEntity>>
+}
+

@@ -7,6 +7,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.keyspaceapps.goodtv.data.settings.AppSettings
 import com.keyspaceapps.goodtv.data.db.GoodTvDatabase
 import com.keyspaceapps.goodtv.data.db.RoomLibraryStore
+import com.keyspaceapps.goodtv.data.db.RoomPopularMoviesStore
 import com.keyspaceapps.goodtv.data.db.RoomTmdbCache
 import com.keyspaceapps.goodtv.data.db.RoomTmdbGenreStore
 import com.keyspaceapps.goodtv.data.db.RoomWatchProgressStore
@@ -18,6 +19,7 @@ import com.keyspaceapps.goodtv.data.repo.SyncState
 import com.keyspaceapps.goodtv.data.source.SourceRegistry
 import com.keyspaceapps.goodtv.data.tmdb.TmdbApi
 import com.keyspaceapps.goodtv.data.tmdb.TmdbCredential
+import com.keyspaceapps.goodtv.data.tmdb.PopularMoviesRepository
 import com.keyspaceapps.goodtv.data.tmdb.TmdbGenreFetcher
 import com.keyspaceapps.goodtv.data.tmdb.TmdbRepository
 import com.keyspaceapps.goodtv.data.xtream.XtreamApi
@@ -87,6 +89,11 @@ class AppGraph(val context: Context) {
     private val defaultTmdb: TmdbRepository by lazy { TmdbRepository(api = tmdbApi, cache = tmdbCache, language = tmdbLanguage) }
 
     val watchProgress: WatchProgressRepository by lazy { WatchProgressRepository(RoomWatchProgressStore(db.watchProgress())) }
+
+    /** Home's Popular Movies: TMDB's popular streaming films the library has, refreshed daily. */
+    val popularMovies: PopularMoviesRepository by lazy {
+        PopularMoviesRepository(tmdbApi, RoomPopularMoviesStore(db.popular()), tmdbLanguage)
+    }
 
     /** Background TMDB genre fill for movies; started on launch after stale sources refresh. */
     val genreFetcher: TmdbGenreFetcher by lazy {

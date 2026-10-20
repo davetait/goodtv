@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -41,6 +42,7 @@ import com.keyspaceapps.goodtv.data.progress.ContinueItem
 import com.keyspaceapps.goodtv.data.progress.WatchKind
 import com.keyspaceapps.goodtv.data.progress.WatchProgressRepository
 import com.keyspaceapps.goodtv.data.tmdb.TmdbKind
+import com.keyspaceapps.goodtv.ui.browse.FocusMemory
 import com.keyspaceapps.goodtv.ui.browse.PosterCard
 import com.keyspaceapps.goodtv.ui.nav.GoodTvKey
 import com.keyspaceapps.goodtv.ui.nav.MovieDetailKey
@@ -103,8 +105,10 @@ private fun ContinueItem.status(): String {
 
 /**
  * The Continue Watching rail. Holding Select (or the remote's Menu key) on a card offers to remove
- * it. Focus goes to [initialFocus]'s first card when it is still unclaimed; after a removal it moves
- * to the neighbouring card, or is handed back ([onEmptied]) when the row empties.
+ * it. Focus goes to [initialFocus]'s first card when it is still unclaimed (unless [claimInitialFocus]
+ * is false: another row's remembered card is coming back); after a removal it moves to the
+ * neighbouring card, or is handed back ([onEmptied]) when the row empties. Focused cards are noted
+ * in [focus].
  */
 @Composable
 fun ContinueWatchingRow(
@@ -113,6 +117,8 @@ fun ContinueWatchingRow(
     onOpen: (GoodTvKey) -> Unit,
     onRemove: (ContinueItem) -> Unit,
     onEmptied: () -> Unit,
+    focus: FocusMemory? = null,
+    claimInitialFocus: Boolean = true,
 ) {
     var menuFor by remember { mutableStateOf<ContinueItem?>(null) }
     // After a removal: (removed card's key, neighbour's key). The neighbour takes focus once the
@@ -149,9 +155,10 @@ fun ContinueWatchingRow(
                             val r = refocus
                             when {
                                 r != null && r.second == item.key && items.none { it.key == r.first } -> { refocus = null; requester.requestFocus() }
-                                index == 0 && !initialFocus.value -> { initialFocus.value = true; requester.requestFocus() }
+                                index == 0 && claimInitialFocus && !initialFocus.value -> { initialFocus.value = true; requester.requestFocus() }
                             }
                         }
+                        .onFocusChanged { if (it.isFocused) focus?.key = "continue:${item.key}" }
                         .onKeyEvent { e ->
                             if (e.type == KeyEventType.KeyUp && e.key == Key.Menu) { menuFor = item; true } else false
                         },

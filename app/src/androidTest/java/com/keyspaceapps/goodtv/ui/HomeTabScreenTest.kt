@@ -79,22 +79,19 @@ class HomeTabScreenTest {
     @Test
     fun showsSearchAndRowsWithFocusOnFirstTile() {
         seedAndLaunch("HOME")
-        waitFor("Popular Movies")
+        waitFor("Popular Shows")
         composeRule.onNodeWithText("Search movies, shows and channels").assertIsDisplayed()
-        // Nothing watched yet, so no Continue Watching row.
+        // Nothing watched yet and no TMDB ranking (TMDB is off in tests), so only Popular Shows.
         composeRule.onAllNodes(hasText("Continue Watching")).assertCountEquals(0)
-        composeRule.waitUntil(5_000) { runCatching { composeRule.onNodeWithText("Movie 1").assertIsFocused() }.isSuccess }
-
-        composeRule.onRoot().performKeyInput { pressKey(Key.DirectionDown) }
-        composeRule.onNodeWithText("Show 1").assertIsFocused()
-        composeRule.onNodeWithText("Popular Shows").assertIsDisplayed()
+        composeRule.onAllNodes(hasText("Popular Movies")).assertCountEquals(0)
+        composeRule.waitUntil(5_000) { runCatching { composeRule.onNodeWithText("Show 1").assertIsFocused() }.isSuccess }
     }
 
     @Test
     fun upFromFirstTileFocusesScopeThenRightFocusesSearch() {
         seedAndLaunch("HOME")
-        waitFor("Movie 1")
-        composeRule.waitUntil(5_000) { runCatching { composeRule.onNodeWithText("Movie 1").assertIsFocused() }.isSuccess }
+        waitFor("Show 1")
+        composeRule.waitUntil(5_000) { runCatching { composeRule.onNodeWithText("Show 1").assertIsFocused() }.isSuccess }
 
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionUp) }
         composeRule.onNodeWithText("All").assertIsFocused()
@@ -108,8 +105,8 @@ class HomeTabScreenTest {
     @Test
     fun selectOnSearchFocusesTheFieldAndDownLeavesIt() {
         seedAndLaunch("HOME")
-        waitFor("Movie 1")
-        composeRule.waitUntil(5_000) { runCatching { composeRule.onNodeWithText("Movie 1").assertIsFocused() }.isSuccess }
+        waitFor("Show 1")
+        composeRule.waitUntil(5_000) { runCatching { composeRule.onNodeWithText("Show 1").assertIsFocused() }.isSuccess }
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionUp) }
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionRight) }
         composeRule.onNode(hasSetTextAction()).assertIsNotFocused()
@@ -126,26 +123,26 @@ class HomeTabScreenTest {
     @Test
     fun homeIsTheDefaultTabWhenNoneIsSaved() {
         seedAndLaunch("")
-        waitFor("Popular Movies")
+        waitFor("Popular Shows")
         composeRule.onNodeWithText("Home").assertIsSelected()
     }
 
     @Test
     fun searchShowsMatchesOfEveryKindLabelledByKind() {
         seedAndLaunch("HOME")
-        waitFor("Movie 1")
+        waitFor("Show 1")
         composeRule.onNode(hasSetTextAction()).performTextInput("matrix")
         waitFor("The Matrix")
         composeRule.onNodeWithText("Matrix News").assertIsDisplayed()
         composeRule.onNodeWithText("Channel").assertIsDisplayed()
         composeRule.onNodeWithText("Movie").assertIsDisplayed()
-        composeRule.onAllNodes(hasText("Popular Movies")).assertCountEquals(0)
+        composeRule.onAllNodes(hasText("Popular Shows")).assertCountEquals(0)
     }
 
     @Test
     fun noMatchesSaysSo() {
         seedAndLaunch("HOME")
-        waitFor("Movie 1")
+        waitFor("Show 1")
         composeRule.onNode(hasSetTextAction()).performTextInput("zzz")
         waitFor("Nothing matches “zzz”")
     }
@@ -154,7 +151,7 @@ class HomeTabScreenTest {
     @Test
     fun scopeDropdownNarrowsToOneKindAndReturnsFocus() {
         seedAndLaunch("HOME")
-        waitFor("Movie 1")
+        waitFor("Show 1")
         composeRule.onNode(hasSetTextAction()).performTextInput("matrix")
         waitFor("Matrix News")
 

@@ -11,11 +11,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -33,6 +35,7 @@ import androidx.tv.material3.Text
 import com.keyspaceapps.goodtv.R
 import com.keyspaceapps.goodtv.data.progress.ContinueItem
 import com.keyspaceapps.goodtv.domain.ContentKind
+import com.keyspaceapps.goodtv.domain.Movie
 import com.keyspaceapps.goodtv.ui.browse.FocusMemory
 import com.keyspaceapps.goodtv.ui.browse.PosterCard
 import com.keyspaceapps.goodtv.ui.browse.rememberedFocus
@@ -48,27 +51,24 @@ import com.keyspaceapps.goodtv.ui.tmdb.tmdbKind
 
 private const val PLACEHOLDER_COUNT = 8
 
-private data class HomeRow(val titleRes: Int, val items: List<String>)
-
-private fun placeholders(prefix: String) = (1..PLACEHOLDER_COUNT).map { "$prefix $it" }
-
-// TODO: hook up the popular rows.
-private val rows = listOf(
-    HomeRow(R.string.home_popular_movies, placeholders("Movie")),
-    HomeRow(R.string.home_popular_shows, placeholders("Show")),
-)
+// TODO: hook up Popular Shows.
+private val showPlaceholders = (1..PLACEHOLDER_COUNT).map { "Show $it" }
 
 /**
  * The Home tab: a scope dropdown and search bar over Continue Watching, Popular Movies and Popular
  * Shows rails. While a search is active the rails give way to a grid of results.
- * Initial focus goes to the first tile of the first row (Continue Watching when there is anything to
- * continue), so UP reaches the search row, then the tabs.
+ * Initial focus goes to the first tile of the first row on screen (Continue Watching when there is
+ * anything to continue), so UP reaches the search row, then the tabs. Coming back from a popular
+ * movie lands on its card again. Popular Movies is hidden when TMDB is off or none are in the library.
  */
 @Composable
 fun HomeTabScreen(onNavigate: (GoodTvKey) -> Unit) {
     val vm = goodTvViewModel { HomeSearchViewModel(it.repository) }
     val continueVm = goodTvViewModel { ContinueWatchingViewModel(it.watchProgress) }
     val continueItems by continueVm.items.collectAsState()
+    val popularVm = goodTvViewModel { PopularMoviesViewModel(it.popularMovies, it.appScope) }
+    val popularMovies by popularVm.movies.collectAsState()
+    LaunchedEffect(Unit) { popularVm.refresh() }
     val query by vm.query.collectAsState()
     val scope by vm.scope.collectAsState()
     val results by vm.results.collectAsState()
@@ -84,9 +84,11 @@ fun HomeTabScreen(onNavigate: (GoodTvKey) -> Unit) {
         }
         val found = results
         when {
-            // Wait for Continue Watching so the first row (and its focus) doesn't change under the user.
-            found == null -> continueItems?.let { items ->
-                HomeRows(items, rowsRequested, onNavigate, onRemove = continueVm::remove)
+            // Wait for both stored rows so the first row (and its focus) doesn't change under the user.
+            found == null -> {
+                val items = continueItems
+                val popular = popularMovies
+                if (items != null && popular != null) HomeRows(items, popular, popularVm.focus, rowsRequested, onNavigate, onRemove = continueVm::remove)
             }
             found.isEmpty() -> Text(
                 stringResource(R.string.search_no_results, query.trim()),
@@ -136,6 +138,8 @@ private fun SearchResultsGrid(
 @Composable
 private fun HomeRows(
     continueItems: List<ContinueItem>,
+    popularMovies: List<Movie>,
+    focus: FocusMemory,
     requested: MutableState<Boolean>,
     onNavigate: (GoodTvKey) -> Unit,
     onRemove: (ContinueItem) -> Unit,
@@ -144,14 +148,34 @@ private fun HomeRows(
     // Set when the last Continue Watching card is removed; the next row's first tile takes focus once
     // the row is gone. Kept apart from [requested] so the vanishing card can't claim it back.
     val handOff = remember { mutableStateOf(false) }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 48.dp)) {
-        if (continueItems.isNotEmpty()) item(key = "continue") {
-            ContinueWatchingRow(continueItems, requested, onNavigate, onRemove, onEmptied = { handOff.value = true })
+    val popularComingBack = focus.key in popularMovies.map { it.homeKey() }
+    val listState = rememberLazyListState()
+    // The first ranking can land after Home opened (fresh install: it waits for the first sync). If
+    // the user is still on the placeholder row, bring the new row into view and give it focus.
+    val hadPopular = remember { mutableStateOf(popularMovies.isNotEmpty()) }
+    LaunchedEffect(popularMovies.isNotEmpty()) {
+        if (popularMovies.isNotEmpty() && !hadPopular.value) {
+            hadPopular.value = true
+            if (continueItems.isEmpty() && focus.key == null) {
+                handOff.value = true
+                listState.scrollToItem(0)
+            }
         }
-        itemsIndexed(rows, key = { _, r -> r.titleRes }) { rowIndex, row ->
+    }
+    LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(bottom = 48.dp)) {
+        if (continueItems.isNotEmpty()) item(key = "continue") {
+            ContinueWatchingRow(
+                continueItems, requested, onNavigate, onRemove, onEmptied = { handOff.value = true },
+                focus = focus, claimInitialFocus = !popularComingBack,
+            )
+        }
+        if (popularMovies.isNotEmpty()) item(key = "popular-movies") {
+            PopularMoviesRow(popularMovies, focus, requested, handOff, takesDefaultFocus = continueItems.isEmpty(), onOpen = onNavigate)
+        }
+        item(key = "popular-shows") {
             Column(Modifier.fillMaxWidth().padding(top = 16.dp)) {
                 Text(
-                    stringResource(row.titleRes),
+                    stringResource(R.string.home_popular_shows),
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(start = 48.dp, bottom = 8.dp),
                 )
@@ -159,8 +183,8 @@ private fun HomeRows(
                     contentPadding = PaddingValues(horizontal = 48.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    itemsIndexed(row.items, key = { _, title -> title }) { index, title ->
-                        val focus = if (rowIndex == 0 && index == 0 && continueItems.isEmpty()) {
+                    itemsIndexed(showPlaceholders, key = { _, title -> title }) { index, title ->
+                        val focus = if (index == 0 && continueItems.isEmpty() && popularMovies.isEmpty()) {
                             Modifier.focusRequester(firstItem).onPlaced {
                                 if (!requested.value || handOff.value) {
                                     requested.value = true
