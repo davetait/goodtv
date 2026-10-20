@@ -52,7 +52,10 @@ class SeriesDetailViewModel(
         viewModelScope.launch {
             _state.value = repo.seriesDetail(key.sourceId, key.seriesId).fold(
                 onSuccess = { d ->
-                    val first = (d.seasons.map { it.number }.ifEmpty { d.episodes.map { it.season } }).minOrNull() ?: 1
+                    val numbers = d.seasons.map { it.number }.ifEmpty { d.episodes.map { it.season } }
+                    // Skip seasons with no episodes (panels often list an empty "Specials" season 0).
+                    val withEpisodes = d.episodes.mapTo(HashSet()) { it.season }
+                    val first = numbers.filter { it in withEpisodes }.minOrNull() ?: numbers.minOrNull() ?: 1
                     // Open on the season the user is part-way through.
                     val resumeSeason = progressRepo?.observeSeries(key.sourceId, key.seriesId)?.first()
                         ?.let { SeriesResumes.of(d.episodes, it)?.episode?.season }

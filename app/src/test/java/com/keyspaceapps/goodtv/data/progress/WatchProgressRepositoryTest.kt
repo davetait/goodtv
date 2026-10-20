@@ -64,4 +64,64 @@ class WatchProgressRepositoryTest {
         repo.record(WatchRef(1, WatchKind.EPISODE, "x1", "other"), 60_000L, 0)
         assertEquals(listOf("e2", "e1"), repo.observeSeries(1, "s").first().map { it.ref.itemId })
     }
+
+    private fun ep(id: String, series: String = "s") = WatchRef(1, WatchKind.EPISODE, id, series)
+
+    @Test
+    fun continueWatchingMergesMoviesAndSeriesNewestFirst() = runTest {
+        store.catalog = mapOf((1L to "m1") to "Movie", (1L to "s") to "Show")
+        repo.record(movie, 10 * 60_000L, twoHours); now = 2_000
+        repo.record(ep("e1"), 5 * 60_000L, 0); now = 3_000
+        repo.record(ep("e2"), 5 * 60_000L, 0)
+        val items = repo.observeContinueWatching().first()
+        assertEquals(listOf("Show", "Movie"), items.map { it.title })
+        assertEquals("one card per series, on its latest episode", "e2", items[0].progress.ref.itemId)
+        assertEquals("EPISODE:1:s", items[0].key)
+    }
+
+    @Test
+    fun continueWatchingShowsAtMostThirty() = runTest {
+        store.catalog = (1..40).associate { (1L to "m$it") to "Movie $it" }
+        for (i in 1..40) { now = i.toLong(); repo.record(WatchRef(1, WatchKind.MOVIE, "m$i"), 60_000L, twoHours) }
+        val items = repo.observeContinueWatching().first()
+        assertEquals(WatchProgressRepository.CONTINUE_LIMIT, items.size)
+        assertEquals("Movie 40", items.first().title)
+        assertEquals("Movie 11", items.last().title)
+    }
+
+    @Test
+    fun finishedMoviesLeaveButFinishedEpisodesKeepTheirSeries() = runTest {
+        store.catalog = mapOf((1L to "m1") to "Movie", (1L to "s") to "Show")
+        repo.record(movie, twoHours - 60_000L, twoHours)
+        repo.record(ep("e1"), twoHours - 60_000L, twoHours)
+        val items = repo.observeContinueWatching().first()
+        assertEquals("the series stays for its next episode", listOf("Show"), items.map { it.title })
+        assertTrue(items[0].progress.finished)
+    }
+
+    @Test
+    fun titlesMissingFromTheCatalogAreLeftOut() = runTest {
+        repo.record(movie, 10 * 60_000L, twoHours)
+        assertTrue(repo.observeContinueWatching().first().isEmpty())
+    }
+
+    @Test
+    fun removingAMovieResetsItsProgress() = runTest {
+        store.catalog = mapOf((1L to "m1") to "Movie")
+        repo.record(movie, 10 * 60_000L, twoHours)
+        repo.remove(repo.observeContinueWatching().first().single())
+        assertNull(repo.observe(movie).first())
+        assertTrue(repo.observeContinueWatching().first().isEmpty())
+    }
+
+    @Test
+    fun removingASeriesResetsEveryEpisodeOfItOnly() = runTest {
+        store.catalog = mapOf((1L to "s") to "Show", (1L to "other") to "Other")
+        repo.record(ep("e1"), twoHours - 60_000L, twoHours); now = 2_000
+        repo.record(ep("e2"), 5 * 60_000L, twoHours); now = 3_000
+        repo.record(ep("x1", "other"), 5 * 60_000L, twoHours)
+        repo.remove(repo.observeContinueWatching().first().single { it.title == "Show" })
+        assertTrue(repo.observeSeries(1, "s").first().isEmpty())
+        assertEquals(listOf("x1"), repo.observeSeries(1, "other").first().map { it.ref.itemId })
+    }
 }

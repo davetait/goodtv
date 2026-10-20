@@ -108,6 +108,6 @@ class SeriesScreenTest {
         composeRule.onNodeWithText("E1 · One · 45m").assertIsFocused()
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionCenter) }
         composeRule.waitForIdle()
-        assertEquals(PlayerKey(sourceA, PlayerKey.KIND_EPISODE, "1001", "mp4", "Series 1 · S1E1 · One", seriesId = "s1"), played)
+        assertEquals(PlayerKey(sourceA, PlayerKey.KIND_EPISODE, "1001", "mp4", "Series 1 · S1E1 · One", seriesId = "s1", season = 1, episode = 1), played)
     }
 }

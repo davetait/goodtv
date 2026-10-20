@@ -1,6 +1,7 @@
 package com.keyspaceapps.goodtv.ui.nav
 
 import androidx.navigation3.runtime.NavKey
+import com.keyspaceapps.goodtv.data.progress.PlaybackInfo
 import com.keyspaceapps.goodtv.data.progress.WatchKind
 import com.keyspaceapps.goodtv.data.progress.WatchRef
 import com.keyspaceapps.goodtv.domain.ContentKind
@@ -23,12 +24,17 @@ data class PlayerKey(
     val title: String,
     val startPositionMs: Long = 0,
     val seriesId: String? = null,
+    val season: Int? = null,
+    val episode: Int? = null,
 ) : GoodTvKey {
     fun toRef(): PlayableRef = when (refKind) {
         KIND_MOVIE -> PlayableRef.Movie(refId, ext ?: "mp4")
         KIND_EPISODE -> PlayableRef.Episode(refId, ext ?: "mp4")
         else -> PlayableRef.Live(refId)
     }
+
+    /** Saved with progress so Continue Watching can start playback again directly. */
+    fun playbackInfo(): PlaybackInfo = PlaybackInfo(title, ext, season, episode)
 
     /** What progress is recorded against; null for live channels. */
     fun watchRef(): WatchRef? = when (refKind) {

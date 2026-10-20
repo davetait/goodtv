@@ -59,7 +59,7 @@ fun GoodTvNavigation() {
                         onBack = pop,
                         startPositionMs = key.startPositionMs,
                         // App scope, so the save on leaving the player outlives the player screen.
-                        onProgress = ref?.let { r -> { pos, dur -> graph.appScope.launch { graph.watchProgress.record(r, pos, dur) } } },
+                        onProgress = ref?.let { r -> { pos, dur -> graph.appScope.launch { graph.watchProgress.record(r, pos, dur, key.playbackInfo()) } } },
                     )
                 }
             }

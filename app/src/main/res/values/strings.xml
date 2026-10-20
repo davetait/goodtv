@@ -52,6 +52,13 @@
     <string name="genre_empty">No titles in this genre yet.</string>
     <string name="genre_limited">Showing the newest %1$s of %2$s.</string>
     <string name="genre_limited_by_name">Showing the first %1$s of %2$s.</string>
+    <string name="continue_hint">Hold Select to remove</string>
+    <string name="minutes_left">%1$d min left</string>
+    <string name="up_next">Up next</string>
+    <string name="up_next_after">Up next after %1$s</string>
+    <string name="remove_continue">Remove from Continue Watching</string>
+    <string name="remove_continue_movie">Its progress is reset, as if you never started it.</string>
+    <string name="remove_continue_series">Progress for every episode is reset, as if you never started the series.</string>
     <string name="home_continue_watching">Continue Watching</string>
     <string name="home_popular_movies">Popular Movies</string>
     <string name="home_popular_shows">Popular Shows</string>

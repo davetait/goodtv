@@ -168,4 +168,5 @@ data class TmdbGenreStatusEntity(val kind: String, val tmdbId: Long, val fetched
 data class WatchProgressEntity(
     val sourceId: Long, val kind: String, val itemId: String, val seriesId: String?,
     val positionMs: Long, val durationMs: Long, val finished: Boolean, val updatedAt: Long,
+    val title: String? = null, val ext: String? = null, val season: Int? = null, val episode: Int? = null,
 )

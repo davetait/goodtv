@@ -97,4 +97,21 @@ class MigrationTest {
         db.query("SELECT positionMs FROM watch_progress").use { c -> c.moveToFirst(); assertEquals(60000L, c.getLong(0)) }
         db.close()
     }
+
+    /** v6 → v7 adds playback details to saved progress; existing rows keep their position. */
+    @Test
+    fun migrate6To7AddsPlaybackDetails() {
+        helper.createDatabase(dbName, 6).apply {
+            execSQL("INSERT INTO sources (id, type, nickname, configJson, enabled, lastSyncAt, lastError, createdAt) VALUES (1, 'XTREAM', 'Home', '{\"type\":\"xtream\",\"server\":\"http://s\",\"username\":\"u\",\"password\":\"p\"}', 1, 1, NULL, 0)")
+            execSQL("INSERT INTO watch_progress (sourceId, kind, itemId, seriesId, positionMs, durationMs, finished, updatedAt) VALUES (1, 'MOVIE', 'm1', NULL, 60000, 0, 0, 1)")
+            close()
+        }
+        val db = helper.runMigrationsAndValidate(dbName, 7, true, MIGRATION_6_7)
+        db.query("SELECT positionMs, title, season FROM watch_progress").use { c ->
+            c.moveToFirst()
+            assertEquals(60000L, c.getLong(0))
+            assertTrue(c.isNull(1) && c.isNull(2))
+        }
+        db.close()
+    }
 }

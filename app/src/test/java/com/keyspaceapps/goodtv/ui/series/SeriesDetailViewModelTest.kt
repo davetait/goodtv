@@ -71,6 +71,16 @@ class SeriesDetailViewModelTest {
     }
 
     @Test
+    fun skipsEmptySpecialsSeason() = runTest(dispatcher) {
+        source.seriesDetail = detail().let { it.copy(seasons = listOf(Season(0, "Specials", null)) + it.seasons) }
+        val vm = SeriesDetailViewModel(repo, SeriesDetailKey(sid, "s1"))
+        advanceUntilIdle()
+        val ready = vm.state.value as SeriesDetailViewModel.State.Ready
+        assertEquals(1, ready.selectedSeason)
+        assertEquals(listOf(0, 1, 2), ready.seasonNumbers())
+    }
+
+    @Test
     fun selectSeasonFiltersEpisodes() = runTest(dispatcher) {
         source.seriesDetail = detail()
         val vm = SeriesDetailViewModel(repo, SeriesDetailKey(sid, "s1"))

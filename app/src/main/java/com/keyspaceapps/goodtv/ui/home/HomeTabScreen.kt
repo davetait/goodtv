@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.keyspaceapps.goodtv.R
+import com.keyspaceapps.goodtv.data.progress.ContinueItem
 import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.ui.browse.FocusMemory
 import com.keyspaceapps.goodtv.ui.browse.PosterCard
@@ -51,9 +52,8 @@ private data class HomeRow(val titleRes: Int, val items: List<String>)
 
 private fun placeholders(prefix: String) = (1..PLACEHOLDER_COUNT).map { "$prefix $it" }
 
-// TODO: hook up each row (watch progress, popular movies, popular series).
+// TODO: hook up the popular rows.
 private val rows = listOf(
-    HomeRow(R.string.home_continue_watching, placeholders("Continue")),
     HomeRow(R.string.home_popular_movies, placeholders("Movie")),
     HomeRow(R.string.home_popular_shows, placeholders("Show")),
 )
@@ -61,11 +61,14 @@ private val rows = listOf(
 /**
  * The Home tab: a scope dropdown and search bar over Continue Watching, Popular Movies and Popular
  * Shows rails. While a search is active the rails give way to a grid of results.
- * Initial focus goes to the first Continue Watching tile, so UP reaches the search row, then the tabs.
+ * Initial focus goes to the first tile of the first row (Continue Watching when there is anything to
+ * continue), so UP reaches the search row, then the tabs.
  */
 @Composable
 fun HomeTabScreen(onNavigate: (GoodTvKey) -> Unit) {
     val vm = goodTvViewModel { HomeSearchViewModel(it.repository) }
+    val continueVm = goodTvViewModel { ContinueWatchingViewModel(it.watchProgress) }
+    val continueItems by continueVm.items.collectAsState()
     val query by vm.query.collectAsState()
     val scope by vm.scope.collectAsState()
     val results by vm.results.collectAsState()
@@ -81,7 +84,10 @@ fun HomeTabScreen(onNavigate: (GoodTvKey) -> Unit) {
         }
         val found = results
         when {
-            found == null -> PlaceholderRows(rowsRequested)
+            // Wait for Continue Watching so the first row (and its focus) doesn't change under the user.
+            found == null -> continueItems?.let { items ->
+                HomeRows(items, rowsRequested, onNavigate, onRemove = continueVm::remove)
+            }
             found.isEmpty() -> Text(
                 stringResource(R.string.search_no_results, query.trim()),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -128,9 +134,20 @@ private fun SearchResultsGrid(
 }
 
 @Composable
-private fun PlaceholderRows(requested: MutableState<Boolean>) {
+private fun HomeRows(
+    continueItems: List<ContinueItem>,
+    requested: MutableState<Boolean>,
+    onNavigate: (GoodTvKey) -> Unit,
+    onRemove: (ContinueItem) -> Unit,
+) {
     val firstItem = remember { FocusRequester() }
+    // Set when the last Continue Watching card is removed; the next row's first tile takes focus once
+    // the row is gone. Kept apart from [requested] so the vanishing card can't claim it back.
+    val handOff = remember { mutableStateOf(false) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 48.dp)) {
+        if (continueItems.isNotEmpty()) item(key = "continue") {
+            ContinueWatchingRow(continueItems, requested, onNavigate, onRemove, onEmptied = { handOff.value = true })
+        }
         itemsIndexed(rows, key = { _, r -> r.titleRes }) { rowIndex, row ->
             Column(Modifier.fillMaxWidth().padding(top = 16.dp)) {
                 Text(
@@ -143,9 +160,13 @@ private fun PlaceholderRows(requested: MutableState<Boolean>) {
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     itemsIndexed(row.items, key = { _, title -> title }) { index, title ->
-                        val focus = if (rowIndex == 0 && index == 0) {
+                        val focus = if (rowIndex == 0 && index == 0 && continueItems.isEmpty()) {
                             Modifier.focusRequester(firstItem).onPlaced {
-                                if (!requested.value) { requested.value = true; firstItem.requestFocus() }
+                                if (!requested.value || handOff.value) {
+                                    requested.value = true
+                                    handOff.value = false
+                                    firstItem.requestFocus()
+                                }
                             }
                         } else {
                             Modifier

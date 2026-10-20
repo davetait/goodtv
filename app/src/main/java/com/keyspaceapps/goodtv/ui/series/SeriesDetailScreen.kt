@@ -84,6 +84,8 @@ fun episodePlayerKey(detail: SeriesDetail, e: Episode, startPositionMs: Long = 0
     },
     startPositionMs = startPositionMs,
     seriesId = detail.series.id,
+    season = e.season,
+    episode = e.number,
 )
 
 @Composable

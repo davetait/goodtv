@@ -246,4 +246,42 @@ interface WatchProgressDao {
 
     @Query("DELETE FROM watch_progress WHERE sourceId = :sourceId AND kind = :kind AND itemId = :itemId")
     suspend fun delete(sourceId: Long, kind: String, itemId: String)
+
+    @Query("DELETE FROM watch_progress WHERE sourceId = :sourceId AND kind = 'EPISODE' AND seriesId = :seriesId")
+    suspend fun deleteSeries(sourceId: Long, seriesId: String)
+
+    @Query(
+        """SELECT p.*, COALESCE(m.title, m.name) AS itemTitle, m.language AS itemLanguage, m.quality AS itemQuality,
+                  m.posterUrl AS imageUrl, m.tmdbId AS itemTmdbId, m.name AS rawName
+           FROM watch_progress p
+           JOIN movies m ON m.sourceId = p.sourceId AND m.id = p.itemId
+           JOIN sources s ON s.id = p.sourceId
+           WHERE p.kind = 'MOVIE' AND p.finished = 0 AND s.enabled = 1
+           ORDER BY p.updatedAt DESC LIMIT :limit""",
+    )
+    fun observeContinueMovies(limit: Int): Flow<List<ContinueRow>>
+
+    @Query(
+        """SELECT p.*, COALESCE(x.title, x.name) AS itemTitle, x.language AS itemLanguage, x.quality AS itemQuality,
+                  x.coverUrl AS imageUrl, x.tmdbId AS itemTmdbId, x.name AS rawName
+           FROM watch_progress p
+           JOIN series x ON x.sourceId = p.sourceId AND x.id = p.seriesId
+           JOIN sources s ON s.id = p.sourceId
+           WHERE p.kind = 'EPISODE' AND s.enabled = 1
+             AND p.updatedAt = (SELECT MAX(q.updatedAt) FROM watch_progress q
+                                WHERE q.kind = 'EPISODE' AND q.sourceId = p.sourceId AND q.seriesId = p.seriesId)
+           ORDER BY p.updatedAt DESC LIMIT :limit""",
+    )
+    fun observeContinueSeries(limit: Int): Flow<List<ContinueRow>>
 }
+
+/** A progress row joined with its catalog title, for Continue Watching. */
+data class ContinueRow(
+    @androidx.room.Embedded val progress: WatchProgressEntity,
+    val itemTitle: String,
+    val itemLanguage: String?,
+    val itemQuality: String?,
+    val imageUrl: String?,
+    val itemTmdbId: Long?,
+    val rawName: String,
+)

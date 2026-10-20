@@ -90,6 +90,16 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
     }
 }
 
+/** v6 → v7: playback details on watch progress, so Continue Watching can resume without the detail page. */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `watch_progress` ADD COLUMN `title` TEXT")
+        db.execSQL("ALTER TABLE `watch_progress` ADD COLUMN `ext` TEXT")
+        db.execSQL("ALTER TABLE `watch_progress` ADD COLUMN `season` INTEGER")
+        db.execSQL("ALTER TABLE `watch_progress` ADD COLUMN `episode` INTEGER")
+    }
+}
+
 @Database(
     entities = [
         SourceEntity::class, CategoryEntity::class, LiveChannelEntity::class, MovieEntity::class, SeriesEntity::class,
@@ -97,7 +107,7 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
         HiddenCategoryEntity::class, TmdbMetaEntity::class, TmdbTitleMatchEntity::class,
         SeriesGenreEntity::class, TmdbGenreEntity::class, TmdbGenreStatusEntity::class, WatchProgressEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true, // schemas/ holds the baseline every future migration is written against
 )
 abstract class GoodTvDatabase : RoomDatabase() {
@@ -111,7 +121,7 @@ abstract class GoodTvDatabase : RoomDatabase() {
     companion object {
         fun create(context: Context): GoodTvDatabase =
             Room.databaseBuilder(context, GoodTvDatabase::class.java, "goodtv.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 .fallbackToDestructiveMigration(dropAllTables = true) // last resort for an unknown version only
                 .build()
     }
