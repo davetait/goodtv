@@ -53,7 +53,6 @@ fun CategoriesScreen(key: CategoriesKey) {
     val groups by vm.groups.collectAsState()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val headerRequesters = remember { mutableMapOf<String, FocusRequester>() }
     // Set by a chip; the matching header requests focus once it is placed (no timing guesses).
     val pendingHeaderFocus = remember { mutableStateOf<String?>(null) }
     val firstRowFocus = remember { FocusRequester() }
@@ -95,7 +94,7 @@ fun CategoriesScreen(key: CategoriesKey) {
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
             groups.forEachIndexed { groupIndex, g ->
                 item(key = "h:${g.prefix}") {
-                    val requester = headerRequesters.getOrPut(g.prefix) { FocusRequester() }
+                    val requester = remember(g.prefix) { FocusRequester() }
                     ListItem(
                         selected = false,
                         onClick = { vm.toggleGroup(g) },

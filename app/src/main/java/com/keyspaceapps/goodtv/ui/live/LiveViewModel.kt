@@ -22,6 +22,8 @@ class LiveViewModel(repo: LibraryRepository) : ViewModel() {
     private val sharing = SharingStarted.WhileSubscribed(5_000)
     val focus = FocusMemory()
 
+    val hasSources: StateFlow<Boolean> = repo.enabledSourceCount().map { it > 0 }.stateIn(viewModelScope, sharing, false)
+
     val categories: StateFlow<List<CategoryWithSource>> =
         repo.categories(ContentKind.LIVE).stateIn(viewModelScope, sharing, emptyList())
 

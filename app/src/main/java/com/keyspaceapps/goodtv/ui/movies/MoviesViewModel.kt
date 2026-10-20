@@ -19,6 +19,9 @@ class MoviesViewModel(repo: LibraryRepository) : ViewModel() {
     private val categories = repo.categories(ContentKind.MOVIE)
     val focus = FocusMemory()
 
+    val hasSources: StateFlow<Boolean> = repo.enabledSourceCount().map { it > 0 }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     val multiSource: StateFlow<Boolean> = categories.map { it.isMultiSource() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 

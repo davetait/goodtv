@@ -66,6 +66,10 @@ Release builds compile these as empty. Instrumented tests always start with no s
 
 Stream format: live channels use `.ts` when the panel lists it in `allowed_output_formats` (most reliable on real panels), otherwise `.m3u8`. Movies and episodes use the panel's `container_extension`.
 
+## Categories
+
+Real providers expose hundreds of categories. On the Sources tab, each source has a **Categories** button: a per-source checklist split into Live / Movies / Series, grouped by the provider's name prefixes (`AR|`, `FR -`, first word). Everything is on by default; untick a category, or press a group header to hide a whole block in one go; **Select all** / **Clear all** work per content type and the prefix chips jump to a block. Choices save instantly, survive refreshes, and hidden categories (and their content) disappear from Live, Movies and Series. Only switched-off categories are stored, so new categories from the provider appear switched on.
+
 ## Real Google TV Streamer (adb over Wi-Fi)
 
 The Streamer has no USB data port, so debugging is over the network. These steps come from community guides rather than Google's own docs, so menu names may differ slightly by firmware:

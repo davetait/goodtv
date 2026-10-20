@@ -43,12 +43,13 @@ fun LiveScreen(onPlay: (PlayerKey) -> Unit) {
     val selected by vm.selected.collectAsState()
     val channels by vm.channels.collectAsState()
     val multiSource by vm.multiSource.collectAsState()
+    val hasSources by vm.hasSources.collectAsState()
     val requested = remember { mutableStateOf(false) }
     val target = vm.focus.targetIn(channels.map { it.id }, channels.firstOrNull()?.id)
 
     if (categories.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(stringResource(R.string.no_sources_yet), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(if (hasSources) R.string.everything_hidden else R.string.no_sources_yet), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }

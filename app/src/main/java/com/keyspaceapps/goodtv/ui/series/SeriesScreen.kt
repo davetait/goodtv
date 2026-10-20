@@ -23,11 +23,12 @@ fun SeriesScreen(onSeries: (SeriesDetailKey) -> Unit, onSeeAll: (CategoryGridKey
     val vm = goodTvViewModel { SeriesViewModel(it.repository) }
     val rows by vm.rows.collectAsState()
     val multiSource by vm.multiSource.collectAsState()
+    val hasSources by vm.hasSources.collectAsState()
 
     val loaded = rows ?: return // still loading: show nothing rather than a misleading empty state
     if (loaded.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(stringResource(R.string.no_sources_yet), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(if (hasSources) R.string.everything_hidden else R.string.no_sources_yet), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }

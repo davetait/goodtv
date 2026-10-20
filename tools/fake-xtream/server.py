@@ -31,9 +31,10 @@ VOD_STREAMS = [
 
 def build_catalog(prefix):
     def cat(cid, name):
-        return {"category_id": str(cid), "category_name": f"{prefix} {name}".strip(), "parent_id": 0}
+        return {"category_id": str(cid), "category_name": f"{name} {prefix}".strip(), "parent_id": 0}
 
-    live_cats = [cat(1, "News"), cat(2, "Sports"), cat(3, "Kids")]
+    # Prefixed like real panels so the Categories screen groups them: "AR| …", "UK - …", first word.
+    live_cats = [cat(1, "AR| News"), cat(2, "UK| Sports"), cat(3, "UK| Kids")]
     live = []
     for i in range(1, 13):
         cid = 1 + (i - 1) % 3
@@ -45,7 +46,7 @@ def build_catalog(prefix):
             "category_id": str(cid) if i % 3 else cid, "custom_sid": "", "tv_archive": 0,
             "direct_source": "", "tv_archive_duration": 0,
         })
-    vod_cats = [cat(10, "Action"), cat(11, "Drama")]
+    vod_cats = [cat(10, "EN - Action"), cat(11, "FR - Drama")]
     vod = []
     for i in range(1, 32):
         vod.append({
@@ -59,7 +60,7 @@ def build_catalog(prefix):
             "stream_icon": "", "rating": 8.1, "added": str(1700001000 + i),
             "category_id": 11, "container_extension": "mp4",
         })
-    series_cats = [cat(20, "Drama Series")]
+    series_cats = [cat(20, "GERMANY Drama Series")]
     series = [
         {"num": 1, "name": "The Fake Show", "series_id": 3001, "cover": "", "plot": "Two seasons of placeholder drama.",
          "cast": "A. Actor, B. Actor", "director": "C. Director", "genre": "Drama", "releaseDate": "2024-01-15",
