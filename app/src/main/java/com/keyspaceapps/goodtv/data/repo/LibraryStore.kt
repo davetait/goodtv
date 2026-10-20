@@ -43,6 +43,14 @@ interface LibraryStore {
     fun observeMoviesByCategory(limitPerCategory: Int): Flow<Map<CategoryKey, List<Movie>>>
     fun observeSeriesByCategory(limitPerCategory: Int): Flow<Map<CategoryKey, List<Series>>>
 
+    /**
+     * Items of enabled sources whose name contains [query] (case-insensitive for ASCII), names that
+     * start with it first, then by name. Items in hidden categories are left out. At most [limit].
+     */
+    fun searchLive(query: String, limit: Int): Flow<List<LiveChannel>>
+    fun searchMovies(query: String, limit: Int): Flow<List<Movie>>
+    fun searchSeries(query: String, limit: Int): Flow<List<Series>>
+
     /** Every category of one source and kind, hidden or not, in name order (for the Categories screen). */
     fun observeAllCategories(sourceId: Long, kind: ContentKind): Flow<List<Category>>
     fun observeHiddenCategories(sourceId: Long): Flow<Set<Pair<ContentKind, String>>>

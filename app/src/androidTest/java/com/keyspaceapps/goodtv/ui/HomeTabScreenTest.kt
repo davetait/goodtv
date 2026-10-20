@@ -25,6 +25,15 @@ import com.keyspaceapps.goodtv.data.source.SourceConfig
 import com.keyspaceapps.goodtv.data.source.SourceType
 import com.keyspaceapps.goodtv.domain.SourceRecord
 import kotlinx.coroutines.runBlocking
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.isRoot
+import androidx.compose.ui.test.requestFocus
+import com.keyspaceapps.goodtv.domain.Catalog
+import com.keyspaceapps.goodtv.domain.Category
+import com.keyspaceapps.goodtv.domain.ContentKind
+import com.keyspaceapps.goodtv.domain.LiveChannel
+import com.keyspaceapps.goodtv.domain.Movie
 import org.junit.After
 import org.junit.Rule
 import org.junit.Test
@@ -45,7 +54,16 @@ class HomeTabScreenTest {
             val graph = ApplicationProvider.getApplicationContext<android.content.Context>().appGraph()
             graph.db.clearAllTables()
             graph.settings.setLastTab(lastTab)
-            graph.store.insertSource(SourceRecord(0, SourceType.XTREAM, "A", SourceConfig.Xtream("http://s", "u", "p"), true, System.currentTimeMillis(), null))
+            val id = graph.store.insertSource(SourceRecord(0, SourceType.XTREAM, "A", SourceConfig.Xtream("http://s", "u", "p"), true, System.currentTimeMillis(), null))
+            graph.store.replaceCatalog(
+                id,
+                Catalog(
+                    categories = listOf(Category(id, ContentKind.LIVE, "c1", "News"), Category(id, ContentKind.MOVIE, "m1", "Action")),
+                    live = listOf(LiveChannel(id, "l1", "c1", "Matrix News", null, 1)),
+                    movies = listOf(Movie(id, "mv1", "m1", "The Matrix", null, "mp4", null, null)),
+                    series = emptyList(),
+                ),
+            )
         }
         scenario = ActivityScenario.launch(MainActivity::class.java)
     }
@@ -76,12 +94,14 @@ class HomeTabScreenTest {
     }
 
     @Test
-    fun upFromFirstTileFocusesSearch() {
+    fun upFromFirstTileFocusesScopeThenRightFocusesSearch() {
         seedAndLaunch("HOME")
         waitFor("Continue 1")
         composeRule.waitUntil(5_000) { runCatching { composeRule.onNodeWithText("Continue 1").assertIsFocused() }.isSuccess }
 
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionUp) }
+        composeRule.onNodeWithText("All").assertIsFocused()
+        composeRule.onRoot().performKeyInput { pressKey(Key.DirectionRight) }
         // The bar takes focus, not the text field inside it (that would open the keyboard).
         composeRule.onNode(isFocused() and hasAnyDescendant(hasSetTextAction())).assertExists()
         composeRule.onNode(hasSetTextAction()).assertIsNotFocused()
@@ -94,6 +114,7 @@ class HomeTabScreenTest {
         waitFor("Continue 1")
         composeRule.waitUntil(5_000) { runCatching { composeRule.onNodeWithText("Continue 1").assertIsFocused() }.isSuccess }
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionUp) }
+        composeRule.onRoot().performKeyInput { pressKey(Key.DirectionRight) }
         composeRule.onNode(hasSetTextAction()).assertIsNotFocused()
 
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionCenter) }
@@ -110,5 +131,45 @@ class HomeTabScreenTest {
         seedAndLaunch("")
         waitFor("Continue Watching")
         composeRule.onNodeWithText("Home").assertIsSelected()
+    }
+
+    @Test
+    fun searchShowsMatchesOfEveryKindLabelledByKind() {
+        seedAndLaunch("HOME")
+        waitFor("Continue 1")
+        composeRule.onNode(hasSetTextAction()).performTextInput("matrix")
+        waitFor("The Matrix")
+        composeRule.onNodeWithText("Matrix News").assertIsDisplayed()
+        composeRule.onNodeWithText("Channel").assertIsDisplayed()
+        composeRule.onNodeWithText("Movie").assertIsDisplayed()
+        composeRule.onAllNodes(hasText("Continue Watching")).assertCountEquals(0)
+    }
+
+    @Test
+    fun noMatchesSaysSo() {
+        seedAndLaunch("HOME")
+        waitFor("Continue 1")
+        composeRule.onNode(hasSetTextAction()).performTextInput("zzz")
+        waitFor("Nothing matches “zzz”")
+    }
+
+    /** The scope list opens in a popup with focus on the current scope; picking Movies narrows the results. */
+    @Test
+    fun scopeDropdownNarrowsToOneKindAndReturnsFocus() {
+        seedAndLaunch("HOME")
+        waitFor("Continue 1")
+        composeRule.onNode(hasSetTextAction()).performTextInput("matrix")
+        waitFor("Matrix News")
+
+        composeRule.onNodeWithText("All").requestFocus()
+        composeRule.onRoot().performKeyInput { pressKey(Key.DirectionCenter) }
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(isRoot()).fetchSemanticsNodes().size == 2 }
+        val popup = composeRule.onAllNodes(isRoot())[1]
+        popup.performKeyInput { pressKey(Key.DirectionDown); pressKey(Key.DirectionDown); pressKey(Key.DirectionCenter) }
+
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasText("Matrix News")).fetchSemanticsNodes().isEmpty() }
+        composeRule.onNodeWithText("The Matrix").assertIsDisplayed()
+        composeRule.onAllNodes(hasText("Movie")).assertCountEquals(0)
+        composeRule.waitUntil(5_000) { runCatching { composeRule.onNode(hasText("Movies") and hasClickAction() and isFocused()).assertExists() }.isSuccess }
     }
 }

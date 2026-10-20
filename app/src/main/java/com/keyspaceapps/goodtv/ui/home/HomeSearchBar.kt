@@ -84,7 +84,6 @@ fun HomeSearchBar(query: String, onQueryChange: (String) -> Unit, hint: String, 
             textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.onSurface),
             cursorBrush = SolidColor(colors.primary),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            // TODO: run the search.
             keyboardActions = KeyboardActions(onSearch = { stopEditing(FocusDirection.Down) }),
             modifier = Modifier
                 .fillMaxWidth()

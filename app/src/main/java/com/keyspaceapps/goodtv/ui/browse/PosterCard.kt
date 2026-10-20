@@ -18,7 +18,10 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 
-/** 2:3 poster tile with the title underneath. Shows [placeholderLabel] (or the first letter) when there is no image. */
+/**
+ * 2:3 poster tile with the title (and optional [subtitle]) underneath. Shows [placeholderLabel] (or the
+ * first letter) when there is no image. [fitImage] letterboxes instead of cropping, for channel logos.
+ */
 @Composable
 fun PosterCard(
     title: String,
@@ -26,6 +29,8 @@ fun PosterCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     placeholderLabel: String? = null,
+    subtitle: String? = null,
+    fitImage: Boolean = false,
 ) {
     Card(onClick = onClick, modifier = modifier.width(140.dp)) {
         Column {
@@ -37,7 +42,7 @@ fun PosterCard(
                 contentAlignment = Alignment.Center,
             ) {
                 if (imageUrl != null) {
-                    AsyncImage(model = imageUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f))
+                    AsyncImage(model = imageUrl, contentDescription = null, contentScale = if (fitImage) ContentScale.Fit else ContentScale.Crop, modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f))
                 } else {
                     Text(placeholderLabel ?: title.take(1).uppercase(), style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -47,8 +52,16 @@ fun PosterCard(
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                modifier = Modifier.padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = if (subtitle == null) 6.dp else 0.dp),
             )
+            if (subtitle != null) {
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 8.dp, end = 8.dp, bottom = 6.dp),
+                )
+            }
         }
     }
 }

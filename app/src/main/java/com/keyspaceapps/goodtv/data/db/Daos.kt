@@ -83,6 +83,35 @@ interface LibraryDao {
     )
     fun observeEnabledSeries(): Flow<List<SeriesEntity>>
 
+    // Search: name contains [pattern] (already LIKE-escaped with backslash), names starting with it first.
+    // Enabled sources only; items in hidden categories are left out, uncategorised ones are kept.
+    @Query(
+        """SELECT c.* FROM live_channels c JOIN sources s ON s.id = c.sourceId
+           WHERE s.enabled = 1 AND c.name LIKE '%' || :pattern || '%' ESCAPE '\'
+             AND NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = c.sourceId AND h.kind = 'LIVE' AND h.categoryId = c.categoryId)
+           ORDER BY CASE WHEN c.name LIKE :pattern || '%' ESCAPE '\' THEN 0 ELSE 1 END, c.name
+           LIMIT :limit""",
+    )
+    fun searchLive(pattern: String, limit: Int): Flow<List<LiveChannelEntity>>
+
+    @Query(
+        """SELECT m.* FROM movies m JOIN sources s ON s.id = m.sourceId
+           WHERE s.enabled = 1 AND m.name LIKE '%' || :pattern || '%' ESCAPE '\'
+             AND NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = m.sourceId AND h.kind = 'MOVIE' AND h.categoryId = m.categoryId)
+           ORDER BY CASE WHEN m.name LIKE :pattern || '%' ESCAPE '\' THEN 0 ELSE 1 END, m.name
+           LIMIT :limit""",
+    )
+    fun searchMovies(pattern: String, limit: Int): Flow<List<MovieEntity>>
+
+    @Query(
+        """SELECT x.* FROM series x JOIN sources s ON s.id = x.sourceId
+           WHERE s.enabled = 1 AND x.name LIKE '%' || :pattern || '%' ESCAPE '\'
+             AND NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = x.sourceId AND h.kind = 'SERIES' AND h.categoryId = x.categoryId)
+           ORDER BY CASE WHEN x.name LIKE :pattern || '%' ESCAPE '\' THEN 0 ELSE 1 END, x.name
+           LIMIT :limit""",
+    )
+    fun searchSeries(pattern: String, limit: Int): Flow<List<SeriesEntity>>
+
     @Query("SELECT * FROM movies WHERE sourceId = :sourceId AND id = :id") suspend fun getMovie(sourceId: Long, id: String): MovieEntity?
     @Query("SELECT * FROM series WHERE sourceId = :sourceId AND id = :id") suspend fun getSeries(sourceId: Long, id: String): SeriesEntity?
 

@@ -91,6 +91,23 @@ class FakeLibraryStore : LibraryStore {
         this.hidden.value = if (hidden) this.hidden.value + rows else this.hidden.value - rows
     }
 
+    private fun <T> search(query: String, limit: Int, kind: ContentKind, pick: (Catalog) -> List<T>, name: (T) -> String, sid: (T) -> Long, cat: (T) -> String?): Flow<List<T>> =
+        combine(sources, catalogs, hidden) { s, c, h ->
+            val enabled = s.filter { it.enabled }.map { it.id }.toSet()
+            enabled.flatMap { id -> c[id]?.let(pick).orEmpty() }
+                .filter { name(it).contains(query, ignoreCase = true) }
+                .filterNot { item -> cat(item)?.let { Triple(sid(item), kind, it) in h } ?: false }
+                .sortedWith(compareBy<T>({ if (name(it).startsWith(query, ignoreCase = true)) 0 else 1 }, { name(it) }))
+                .take(limit)
+        }
+
+    override fun searchLive(query: String, limit: Int): Flow<List<LiveChannel>> =
+        search(query, limit, ContentKind.LIVE, { it.live }, { it.name }, { it.sourceId }, { it.categoryId })
+    override fun searchMovies(query: String, limit: Int): Flow<List<Movie>> =
+        search(query, limit, ContentKind.MOVIE, { it.movies }, { it.name }, { it.sourceId }, { it.categoryId })
+    override fun searchSeries(query: String, limit: Int): Flow<List<Series>> =
+        search(query, limit, ContentKind.SERIES, { it.series }, { it.name }, { it.sourceId }, { it.categoryId })
+
     override fun observeLiveChannels(sourceId: Long, categoryId: String): Flow<List<LiveChannel>> =
         catalogs.map { it[sourceId]?.live?.filter { ch -> ch.categoryId == categoryId } ?: emptyList() }
 

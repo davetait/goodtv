@@ -8,6 +8,14 @@
 
     <string name="tab_home">Home</string>
     <string name="home_search_hint">Search movies, shows and channels</string>
+    <string name="search_hint_live">Search channels</string>
+    <string name="search_hint_movies">Search movies</string>
+    <string name="search_hint_series">Search series</string>
+    <string name="search_scope_all">All</string>
+    <string name="search_kind_live">Channel</string>
+    <string name="search_kind_movie">Movie</string>
+    <string name="search_kind_series">Series</string>
+    <string name="search_no_results">Nothing matches “%1$s”</string>
     <string name="home_continue_watching">Continue Watching</string>
     <string name="home_popular_movies">Popular Movies</string>
     <string name="home_popular_shows">Popular Shows</string>

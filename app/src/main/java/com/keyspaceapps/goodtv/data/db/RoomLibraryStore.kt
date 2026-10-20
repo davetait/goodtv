@@ -88,6 +88,15 @@ class RoomLibraryStore(
             .map { rows -> rows.groupBy { CategoryKey(it.sourceId, it.categoryId!!) }.mapValues { (_, v) -> v.take(limitPerCategory).map { it.toDomain() } } }
             .distinctUntilChanged()
 
+    override fun searchLive(query: String, limit: Int): Flow<List<LiveChannel>> =
+        library.searchLive(escapeLike(query), limit).map { rows -> rows.map { it.toDomain() } }
+
+    override fun searchMovies(query: String, limit: Int): Flow<List<Movie>> =
+        library.searchMovies(escapeLike(query), limit).map { rows -> rows.map { it.toDomain() } }
+
+    override fun searchSeries(query: String, limit: Int): Flow<List<Series>> =
+        library.searchSeries(escapeLike(query), limit).map { rows -> rows.map { it.toDomain() } }
+
     override fun observeAllCategories(sourceId: Long, kind: ContentKind): Flow<List<Category>> =
         library.observeAllCategories(sourceId, kind.name).map { rows -> rows.map { it.toDomain() } }
 
@@ -123,3 +132,7 @@ class RoomLibraryStore(
         library.insertEpisodes(detail.episodes.map { it.toEntity() })
     }
 }
+
+/** Escapes LIKE wildcards so a query such as "100%" matches literally (paired with `ESCAPE '\'`). */
+internal fun escapeLike(query: String): String =
+    query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")

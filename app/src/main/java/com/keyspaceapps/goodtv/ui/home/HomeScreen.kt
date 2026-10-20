@@ -82,7 +82,7 @@ fun HomeScreen(onNavigate: (GoodTvKey) -> Unit) {
         }
         Box(Modifier.fillMaxSize()) {
             when (current) {
-                HomeTab.HOME -> HomeTabScreen()
+                HomeTab.HOME -> HomeTabScreen(onNavigate = onNavigate)
                 HomeTab.LIVE -> LiveScreen(onPlay = onNavigate)
                 HomeTab.MOVIES -> MoviesScreen(onMovie = onNavigate, onSeeAll = onNavigate)
                 HomeTab.SERIES -> SeriesScreen(onSeries = onNavigate, onSeeAll = onNavigate)
