@@ -19,6 +19,9 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.keyspaceapps.goodtv.ui.goodTvViewModel
 import com.keyspaceapps.goodtv.ui.nav.CategoryGridKey
+import com.keyspaceapps.goodtv.ui.tmdb.POSTER_SETTLE_MS
+import com.keyspaceapps.goodtv.ui.tmdb.rememberTmdbMeta
+import com.keyspaceapps.goodtv.ui.tmdb.tmdbKind
 
 /** Every item of one category, six per row. */
 @Composable
@@ -37,8 +40,9 @@ fun CategoryGridScreen(key: CategoryGridKey, onItem: (RowItem) -> Unit) {
             contentPadding = PaddingValues(bottom = 48.dp),
         ) {
             itemsIndexed(items, key = { _, it -> it.id }) { _, item ->
+                val tmdb = rememberTmdbMeta(key.kind.tmdbKind(), item.tmdbId, item.title, POSTER_SETTLE_MS)
                 PosterCard(
-                    title = item.title, imageUrl = item.imageUrl, onClick = { onItem(item) },
+                    title = item.title, imageUrl = item.imageUrl, onClick = { onItem(item) }, rating = tmdb?.reliableRating,
                     modifier = Modifier.rememberedFocus(vm.focus, item.id, isTarget = item.id == target, requested = requested),
                 )
             }

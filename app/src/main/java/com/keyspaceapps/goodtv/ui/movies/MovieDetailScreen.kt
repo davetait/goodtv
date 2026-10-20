@@ -31,7 +31,10 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.keyspaceapps.goodtv.R
+import com.keyspaceapps.goodtv.data.tmdb.TmdbMeta
 import com.keyspaceapps.goodtv.domain.MovieDetail
+import com.keyspaceapps.goodtv.ui.tmdb.TmdbCredit
+import com.keyspaceapps.goodtv.ui.tmdb.detailRating
 import com.keyspaceapps.goodtv.ui.browse.Formats
 import com.keyspaceapps.goodtv.ui.goodTvViewModel
 import com.keyspaceapps.goodtv.ui.nav.MovieDetailKey
@@ -39,13 +42,14 @@ import com.keyspaceapps.goodtv.ui.nav.PlayerKey
 
 @Composable
 fun MovieDetailScreen(key: MovieDetailKey, onPlay: (PlayerKey) -> Unit) {
-    val vm = goodTvViewModel(key = "movie-${key.sourceId}-${key.movieId}") { MovieDetailViewModel(it.repository, key) }
+    val vm = goodTvViewModel(key = "movie-${key.sourceId}-${key.movieId}") { MovieDetailViewModel(it.repository, key, it.tmdb) }
     val state by vm.state.collectAsState()
+    val tmdb by vm.tmdb.collectAsState()
 
     when (val s = state) {
         MovieDetailViewModel.State.Loading -> Centered(stringResource(R.string.player_loading))
         is MovieDetailViewModel.State.Error -> Centered(s.message)
-        is MovieDetailViewModel.State.Ready -> MovieDetailContent(s.detail, onPlay)
+        is MovieDetailViewModel.State.Ready -> MovieDetailContent(s.detail, tmdb, onPlay)
     }
 }
 
@@ -55,7 +59,7 @@ private fun Centered(text: String) {
 }
 
 @Composable
-private fun MovieDetailContent(detail: MovieDetail, onPlay: (PlayerKey) -> Unit) {
+private fun MovieDetailContent(detail: MovieDetail, tmdb: TmdbMeta?, onPlay: (PlayerKey) -> Unit) {
     val playFocus = remember { FocusRequester() }
     var focusRequested by remember { mutableStateOf(false) }
     val movie = detail.movie
@@ -72,7 +76,7 @@ private fun MovieDetailContent(detail: MovieDetail, onPlay: (PlayerKey) -> Unit)
                 Text(movie.name, style = MaterialTheme.typography.headlineLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    Formats.metaLine(listOf(Formats.year(detail.releaseDate), detail.genre, Formats.duration(detail.durationSecs), Formats.rating(movie.rating))),
+                    Formats.metaLine(listOf(Formats.year(detail.releaseDate), detail.genre, Formats.duration(detail.durationSecs), detailRating(tmdb, movie.rating))),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(20.dp))
@@ -83,10 +87,11 @@ private fun MovieDetailContent(detail: MovieDetail, onPlay: (PlayerKey) -> Unit)
                     },
                 ) { Text(stringResource(R.string.play)) }
                 Spacer(Modifier.height(20.dp))
-                detail.plot?.let { Text(it, maxLines = 8, overflow = TextOverflow.Ellipsis) }
+                (tmdb?.overview ?: detail.plot)?.let { Text(it, maxLines = 8, overflow = TextOverflow.Ellipsis) }
                 Spacer(Modifier.height(12.dp))
                 detail.cast?.let { Text("Cast: $it", color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis) }
                 detail.director?.let { Text("Director: $it", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                TmdbCredit(tmdb)
             }
         }
     }

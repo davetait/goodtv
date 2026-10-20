@@ -1,5 +1,6 @@
 package com.keyspaceapps.goodtv.data.tmdb
 
+import com.keyspaceapps.goodtv.testing.InMemoryTmdbCache
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals

@@ -3,6 +3,9 @@ package com.keyspaceapps.goodtv.ui.series
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keyspaceapps.goodtv.data.repo.LibraryRepository
+import com.keyspaceapps.goodtv.data.tmdb.TmdbKind
+import com.keyspaceapps.goodtv.data.tmdb.TmdbMeta
+import com.keyspaceapps.goodtv.data.tmdb.TmdbRepository
 import com.keyspaceapps.goodtv.domain.Episode
 import com.keyspaceapps.goodtv.domain.SeriesDetail
 import com.keyspaceapps.goodtv.ui.nav.SeriesDetailKey
@@ -11,7 +14,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-class SeriesDetailViewModel(private val repo: LibraryRepository, val key: SeriesDetailKey) : ViewModel() {
+/** Provider details first; TMDB rating and summary follow in [tmdb] when [tmdbRepo] finds the show. */
+class SeriesDetailViewModel(
+    private val repo: LibraryRepository,
+    val key: SeriesDetailKey,
+    private val tmdbRepo: TmdbRepository? = null,
+) : ViewModel() {
     sealed interface State {
         data object Loading : State
         data class Ready(val detail: SeriesDetail, val selectedSeason: Int) : State {
@@ -26,6 +34,9 @@ class SeriesDetailViewModel(private val repo: LibraryRepository, val key: Series
     private val _state = MutableStateFlow<State>(State.Loading)
     val state: StateFlow<State> = _state
 
+    private val _tmdb = MutableStateFlow<TmdbMeta?>(null)
+    val tmdb: StateFlow<TmdbMeta?> = _tmdb
+
     init {
         viewModelScope.launch {
             _state.value = repo.seriesDetail(key.sourceId, key.seriesId).fold(
@@ -35,6 +46,12 @@ class SeriesDetailViewModel(private val repo: LibraryRepository, val key: Series
                 },
                 onFailure = { State.Error(it.message ?: "Could not load series") },
             )
+        }
+        tmdbRepo?.let { t ->
+            viewModelScope.launch {
+                val row = repo.catalogSeries(key.sourceId, key.seriesId) ?: return@launch
+                _tmdb.value = t.lookup(TmdbKind.TV, row.tmdbId, row.name).getOrNull()
+            }
         }
     }
 

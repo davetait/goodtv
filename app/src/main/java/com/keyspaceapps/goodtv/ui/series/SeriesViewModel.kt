@@ -32,6 +32,6 @@ class SeriesViewModel(repo: LibraryRepository) : ViewModel() {
     /** null until the first query result arrives, so the screen can tell "loading" from "empty". */
     val rows: StateFlow<List<CategoryRow>?> = rowsFlow(
         categories,
-        repo.seriesByCategory(ROW_LIMIT + 1).map { grouped -> grouped.mapValues { (_, list) -> list.map { RowItem(it.sourceId, it.id, it.name, it.coverUrl) } } },
+        repo.seriesByCategory(ROW_LIMIT + 1).map { grouped -> grouped.mapValues { (_, list) -> list.map { RowItem(it.sourceId, it.id, it.name, it.coverUrl, it.tmdbId) } } },
     ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 }

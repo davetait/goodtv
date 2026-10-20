@@ -19,7 +19,14 @@ data class TmdbMeta(
     val backdropUrl: String?,
     val language: String,
     val fetchedAt: Long,
-)
+) {
+    /** [rating] only when enough people voted for it to mean something; a lone 10/10 is noise. */
+    val reliableRating: Double? get() = rating?.takeIf { voteCount >= MIN_VOTES }
+
+    companion object {
+        const val MIN_VOTES = 10
+    }
+}
 
 /** Storage for [TmdbRepository]; Room in the app, in-memory in tests. */
 interface TmdbCache {
@@ -50,7 +57,29 @@ class TmdbRepository(
 ) {
     val isEnabled: Boolean get() = api != null
 
+    // Process-wide memo over the Room cache so posters scrolled past again resolve instantly.
+    // Failures are remembered briefly so a dead network isn't asked again by every poster.
+    private class Memo(val result: Result<TmdbMeta?>, val at: Long)
+    private val memo = object : LinkedHashMap<String, Memo>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Memo>?) = size > MEMO_SIZE
+    }
+
+    private fun memoKey(kind: TmdbKind, tmdbId: Long?, rawTitle: String) =
+        "${language()}|$kind|${tmdbId?.takeIf { it > 0 } ?: ("t:" + rawTitle)}"
+
+    /** The remembered answer if this lookup already ran in this process: null = unknown, else the result. */
+    fun peek(kind: TmdbKind, tmdbId: Long?, rawTitle: String): Result<TmdbMeta?>? = synchronized(memo) {
+        memo[memoKey(kind, tmdbId, rawTitle)]?.takeIf { clock() - it.at < if (it.result.isSuccess) MEMO_TTL_MS else FAILURE_BACKOFF_MS }?.result
+    }
+
     suspend fun lookup(kind: TmdbKind, tmdbId: Long?, rawTitle: String): Result<TmdbMeta?> {
+        peek(kind, tmdbId, rawTitle)?.let { return it }
+        val result = lookupUncached(kind, tmdbId, rawTitle)
+        synchronized(memo) { memo[memoKey(kind, tmdbId, rawTitle)] = Memo(result, clock()) }
+        return result
+    }
+
+    private suspend fun lookupUncached(kind: TmdbKind, tmdbId: Long?, rawTitle: String): Result<TmdbMeta?> {
         val api = api ?: return Result.success(null)
         return try {
             val lang = language()
@@ -119,6 +148,11 @@ class TmdbRepository(
         const val NO_MATCH_TTL_MS = 7L * 24 * 3_600_000
         /** TMDB's terms: no caching beyond 6 months. */
         const val MAX_CACHE_AGE_MS = 180L * 24 * 3_600_000
+        /** After a failed lookup, wait this long before trying the same title again. */
+        const val FAILURE_BACKOFF_MS = 2L * 60_000
+        /** In-memory answers are re-read from the Room cache after this; the TV process can live for days. */
+        const val MEMO_TTL_MS = 3_600_000L
+        private const val MEMO_SIZE = 5_000
 
         /**
          * With a year: the first result (TMDB orders by relevance) released within a year of it, if

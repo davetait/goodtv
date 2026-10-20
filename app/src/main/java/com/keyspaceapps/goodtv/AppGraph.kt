@@ -2,6 +2,7 @@ package com.keyspaceapps.goodtv
 
 import android.content.Context
 import android.util.Log
+import androidx.annotation.VisibleForTesting
 import androidx.datastore.preferences.preferencesDataStore
 import com.keyspaceapps.goodtv.data.settings.AppSettings
 import com.keyspaceapps.goodtv.data.db.GoodTvDatabase
@@ -63,12 +64,19 @@ class AppGraph(val context: Context) {
     val syncManager: SyncManager by lazy { SyncManager(store, sourceRegistry, appScope) }
     val repository: LibraryRepository by lazy { LibraryRepository(store, sourceRegistry, syncManager, settings) }
 
-    /** TMDB ratings and summaries; a no-op when no TMDB key is configured. Language follows the device. */
-    val tmdb: TmdbRepository by lazy {
+    /**
+     * TMDB ratings and summaries; a no-op when no TMDB key is configured or [GoodTvApp.disableTmdb] is
+     * set (instrumented tests, which must not call the real API). Language follows the device.
+     */
+    private val defaultTmdb: TmdbRepository by lazy {
         TmdbRepository(
-            api = TmdbCredential.from(BuildConfig.TMDB_API_KEY)?.let { TmdbApi(okHttp, it) },
+            api = TmdbCredential.from(BuildConfig.TMDB_API_KEY)?.takeUnless { GoodTvApp.disableTmdb }?.let { TmdbApi(okHttp, it) },
             cache = RoomTmdbCache(db.tmdb()),
             language = { Locale.getDefault().toLanguageTag() },
         )
     }
+
+    /** Instrumented tests point this at a mock TMDB server. */
+    @VisibleForTesting var tmdbOverride: TmdbRepository? = null
+    val tmdb: TmdbRepository get() = tmdbOverride ?: defaultTmdb
 }

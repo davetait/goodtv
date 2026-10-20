@@ -1,5 +1,6 @@
 package com.keyspaceapps.goodtv.data.tmdb
 
+import com.keyspaceapps.goodtv.testing.InMemoryTmdbCache
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
@@ -112,7 +113,34 @@ class TmdbRepositoryTest {
         val result = repo().lookup(TmdbKind.MOVIE, 603, "x")
         assertTrue(result.exceptionOrNull() is TmdbException)
         routes["/3/movie/603"] = 200 to fixture("movie_603.json")
-        assertEquals(603L, repo().lookup(TmdbKind.MOVIE, 603, "x").getOrThrow()!!.tmdbId)
+        val r = repo()
+        assertTrue(r.lookup(TmdbKind.MOVIE, 603, "x").isSuccess) // fresh repository: nothing remembered
+        assertEquals(603L, r.lookup(TmdbKind.MOVIE, 603, "x").getOrThrow()!!.tmdbId)
+    }
+
+    @Test
+    fun oneRepositoryRemembersAnswersAndBacksOffAfterAFailure() = runTest {
+        val r = repo()
+        r.lookup(TmdbKind.MOVIE, 603, "x")
+        assertEquals(603L, r.peek(TmdbKind.MOVIE, 603, "x")!!.getOrThrow()!!.tmdbId)
+        r.lookup(TmdbKind.MOVIE, 603, "x")
+        assertEquals(1, requests.size)
+
+        routes["/3/tv/1399"] = 503 to ""
+        assertTrue(r.lookup(TmdbKind.TV, 1399, "x").isFailure)
+        routes["/3/tv/1399"] = 200 to fixture("tv_1399.json")
+        assertTrue("still backing off", r.lookup(TmdbKind.TV, 1399, "x").isFailure)
+        assertEquals(2, requests.size)
+        now += TmdbRepository.FAILURE_BACKOFF_MS + 1
+        assertEquals(1399L, r.lookup(TmdbKind.TV, 1399, "x").getOrThrow()!!.tmdbId)
+        assertNull(r.peek(TmdbKind.MOVIE, 1, "never asked"))
+    }
+
+    @Test
+    fun reliableRatingNeedsEnoughVotes() = runTest {
+        val m = repo().lookup(TmdbKind.MOVIE, 603, "x").getOrThrow()!!
+        assertEquals(8.2, m.reliableRating!!, 0.0)
+        assertNull(m.copy(voteCount = TmdbMeta.MIN_VOTES - 1).reliableRating)
     }
 
     @Test
@@ -141,18 +169,5 @@ class TmdbRepositoryTest {
         assertNull(TmdbRepository.pickMatch(CleanTitle("heat", null, true), list))
         assertEquals(2L, TmdbRepository.pickMatch(CleanTitle("heat", null, true), list.take(2)))
         assertNull(TmdbRepository.pickMatch(CleanTitle("Heat 2", null, true), list))
-    }
-}
-
-class InMemoryTmdbCache : TmdbCache {
-    private val metas = mutableMapOf<Pair<TmdbKind, Long>, TmdbMeta>()
-    private val matches = mutableMapOf<Pair<TmdbKind, String>, TitleMatch>()
-    override suspend fun meta(kind: TmdbKind, tmdbId: Long) = metas[kind to tmdbId]
-    override suspend fun putMeta(meta: TmdbMeta) { metas[meta.kind to meta.tmdbId] = meta }
-    override suspend fun titleMatch(kind: TmdbKind, queryKey: String) = matches[kind to queryKey]
-    override suspend fun putTitleMatch(kind: TmdbKind, queryKey: String, match: TitleMatch) { matches[kind to queryKey] = match }
-    override suspend fun prune(before: Long) {
-        metas.values.removeAll { it.fetchedAt < before }
-        matches.values.removeAll { it.fetchedAt < before }
     }
 }

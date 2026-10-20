@@ -73,6 +73,10 @@ class LibraryRepository(
         store.deleteSource(id)
     }
 
+    /** The synced catalog row (carries the provider's TMDB id, which the detail call does not). */
+    suspend fun catalogMovie(sourceId: Long, movieId: String): Movie? = store.getMovie(sourceId, movieId)
+    suspend fun catalogSeries(sourceId: Long, seriesId: String): Series? = store.getSeries(sourceId, seriesId)
+
     suspend fun movieDetail(sourceId: Long, movieId: String): Result<MovieDetail> {
         store.getMovieDetail(sourceId, movieId)?.let { return Result.success(it) }
         val record = store.getSource(sourceId) ?: return Result.failure(SourceException("Source not found"))

@@ -23,6 +23,8 @@ class GoodTvApp : Application() {
         /** Set by the instrumented test runner before the Application is created. */
         @JvmStatic
         var skipDebugSource: Boolean = false
+        /** Set by the instrumented test runner so tests never reach the real TMDB API. */
+        @Volatile var disableTmdb: Boolean = false
     }
 }
 

@@ -7,9 +7,11 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -21,6 +23,7 @@ import coil3.compose.AsyncImage
 /**
  * 2:3 poster tile with the title (and optional [subtitle]) underneath. Shows [placeholderLabel] (or the
  * first letter) when there is no image. [fitImage] letterboxes instead of cropping, for channel logos.
+ * [rating] (0–10) shows as a "★ 7.6" badge in the image's top-left corner.
  */
 @Composable
 fun PosterCard(
@@ -31,6 +34,7 @@ fun PosterCard(
     placeholderLabel: String? = null,
     subtitle: String? = null,
     fitImage: Boolean = false,
+    rating: Double? = null,
 ) {
     Card(onClick = onClick, modifier = modifier.width(140.dp)) {
         Column {
@@ -45,6 +49,18 @@ fun PosterCard(
                     AsyncImage(model = imageUrl, contentDescription = null, contentScale = if (fitImage) ContentScale.Fit else ContentScale.Crop, modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f))
                 } else {
                     Text(placeholderLabel ?: title.take(1).uppercase(), style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Formats.rating(rating)?.let { label ->
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Color.White,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(6.dp)
+                            .background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
                 }
             }
             Text(

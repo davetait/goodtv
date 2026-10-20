@@ -41,6 +41,9 @@ import com.keyspaceapps.goodtv.ui.nav.GoodTvKey
 import com.keyspaceapps.goodtv.ui.nav.MovieDetailKey
 import com.keyspaceapps.goodtv.ui.nav.PlayerKey
 import com.keyspaceapps.goodtv.ui.nav.SeriesDetailKey
+import com.keyspaceapps.goodtv.ui.tmdb.POSTER_SETTLE_MS
+import com.keyspaceapps.goodtv.ui.tmdb.rememberTmdbMeta
+import com.keyspaceapps.goodtv.ui.tmdb.tmdbKind
 
 private const val PLACEHOLDER_COUNT = 8
 
@@ -110,12 +113,14 @@ private fun SearchResultsGrid(
         modifier = Modifier.fillMaxSize(),
     ) {
         items(results, key = { it.key }) { r ->
+            val tmdb = rememberTmdbMeta(r.kind.tmdbKind(), r.tmdbId, r.title, POSTER_SETTLE_MS)
             PosterCard(
                 title = r.title,
                 imageUrl = r.imageUrl,
                 onClick = { onResult(r) },
                 subtitle = if (showKind) stringResource(r.kind.labelRes) else null,
                 fitImage = r.kind == ContentKind.LIVE,
+                rating = tmdb?.reliableRating,
                 modifier = Modifier.rememberedFocus(focus, r.key, isTarget = r.key == target, requested = requested),
             )
         }

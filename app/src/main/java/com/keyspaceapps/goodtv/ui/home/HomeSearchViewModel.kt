@@ -27,7 +27,7 @@ enum class SearchScope(val kinds: List<ContentKind>) {
 }
 
 /** One search hit; [key] is unique across kinds and sources. */
-data class SearchResult(val kind: ContentKind, val sourceId: Long, val id: String, val title: String, val imageUrl: String?) {
+data class SearchResult(val kind: ContentKind, val sourceId: Long, val id: String, val title: String, val imageUrl: String?, val tmdbId: Long? = null) {
     val key: String get() = "${kind.name}:$sourceId:$id"
 }
 
@@ -70,10 +70,10 @@ class HomeSearchViewModel(private val repo: LibraryRepository) : ViewModel() {
             list.map { SearchResult(kind, it.sourceId, it.id, it.name, it.logoUrl) }
         }
         ContentKind.MOVIE -> repo.searchMovies(query, SEARCH_LIMIT_PER_KIND).map { list ->
-            list.map { SearchResult(kind, it.sourceId, it.id, it.name, it.posterUrl) }
+            list.map { SearchResult(kind, it.sourceId, it.id, it.name, it.posterUrl, it.tmdbId) }
         }
         ContentKind.SERIES -> repo.searchSeries(query, SEARCH_LIMIT_PER_KIND).map { list ->
-            list.map { SearchResult(kind, it.sourceId, it.id, it.name, it.coverUrl) }
+            list.map { SearchResult(kind, it.sourceId, it.id, it.name, it.coverUrl, it.tmdbId) }
         }
     }
 }
