@@ -257,4 +257,54 @@ class RoomLibraryStoreTest {
         assertTrue(store.observeHiddenCategories(a).first().isEmpty())
         assertEquals(0, store.observeSummaries().first().single().hiddenCount)
     }
+
+    @Test
+    fun searchMatchesAnywherePrefixFirstAndSkipsHiddenAndDisabled() = runBlocking {
+        val a = store.insertSource(record("A"))
+        val off = store.insertSource(record("Off", enabled = false))
+        val movies = listOf("The Matrix", "Matrix Reloaded", "Heat", "matrix lowercase").mapIndexed { i, n -> Movie(a, "M$i", "m1", n, null, "mkv", null, null) }
+        val base = catalog(a, live = 0, movies = 0, series = 0)
+        store.replaceCatalog(a, base.copy(categories = base.categories + Category(a, ContentKind.MOVIE, "m2", "Hidden"), movies = movies + Movie(a, "H", "m2", "Matrix Hidden", null, "mkv", null, null)))
+        store.replaceCatalog(off, catalog(off, live = 0, movies = 0, series = 0).copy(movies = listOf(Movie(off, "X", "m1", "Matrix Off", null, "mkv", null, null))))
+        store.setCategoriesHidden(a, ContentKind.MOVIE, listOf("m2"), hidden = true)
+
+        val names = store.searchMovies("MATRIX", 10).first().map { it.name }
+        assertEquals(listOf("Matrix Reloaded", "matrix lowercase", "The Matrix"), names)
+        assertEquals(listOf("Matrix Reloaded"), store.searchMovies("matrix", 1).first().map { it.name })
+    }
+
+    @Test
+    fun searchTreatsWildcardsLiterally() = runBlocking {
+        val a = store.insertSource(record("A"))
+        store.replaceCatalog(
+            a,
+            catalog(a, live = 0, movies = 0, series = 0).copy(
+                live = listOf(LiveChannel(a, "1", "c1", "100% Hits", null, 1), LiveChannel(a, "2", "c1", "1000 Hits", null, 2), LiveChannel(a, "3", "c1", "A_B", null, 3), LiveChannel(a, "4", "c1", "AXB", null, 4)),
+            ),
+        )
+        assertEquals(listOf("100% Hits"), store.searchLive("100%", 10).first().map { it.name })
+        assertEquals(listOf("A_B"), store.searchLive("a_b", 10).first().map { it.name })
+    }
+
+    @Test
+    fun listsSortAndSearchByCleanTitleNotTag() = runBlocking {
+        val a = store.insertSource(record("A"))
+        fun s(id: String, raw: String, title: String, lang: String?) = Series(a, id, "s1", raw, null, null, null, title = title, language = lang)
+        store.replaceCatalog(
+            a,
+            catalog(a, live = 0, movies = 0, series = 0).copy(
+                series = listOf(
+                    s("1", "EN - Zorro", "Zorro", "EN"),
+                    s("2", "4K-AR - Breaking Bad", "Breaking Bad", "AR"),
+                    s("3", "DE - Breaking Bad", "Breaking Bad", "DE"),
+                    s("4", "AR-SUBS - Arrow", "Arrow", "AR-SUB"),
+                ),
+            ),
+        )
+        assertEquals(listOf("4", "2", "3", "1"), store.observeSeries(a, "s1", 10).first().map { it.id })
+        // "ar" no longer matches every Arabic-tagged title; "br" finds Breaking Bad by its own name, first.
+        assertEquals(listOf("4"), store.searchSeries("arr", 10).first().map { it.id })
+        assertEquals(listOf("2", "3"), store.searchSeries("break", 10).first().map { it.id })
+        assertEquals("Breaking Bad", store.observeSeries(a, "s1", 10).first()[1].title)
+    }
 }

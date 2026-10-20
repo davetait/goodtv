@@ -54,6 +54,8 @@ data class XtVodStream(
     @Serializable(FlexStringSerializer::class) val container_extension: String? = null,
     @Serializable(FlexDoubleSerializer::class) val rating: Double? = null,
     @Serializable(FlexLongSerializer::class) val added: Long? = null,
+    /** TMDB movie id as sent: number, string, "", 0, "43332-" or even an IMDb "tt…" id. See [tmdbIdOf]. */
+    @Serializable(FlexStringSerializer::class) val tmdb: String? = null,
 )
 
 @Serializable
@@ -92,6 +94,8 @@ data class XtSeries(
     @Serializable(FlexDoubleSerializer::class) val rating: Double? = null,
     @Serializable(FlexStringSerializer::class) val category_id: String? = null,
     @Serializable(FlexStringListSerializer::class) val backdrop_path: List<String> = emptyList(),
+    /** TMDB TV series id as sent; see [tmdbIdOf]. */
+    @Serializable(FlexStringSerializer::class) val tmdb: String? = null,
 )
 
 @Serializable

@@ -14,6 +14,10 @@ data class LiveChannel(
     val name: String,
     val logoUrl: String?,
     val number: Int?,
+    /** Clean display title (see [DisplayTitle]); the raw [name] stays for matching. */
+    val title: String = name,
+    val language: String? = null,
+    val quality: String? = null,
 )
 
 data class Movie(
@@ -25,6 +29,12 @@ data class Movie(
     val containerExtension: String,
     val rating: Double?,
     val addedAt: Long?,
+    /** themoviedb.org movie id when the provider supplies one. */
+    val tmdbId: Long? = null,
+    /** Clean display title with the year, "The Matrix (1999)" (see [DisplayTitle]); [name] stays raw. */
+    val title: String = name,
+    val language: String? = null,
+    val quality: String? = null,
 )
 
 data class Series(
@@ -35,6 +45,14 @@ data class Series(
     val coverUrl: String?,
     val plot: String?,
     val rating: Double?,
+    /** themoviedb.org TV series id when the provider supplies one. */
+    val tmdbId: Long? = null,
+    /** From the provider's genre text at sync time; stored separately, so not filled when read back. */
+    val genres: Set<Genre> = emptySet(),
+    /** Clean display title with the year (see [DisplayTitle]); [name] stays raw. */
+    val title: String = name,
+    val language: String? = null,
+    val quality: String? = null,
 )
 
 data class Catalog(
@@ -120,3 +138,8 @@ data class SourceSummary(
 )
 
 data class CategoryWithSource(val category: Category, val sourceNickname: String)
+
+/** "The Matrix (1999) (AR · 4K)": what lists and pages show for a title. */
+val LiveChannel.label: String get() = displayLabel(title, language, quality)
+val Movie.label: String get() = displayLabel(title, language, quality)
+val Series.label: String get() = displayLabel(title, language, quality)

@@ -38,22 +38,30 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.keyspaceapps.goodtv.R
+import com.keyspaceapps.goodtv.data.tmdb.TmdbMeta
 import com.keyspaceapps.goodtv.domain.Episode
+import com.keyspaceapps.goodtv.ui.tmdb.TmdbCredit
+import com.keyspaceapps.goodtv.ui.tmdb.detailRating
 import com.keyspaceapps.goodtv.domain.SeriesDetail
 import com.keyspaceapps.goodtv.ui.browse.Formats
 import com.keyspaceapps.goodtv.ui.goodTvViewModel
 import com.keyspaceapps.goodtv.ui.nav.PlayerKey
 import com.keyspaceapps.goodtv.ui.nav.SeriesDetailKey
+import com.keyspaceapps.goodtv.domain.DisplayTitle
+import com.keyspaceapps.goodtv.ui.player.PlayerFormats
+import com.keyspaceapps.goodtv.data.progress.WatchProgress
 
 @Composable
 fun SeriesDetailScreen(key: SeriesDetailKey, onPlay: (PlayerKey) -> Unit) {
-    val vm = goodTvViewModel(key = "series-${key.sourceId}-${key.seriesId}") { SeriesDetailViewModel(it.repository, key) }
+    val vm = goodTvViewModel(key = "series-${key.sourceId}-${key.seriesId}") { SeriesDetailViewModel(it.repository, key, it.tmdb, it.watchProgress) }
     val state by vm.state.collectAsState()
+    val tmdb by vm.tmdb.collectAsState()
+    val progress by vm.progress.collectAsState()
 
     when (val s = state) {
         SeriesDetailViewModel.State.Loading -> Centered(stringResource(R.string.player_loading))
         is SeriesDetailViewModel.State.Error -> Centered(s.message)
-        is SeriesDetailViewModel.State.Ready -> SeriesDetailContent(s, onSelectSeason = vm::selectSeason, onPlay = onPlay)
+        is SeriesDetailViewModel.State.Ready -> SeriesDetailContent(s, tmdb, progress, onSelectSeason = vm::selectSeason, onPlay = onPlay)
     }
 }
 
@@ -62,19 +70,40 @@ private fun Centered(text: String) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant) }
 }
 
-fun episodeLine(e: Episode): String = Formats.metaLine(listOf("E${e.number}", e.title, Formats.duration(e.durationSecs)))
+/**
+ * "E3 · Pilot · 45m · Resume from 12:40"; the episode title loses the series name and "S01E03" panels
+ * prefix it with, and [status] (resume point or "Watched") goes last.
+ */
+fun episodeLine(e: Episode, seriesTitle: String, status: String? = null): String =
+    Formats.metaLine(listOf("E${e.number}", DisplayTitle.episodeTitle(e.title, seriesTitle), Formats.duration(e.durationSecs), status))
 
-fun episodePlayerKey(detail: SeriesDetail, e: Episode) = PlayerKey(
+fun episodePlayerKey(detail: SeriesDetail, e: Episode, startPositionMs: Long = 0) = PlayerKey(
     e.sourceId, PlayerKey.KIND_EPISODE, e.id, e.containerExtension,
-    "${detail.series.name} · S${e.season}E${e.number} ${e.title}",
+    DisplayTitle.parse(detail.series.name).let { d ->
+        listOfNotNull(d.label, "S${e.season}E${e.number}", DisplayTitle.episodeTitle(e.title, d.title)).joinToString(" · ")
+    },
+    startPositionMs = startPositionMs,
+    seriesId = detail.series.id,
+    season = e.season,
+    episode = e.number,
 )
 
 @Composable
-private fun SeriesDetailContent(state: SeriesDetailViewModel.State.Ready, onSelectSeason: (Int) -> Unit, onPlay: (PlayerKey) -> Unit) {
+private fun SeriesDetailContent(
+    state: SeriesDetailViewModel.State.Ready,
+    tmdb: TmdbMeta?,
+    progress: List<WatchProgress>?,
+    onSelectSeason: (Int) -> Unit,
+    onPlay: (PlayerKey) -> Unit,
+) {
     val detail = state.detail
+    val display = DisplayTitle.parse(detail.series.name)
     val episodes = state.episodes()
     val firstEpisodeFocus = remember { FocusRequester() }
+    val resumeFocus = remember { FocusRequester() }
     var focusedForSeason by remember { mutableIntStateOf(Int.MIN_VALUE) }
+    val byEpisode = progress.orEmpty().associateBy { it.ref.itemId }
+    val resume = progress?.let { SeriesResumes.of(detail.episodes, it) }
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         detail.backdropUrl?.let {
@@ -87,15 +116,35 @@ private fun SeriesDetailContent(state: SeriesDetailViewModel.State.Ready, onSele
                 }
             }
             Column(Modifier.padding(start = 40.dp).weight(1f)) {
-                Text(detail.series.name, style = MaterialTheme.typography.headlineLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(display.labelWithoutYear, style = MaterialTheme.typography.headlineLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    Formats.metaLine(listOf(Formats.year(detail.releaseDate), detail.genre, Formats.rating(detail.series.rating))),
+                    Formats.metaLine(listOf(Formats.year(detail.releaseDate), detail.genre, detailRating(tmdb, detail.series.rating))),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                (detail.plot ?: detail.series.plot)?.let {
+                (tmdb?.overview ?: detail.plot ?: detail.series.plot)?.let {
                     Spacer(Modifier.height(12.dp))
                     Text(it, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                }
+                TmdbCredit(tmdb)
+                if (resume != null) {
+                    Spacer(Modifier.height(20.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        val e = resume.episode
+                        Button(
+                            onClick = { onPlay(episodePlayerKey(detail, e, resume.startMs)) },
+                            modifier = Modifier.focusRequester(resumeFocus).onPlaced {
+                                // The resume button, not the first episode, takes focus when the page opens.
+                                if (focusedForSeason == Int.MIN_VALUE) { focusedForSeason = state.selectedSeason; resumeFocus.requestFocus() }
+                            },
+                        ) {
+                            Text(
+                                if (resume.resume) stringResource(R.string.resume_episode, e.season, e.number, PlayerFormats.clock(resume.startMs))
+                                else stringResource(R.string.play_episode, e.season, e.number),
+                            )
+                        }
+                        if (resume.resume) Button(onClick = { onPlay(episodePlayerKey(detail, e, 0)) }) { Text(stringResource(R.string.start_over)) }
+                    }
                 }
                 Spacer(Modifier.height(20.dp))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -114,11 +163,12 @@ private fun SeriesDetailContent(state: SeriesDetailViewModel.State.Ready, onSele
                     }
                 }
                 Spacer(Modifier.height(16.dp))
-                LazyColumn(Modifier.fillMaxSize()) {
+                // Wait for progress so each row shows its resume point and focus goes to the right place.
+                if (progress != null) LazyColumn(Modifier.fillMaxSize()) {
                     itemsIndexed(episodes, key = { _, e -> e.id }) { index, e ->
                         val focusModifier = if (index == 0) {
                             Modifier.focusRequester(firstEpisodeFocus).onPlaced {
-                                if (focusedForSeason != state.selectedSeason) {
+                                if (focusedForSeason != state.selectedSeason && !(focusedForSeason == Int.MIN_VALUE && resume != null)) {
                                     focusedForSeason = state.selectedSeason
                                     firstEpisodeFocus.requestFocus()
                                 }
@@ -126,10 +176,17 @@ private fun SeriesDetailContent(state: SeriesDetailViewModel.State.Ready, onSele
                         } else {
                             Modifier
                         }
+                        val saved = byEpisode[e.id]
+                        val status = when {
+                            saved?.resumable == true -> stringResource(R.string.resume_from, PlayerFormats.clock(saved.positionMs))
+                            saved?.finished == true -> stringResource(R.string.watched)
+                            else -> null
+                        }
                         ListItem(
                             selected = false,
-                            onClick = { onPlay(episodePlayerKey(detail, e)) },
-                            headlineContent = { Text(episodeLine(e)) },
+                            // A part-watched episode carries on; anything else starts from the beginning.
+                            onClick = { onPlay(episodePlayerKey(detail, e, saved?.takeIf { it.resumable }?.positionMs ?: 0)) },
+                            headlineContent = { Text(episodeLine(e, display.title, status)) },
                             supportingContent = e.plot?.let { p -> { Text(p, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
                             modifier = focusModifier.padding(vertical = 2.dp),
                         )

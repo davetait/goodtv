@@ -7,6 +7,7 @@ import com.keyspaceapps.goodtv.data.source.SourceRegistry
 import com.keyspaceapps.goodtv.domain.Category
 import com.keyspaceapps.goodtv.domain.CategoryWithSource
 import com.keyspaceapps.goodtv.domain.ContentKind
+import com.keyspaceapps.goodtv.domain.Genre
 import com.keyspaceapps.goodtv.domain.LiveChannel
 import com.keyspaceapps.goodtv.domain.Movie
 import com.keyspaceapps.goodtv.domain.MovieDetail
@@ -38,6 +39,12 @@ class LibraryRepository(
     fun series(sourceId: Long, categoryId: String, limit: Int): Flow<List<Series>> = store.observeSeries(sourceId, categoryId, limit)
     fun moviesByCategory(limitPerCategory: Int): Flow<Map<CategoryKey, List<Movie>>> = store.observeMoviesByCategory(limitPerCategory)
     fun seriesByCategory(limitPerCategory: Int): Flow<Map<CategoryKey, List<Series>>> = store.observeSeriesByCategory(limitPerCategory)
+    fun moviesByGenre(genre: Genre, limit: Int): Flow<List<Movie>> = store.observeMoviesByGenre(genre, limit)
+    fun seriesByGenre(genre: Genre, limit: Int): Flow<List<Series>> = store.observeSeriesByGenre(genre, limit)
+    fun genreCounts(kind: ContentKind): Flow<Map<Genre, Int>> = store.observeGenreCounts(kind)
+    fun searchLive(query: String, limit: Int): Flow<List<LiveChannel>> = store.searchLive(query, limit)
+    fun searchMovies(query: String, limit: Int): Flow<List<Movie>> = store.searchMovies(query, limit)
+    fun searchSeries(query: String, limit: Int): Flow<List<Series>> = store.searchSeries(query, limit)
     fun allCategories(sourceId: Long, kind: ContentKind): Flow<List<Category>> = store.observeAllCategories(sourceId, kind)
     fun hiddenCategories(sourceId: Long): Flow<Set<Pair<ContentKind, String>>> = store.observeHiddenCategories(sourceId)
     fun hiddenCount(kind: ContentKind): Flow<Int> = store.observeHiddenCount(kind)
@@ -69,6 +76,10 @@ class LibraryRepository(
         sync.cancel(id) // otherwise the in-flight refresh would insert rows for a deleted source
         store.deleteSource(id)
     }
+
+    /** The synced catalog row (carries the provider's TMDB id, which the detail call does not). */
+    suspend fun catalogMovie(sourceId: Long, movieId: String): Movie? = store.getMovie(sourceId, movieId)
+    suspend fun catalogSeries(sourceId: Long, seriesId: String): Series? = store.getSeries(sourceId, seriesId)
 
     suspend fun movieDetail(sourceId: Long, movieId: String): Result<MovieDetail> {
         store.getMovieDetail(sourceId, movieId)?.let { return Result.success(it) }

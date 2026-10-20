@@ -32,12 +32,12 @@ internal fun CategoryRow.toDomain() = CategoryWithSource(Category(sourceId, Cont
 internal fun CategoryEntity.toDomain() = Category(sourceId, ContentKind.valueOf(kind), id, name)
 
 internal fun Category.toEntity() = CategoryEntity(sourceId, kind.name, id, name)
-internal fun LiveChannel.toEntity() = LiveChannelEntity(sourceId, id, categoryId, name, logoUrl, number)
-internal fun LiveChannelEntity.toDomain() = LiveChannel(sourceId, id, categoryId, name, logoUrl, number)
-internal fun Movie.toEntity() = MovieEntity(sourceId, id, categoryId, name, posterUrl, containerExtension, rating, addedAt)
-internal fun MovieEntity.toDomain() = Movie(sourceId, id, categoryId, name, posterUrl, containerExtension, rating, addedAt)
-internal fun Series.toEntity() = SeriesEntity(sourceId, id, categoryId, name, coverUrl, plot, rating)
-internal fun SeriesEntity.toDomain() = Series(sourceId, id, categoryId, name, coverUrl, plot, rating)
+internal fun LiveChannel.toEntity() = LiveChannelEntity(sourceId, id, categoryId, name, logoUrl, number, title, language, quality)
+internal fun LiveChannelEntity.toDomain() = LiveChannel(sourceId, id, categoryId, name, logoUrl, number, title ?: name, language, quality)
+internal fun Movie.toEntity() = MovieEntity(sourceId, id, categoryId, name, posterUrl, containerExtension, rating, addedAt, tmdbId, title, language, quality)
+internal fun MovieEntity.toDomain() = Movie(sourceId, id, categoryId, name, posterUrl, containerExtension, rating, addedAt, tmdbId, title ?: name, language, quality)
+internal fun Series.toEntity() = SeriesEntity(sourceId, id, categoryId, name, coverUrl, plot, rating, tmdbId, title, language, quality)
+internal fun SeriesEntity.toDomain() = Series(sourceId, id, categoryId, name, coverUrl, plot, rating, tmdbId, title = title ?: name, language = language, quality = quality)
 
 internal fun MovieDetail.toEntity() = MovieDetailEntity(
     movie.sourceId, movie.id, movie.categoryId, movie.name, movie.posterUrl, movie.containerExtension, movie.rating, movie.addedAt,

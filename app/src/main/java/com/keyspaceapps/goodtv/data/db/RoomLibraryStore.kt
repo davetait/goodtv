@@ -7,6 +7,7 @@ import com.keyspaceapps.goodtv.domain.Catalog
 import com.keyspaceapps.goodtv.domain.Category
 import com.keyspaceapps.goodtv.domain.CategoryWithSource
 import com.keyspaceapps.goodtv.domain.ContentKind
+import com.keyspaceapps.goodtv.domain.Genre
 import com.keyspaceapps.goodtv.domain.LiveChannel
 import com.keyspaceapps.goodtv.domain.Movie
 import com.keyspaceapps.goodtv.domain.MovieDetail
@@ -16,6 +17,7 @@ import com.keyspaceapps.goodtv.domain.SourceRecord
 import com.keyspaceapps.goodtv.domain.SourceSummary
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
 
@@ -27,6 +29,7 @@ class RoomLibraryStore(
     private val sources get() = db.sources()
     private val library get() = db.library()
     private val hidden get() = db.hidden()
+    private val genres get() = db.genres()
 
     override fun observeSources(): Flow<List<SourceRecord>> = sources.observeAll().map { list -> list.map { it.toRecord(json) } }
     override suspend fun getSources(): List<SourceRecord> = sources.getAll().map { it.toRecord(json) }
@@ -55,6 +58,8 @@ class RoomLibraryStore(
         library.insertLive(catalog.live.map { it.toEntity() })
         library.insertMovies(catalog.movies.map { it.toEntity() })
         library.insertSeries(catalog.series.map { it.toEntity() })
+        genres.deleteSeriesGenres(sourceId)
+        genres.insertSeriesGenres(catalog.series.flatMap { s -> s.genres.map { SeriesGenreEntity(sourceId, s.id, it.name) } })
         // Prune hidden rows for categories that are gone, but only for kinds the panel actually
         // listed this time: an empty list on a bad day must not wipe the user's choices.
         ContentKind.entries
@@ -87,6 +92,28 @@ class RoomLibraryStore(
         library.observeEnabledSeries()
             .map { rows -> rows.groupBy { CategoryKey(it.sourceId, it.categoryId!!) }.mapValues { (_, v) -> v.take(limitPerCategory).map { it.toDomain() } } }
             .distinctUntilChanged()
+
+    override fun searchLive(query: String, limit: Int): Flow<List<LiveChannel>> =
+        library.searchLive(escapeLike(query), limit).map { rows -> rows.map { it.toDomain() } }
+
+    override fun searchMovies(query: String, limit: Int): Flow<List<Movie>> =
+        library.searchMovies(escapeLike(query), limit).map { rows -> rows.map { it.toDomain() } }
+
+    override fun searchSeries(query: String, limit: Int): Flow<List<Series>> =
+        library.searchSeries(escapeLike(query), limit).map { rows -> rows.map { it.toDomain() } }
+
+    override fun observeMoviesByGenre(genre: Genre, limit: Int): Flow<List<Movie>> =
+        genres.observeMovies(genre.name, limit).map { rows -> rows.map { it.toDomain() } }
+
+    override fun observeSeriesByGenre(genre: Genre, limit: Int): Flow<List<Series>> =
+        genres.observeSeries(genre.name, limit).map { rows -> rows.map { it.toDomain() } }
+
+    override fun observeGenreCounts(kind: ContentKind): Flow<Map<Genre, Int>> =
+        when (kind) {
+            ContentKind.MOVIE -> genres.observeMovieCounts()
+            ContentKind.SERIES -> genres.observeSeriesCounts()
+            ContentKind.LIVE -> flowOf(emptyList())
+        }.map { rows -> rows.mapNotNull { r -> Genre.entries.firstOrNull { it.name == r.genre }?.let { it to r.count } }.toMap() }
 
     override fun observeAllCategories(sourceId: Long, kind: ContentKind): Flow<List<Category>> =
         library.observeAllCategories(sourceId, kind.name).map { rows -> rows.map { it.toDomain() } }
@@ -123,3 +150,7 @@ class RoomLibraryStore(
         library.insertEpisodes(detail.episodes.map { it.toEntity() })
     }
 }
+
+/** Escapes LIKE wildcards so a query such as "100%" matches literally (paired with `ESCAPE '\'`). */
+internal fun escapeLike(query: String): String =
+    query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")

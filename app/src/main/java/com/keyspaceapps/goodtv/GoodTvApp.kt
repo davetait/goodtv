@@ -12,6 +12,7 @@ class GoodTvApp : Application() {
     override fun onCreate() {
         super.onCreate()
         graph = AppGraph(this)
+        graph.startGenreFillAfterSyncs()
         graph.appScope.launch {
             graph.repository.ensureDebugSource(
                 DebugSource.fromBuildConfig(BuildConfig.XTREAM_SERVER, BuildConfig.XTREAM_USERNAME, BuildConfig.XTREAM_PASSWORD, skipDebugSource),
@@ -23,6 +24,8 @@ class GoodTvApp : Application() {
         /** Set by the instrumented test runner before the Application is created. */
         @JvmStatic
         var skipDebugSource: Boolean = false
+        /** Set by the instrumented test runner so tests never reach the real TMDB API. */
+        @Volatile var disableTmdb: Boolean = false
     }
 }
 

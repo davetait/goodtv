@@ -87,7 +87,7 @@ class SourcesFlowTest {
             composeRule.onRoot(useUnmergedTree = true).printToLog("GoodTvTree")
             throw e
         }
-        composeRule.onNodeWithText("Nickname").performTextInput("Home")
+        composeRule.onNodeWithText("Nickname").performTextInput("Living Room")
         composeRule.onNodeWithText("Server URL").performTextInput(server.url("/").toString().trimEnd('/'))
         composeRule.onNodeWithText("Username").performTextInput("u")
         composeRule.onNodeWithText("Password").performTextInput("p")
@@ -106,7 +106,7 @@ class SourcesFlowTest {
             composeRule.onRoot(useUnmergedTree = true).printToLog("GoodTvTree")
             throw e
         }
-        composeRule.onNodeWithText("Home").assertIsDisplayed()
+        composeRule.onNodeWithText("Living Room").assertIsDisplayed()
 
         composeRule.onNodeWithText("Live").tvClick()
         composeRule.waitUntil(10_000) { composeRule.onAllNodes(hasText("Sports")).fetchSemanticsNodes().isNotEmpty() }

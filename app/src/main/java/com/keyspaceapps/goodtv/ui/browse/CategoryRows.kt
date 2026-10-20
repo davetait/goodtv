@@ -18,10 +18,14 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.keyspaceapps.goodtv.R
 import com.keyspaceapps.goodtv.domain.CategoryWithSource
+import com.keyspaceapps.goodtv.ui.tmdb.POSTER_SETTLE_MS
+import com.keyspaceapps.goodtv.ui.tmdb.rememberTmdbMeta
+import com.keyspaceapps.goodtv.ui.tmdb.tmdbKind
 
 const val ROW_LIMIT = 30
 
-data class RowItem(val sourceId: Long, val id: String, val title: String, val imageUrl: String?)
+/** One poster. [title] is the clean label shown; [lookupName] the raw catalog name TMDB matching works from. */
+data class RowItem(val sourceId: Long, val id: String, val title: String, val imageUrl: String?, val tmdbId: Long? = null, val lookupName: String = title)
 
 data class CategoryRow(val category: CategoryWithSource, val items: List<RowItem>, val hasMore: Boolean)
 
@@ -59,8 +63,9 @@ fun CategoryRows(
                 ) {
                     itemsIndexed(row.items, key = { _, it -> it.id }) { _, item ->
                         val key = "${rowKey(row)}:${item.id}"
+                        val tmdb = rememberTmdbMeta(row.category.category.kind.tmdbKind(), item.tmdbId, item.lookupName, POSTER_SETTLE_MS)
                         PosterCard(
-                            title = item.title, imageUrl = item.imageUrl, onClick = { onItem(row, item) },
+                            title = item.title, imageUrl = item.imageUrl, onClick = { onItem(row, item) }, rating = tmdb?.reliableRating,
                             modifier = Modifier.rememberedFocus(focus, key, isTarget = key == target, requested = requested),
                         )
                     }

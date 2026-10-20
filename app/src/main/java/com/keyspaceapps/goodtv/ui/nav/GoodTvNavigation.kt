@@ -27,6 +27,7 @@ import com.keyspaceapps.goodtv.ui.movies.MovieDetailScreen
 import com.keyspaceapps.goodtv.ui.series.SeriesDetailScreen
 import com.keyspaceapps.goodtv.ui.player.PlayerScreen
 import com.keyspaceapps.goodtv.ui.sources.EditSourceScreen
+import kotlinx.coroutines.launch
 
 @Composable
 fun GoodTvNavigation() {
@@ -52,7 +53,14 @@ fun GoodTvNavigation() {
                 if (current == null) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Loading…") }
                 } else {
-                    PlayerScreen(item = current, onBack = pop)
+                    val ref = key.watchRef()
+                    PlayerScreen(
+                        item = current,
+                        onBack = pop,
+                        startPositionMs = key.startPositionMs,
+                        // App scope, so the save on leaving the player outlives the player screen.
+                        onProgress = ref?.let { r -> { pos, dur -> graph.appScope.launch { graph.watchProgress.record(r, pos, dur, key.playbackInfo()) } } },
+                    )
                 }
             }
             entry<MovieDetailKey> { key -> MovieDetailScreen(key = key, onPlay = { backStack.add(it) }) }

@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -42,7 +41,7 @@ class HomeViewModel(private val repo: LibraryRepository, private val settings: A
         viewModelScope.launch {
             val count = repo.enabledSourceCount().first()
             val last = settings.lastTab.first()?.let { name -> HomeTab.entries.firstOrNull { it.name == name } }
-            _tab.value = if (count == 0) HomeTab.SOURCES else last ?: HomeTab.LIVE
+            _tab.value = if (count == 0) HomeTab.SOURCES else last ?: HomeTab.HOME
         }
     }
 
@@ -83,6 +82,7 @@ fun HomeScreen(onNavigate: (GoodTvKey) -> Unit) {
         }
         Box(Modifier.fillMaxSize()) {
             when (current) {
+                HomeTab.HOME -> HomeTabScreen(onNavigate = onNavigate)
                 HomeTab.LIVE -> LiveScreen(onPlay = onNavigate)
                 HomeTab.MOVIES -> MoviesScreen(onMovie = onNavigate, onSeeAll = onNavigate)
                 HomeTab.SERIES -> SeriesScreen(onSeries = onNavigate, onSeeAll = onNavigate)
@@ -94,15 +94,10 @@ fun HomeScreen(onNavigate: (GoodTvKey) -> Unit) {
 
 private val HomeTab.labelRes: Int
     get() = when (this) {
+        HomeTab.HOME -> R.string.tab_home
         HomeTab.LIVE -> R.string.tab_live
         HomeTab.MOVIES -> R.string.tab_movies
         HomeTab.SERIES -> R.string.tab_series
         HomeTab.SOURCES -> R.string.tab_sources
     }
 
-@Composable
-private fun Placeholder(text: String) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}

@@ -1,0 +1,124 @@
+package com.keyspaceapps.goodtv.data.tmdb
+
+import kotlinx.coroutines.test.runTest
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
+import okhttp3.Headers
+import okhttp3.OkHttpClient
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
+import org.junit.Before
+import org.junit.Test
+
+class TmdbApiTest {
+    private val server = MockWebServer()
+    private val sleeps = mutableListOf<Long>()
+
+    private fun fixture(name: String) = javaClass.getResource("/tmdb/$name")!!.readText()
+    private fun ok(body: String) = MockResponse(code = 200, body = body)
+    private fun api(credential: TmdbCredential = TmdbCredential.ApiKey("k3y"), maxAttempts: Int = 3) =
+        TmdbApi(OkHttpClient(), credential, baseUrl = server.url("/3/"), maxAttempts = maxAttempts, sleep = { sleeps += it })
+
+    private suspend fun expectFailure(reason: TmdbException.Reason, block: suspend () -> Unit) {
+        try { block(); fail("expected $reason") } catch (e: TmdbException) { assertEquals(reason, e.reason) }
+    }
+
+    @Before fun setUp() = server.start()
+    @After fun tearDown() = server.close()
+
+    @Test fun credentialKindIsDetectedAndNeverPrinted() {
+        assertNull(TmdbCredential.from("  "))
+        assertTrue(TmdbCredential.from("0123456789abcdef0123456789abcdef") is TmdbCredential.ApiKey)
+        val jwt = TmdbCredential.from("eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJ4In0.c2lnbmF0dXJl")
+        assertTrue(jwt is TmdbCredential.Bearer)
+        assertEquals("Bearer(***)", jwt.toString())
+        assertEquals("ApiKey(***)", TmdbCredential.ApiKey("secret").toString())
+    }
+
+    @Test fun apiKeyGoesInTheQueryWithLanguage() = runTest {
+        server.enqueue(ok(fixture("movie_603.json")))
+        val m = api().movie(603, "de-DE")!!
+        val req = server.takeRequest()
+        assertEquals("/3/movie/603", req.url.encodedPath)
+        assertEquals("k3y", req.url.queryParameter("api_key"))
+        assertEquals("de-DE", req.url.queryParameter("language"))
+        assertNull(req.headers["Authorization"])
+        assertEquals("The Matrix", m.title)
+        assertEquals(8.2, m.vote_average!!, 0.0)
+        assertEquals(listOf("Action", "Science Fiction"), m.genres.map { it.name })
+        assertEquals(136, m.runtime)
+    }
+
+    @Test fun readAccessTokenGoesInTheAuthorizationHeader() = runTest {
+        server.enqueue(ok(fixture("tv_1399.json")))
+        val t = api(TmdbCredential.Bearer("eyJ.a.b")).tv(1399, "en-US")!!
+        val req = server.takeRequest()
+        assertEquals("Bearer eyJ.a.b", req.headers["Authorization"])
+        assertNull(req.url.queryParameter("api_key"))
+        assertEquals("Game of Thrones", t.name)
+        assertEquals(emptyList<Int>(), t.episode_run_time)
+    }
+
+    @Test fun searchSendsQueryAndYearAndToleratesNullsAndEmptyDates() = runTest {
+        server.enqueue(ok(fixture("search_movie_matrix.json")))
+        val results = api().searchMovie("The Matrix", 1999, "en-US")
+        val req = server.takeRequest()
+        assertEquals("/3/search/movie", req.url.encodedPath)
+        assertEquals("The Matrix", req.url.queryParameter("query"))
+        assertEquals("1999", req.url.queryParameter("year"))
+        assertEquals("false", req.url.queryParameter("include_adult"))
+        assertEquals(listOf(684731L, 603L), results.map { it.id })
+        assertNull(results[0].release_date.tmdbYear())
+        assertEquals(1999, results[1].release_date.tmdbYear())
+    }
+
+    @Test fun tvSearchUsesFirstAirDateYear() = runTest {
+        server.enqueue(ok("""{"page":1,"results":[{"id":1399,"name":"Game of Thrones","first_air_date":"2011-04-17"}]}"""))
+        api().searchTv("Game of Thrones", 2011, "en-US")
+        val req = server.takeRequest()
+        assertEquals("/3/search/tv", req.url.encodedPath)
+        assertEquals("2011", req.url.queryParameter("first_air_date_year"))
+        assertNull(req.url.queryParameter("year"))
+    }
+
+    @Test fun unknownIdIsNull() = runTest {
+        server.enqueue(MockResponse(code = 404, body = """{"success":false,"status_code":34}"""))
+        assertNull(api().movie(1, "en-US"))
+    }
+
+    @Test fun badKeyIsAnAuthError() = runTest {
+        server.enqueue(MockResponse(code = 401, body = """{"success":false,"status_code":7}"""))
+        expectFailure(TmdbException.Reason.AUTH) { api().movie(1, "en-US") }
+    }
+
+    @Test fun rateLimitIsRetriedAfterRetryAfter() = runTest {
+        server.enqueue(MockResponse(code = 429, headers = Headers.headersOf("Retry-After", "2")))
+        server.enqueue(MockResponse(code = 429))
+        server.enqueue(ok(fixture("movie_603.json")))
+        assertEquals(603L, api().movie(603, "en-US")!!.id)
+        assertEquals(listOf(2_000L, 2_000L), sleeps)
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test fun rateLimitGivesUpAfterMaxAttempts() = runTest {
+        repeat(2) { server.enqueue(MockResponse(code = 429)) }
+        expectFailure(TmdbException.Reason.RATE_LIMITED) { api(maxAttempts = 2).movie(603, "en-US") }
+        assertEquals(listOf(1_000L), sleeps)
+    }
+
+    @Test fun serverErrorAndGarbageAreReported() = runTest {
+        server.enqueue(MockResponse(code = 503))
+        expectFailure(TmdbException.Reason.SERVER) { api().movie(1, "en-US") }
+        server.enqueue(ok("<html>oops</html>"))
+        expectFailure(TmdbException.Reason.BAD_RESPONSE) { api().movie(1, "en-US") }
+    }
+
+    @Test fun unreachableIsANetworkError() = runTest {
+        val dead = api()
+        server.close()
+        expectFailure(TmdbException.Reason.NETWORK) { dead.movie(1, "en-US") }
+    }
+}

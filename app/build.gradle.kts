@@ -30,6 +30,8 @@ android {
         buildConfigField("String", "XTREAM_SERVER", "\"${localProp("GOODTV_XTREAM_SERVER")}\"")
         buildConfigField("String", "XTREAM_USERNAME", "\"${localProp("GOODTV_XTREAM_USERNAME")}\"")
         buildConfigField("String", "XTREAM_PASSWORD", "\"${localProp("GOODTV_XTREAM_PASSWORD")}\"")
+        // TMDB credential (v3 API key or read access token), all build types; blank turns TMDB off.
+        buildConfigField("String", "TMDB_API_KEY", "\"${localProp("GOODTV_TMDB_API_KEY")}\"")
     }
 
     buildTypes {
@@ -61,6 +63,15 @@ android {
 
     // Exported Room schemas feed the migration test.
     sourceSets.getByName("androidTest").assets.srcDirs("$projectDir/schemas")
+
+    // TmdbLiveTest calls the real TMDB API; it only runs with -PtmdbLive (and a key in local.properties).
+    testOptions.unitTests.all { test ->
+        if (project.hasProperty("tmdbLive")) {
+            test.systemProperty("goodtv.tmdbLiveKey", localProp("GOODTV_TMDB_API_KEY"))
+            (project.findProperty("tmdbSample") as String?)?.let { test.systemProperty("goodtv.tmdbSample", it) }
+            test.outputs.upToDateWhen { false }
+        }
+    }
 }
 
 ksp {

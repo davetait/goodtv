@@ -19,24 +19,109 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
     }
 }
 
+/** v2 → v3: TMDB ids on movies and series, plus the TMDB metadata cache. DDL matches schemas/3.json. */
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `movies` ADD COLUMN `tmdbId` INTEGER")
+        db.execSQL("ALTER TABLE `series` ADD COLUMN `tmdbId` INTEGER")
+        // Existing rows have no ids until the next sync; mark sources stale so the next launch fetches them.
+        db.execSQL("UPDATE `sources` SET `lastSyncAt` = NULL")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `tmdb_meta` (`kind` TEXT NOT NULL, `tmdbId` INTEGER NOT NULL, `language` TEXT NOT NULL, " +
+                "`title` TEXT NOT NULL, `overview` TEXT, `rating` REAL, `voteCount` INTEGER NOT NULL, `year` INTEGER, " +
+                "`genres` TEXT NOT NULL, `runtimeMinutes` INTEGER, `posterUrl` TEXT, `backdropUrl` TEXT, " +
+                "`fetchedAt` INTEGER NOT NULL, PRIMARY KEY(`kind`, `tmdbId`))",
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `tmdb_title_match` (`kind` TEXT NOT NULL, `queryKey` TEXT NOT NULL, " +
+                "`tmdbId` INTEGER, `fetchedAt` INTEGER NOT NULL, PRIMARY KEY(`kind`, `queryKey`))",
+        )
+    }
+}
+
+/** v3 → v4: genre tables (series from the panel, movies from TMDB). DDL matches schemas/4.json. */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_movies_tmdbId` ON `movies` (`tmdbId`)")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `series_genres` (`sourceId` INTEGER NOT NULL, `seriesId` TEXT NOT NULL, `genre` TEXT NOT NULL, " +
+                "PRIMARY KEY(`sourceId`, `seriesId`, `genre`), " +
+                "FOREIGN KEY(`sourceId`) REFERENCES `sources`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_series_genres_genre` ON `series_genres` (`genre`)")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `tmdb_genres` (`kind` TEXT NOT NULL, `tmdbId` INTEGER NOT NULL, `genre` TEXT NOT NULL, " +
+                "PRIMARY KEY(`kind`, `tmdbId`, `genre`))",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_tmdb_genres_kind_genre` ON `tmdb_genres` (`kind`, `genre`)")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `tmdb_genre_status` (`kind` TEXT NOT NULL, `tmdbId` INTEGER NOT NULL, `fetchedAt` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`kind`, `tmdbId`))",
+        )
+        // Series genres are filled at sync; mark sources stale so the next launch fills them for existing libraries.
+        db.execSQL("UPDATE `sources` SET `lastSyncAt` = NULL")
+    }
+}
+
+/** v4 → v5: clean display titles (title, language, quality) on channels, movies and series. */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        for (table in listOf("live_channels", "movies", "series")) {
+            db.execSQL("ALTER TABLE `$table` ADD COLUMN `title` TEXT")
+            db.execSQL("ALTER TABLE `$table` ADD COLUMN `language` TEXT")
+            db.execSQL("ALTER TABLE `$table` ADD COLUMN `quality` TEXT")
+        }
+        // Titles are computed at sync; until the next one, lists fall back to the raw name.
+        db.execSQL("UPDATE `sources` SET `lastSyncAt` = NULL")
+    }
+}
+
+/** v5 → v6: watch progress for resume. DDL matches schemas/6.json. */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `watch_progress` (`sourceId` INTEGER NOT NULL, `kind` TEXT NOT NULL, `itemId` TEXT NOT NULL, " +
+                "`seriesId` TEXT, `positionMs` INTEGER NOT NULL, `durationMs` INTEGER NOT NULL, `finished` INTEGER NOT NULL, " +
+                "`updatedAt` INTEGER NOT NULL, PRIMARY KEY(`sourceId`, `kind`, `itemId`), " +
+                "FOREIGN KEY(`sourceId`) REFERENCES `sources`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_watch_progress_sourceId_seriesId` ON `watch_progress` (`sourceId`, `seriesId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_watch_progress_updatedAt` ON `watch_progress` (`updatedAt`)")
+    }
+}
+
+/** v6 → v7: playback details on watch progress, so Continue Watching can resume without the detail page. */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `watch_progress` ADD COLUMN `title` TEXT")
+        db.execSQL("ALTER TABLE `watch_progress` ADD COLUMN `ext` TEXT")
+        db.execSQL("ALTER TABLE `watch_progress` ADD COLUMN `season` INTEGER")
+        db.execSQL("ALTER TABLE `watch_progress` ADD COLUMN `episode` INTEGER")
+    }
+}
+
 @Database(
     entities = [
         SourceEntity::class, CategoryEntity::class, LiveChannelEntity::class, MovieEntity::class, SeriesEntity::class,
         MovieDetailEntity::class, SeriesInfoEntity::class, SeasonEntity::class, EpisodeEntity::class,
-        HiddenCategoryEntity::class,
+        HiddenCategoryEntity::class, TmdbMetaEntity::class, TmdbTitleMatchEntity::class,
+        SeriesGenreEntity::class, TmdbGenreEntity::class, TmdbGenreStatusEntity::class, WatchProgressEntity::class,
     ],
-    version = 2,
+    version = 7,
     exportSchema = true, // schemas/ holds the baseline every future migration is written against
 )
 abstract class GoodTvDatabase : RoomDatabase() {
     abstract fun sources(): SourceDao
     abstract fun library(): LibraryDao
     abstract fun hidden(): HiddenCategoryDao
+    abstract fun tmdb(): TmdbDao
+    abstract fun genres(): GenreDao
+    abstract fun watchProgress(): WatchProgressDao
 
     companion object {
         fun create(context: Context): GoodTvDatabase =
             Room.databaseBuilder(context, GoodTvDatabase::class.java, "goodtv.db")
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 .fallbackToDestructiveMigration(dropAllTables = true) // last resort for an unknown version only
                 .build()
     }

@@ -31,6 +31,7 @@ import com.keyspaceapps.goodtv.ui.browse.rememberedFocus
 import com.keyspaceapps.goodtv.ui.browse.targetIn
 import com.keyspaceapps.goodtv.ui.goodTvViewModel
 import com.keyspaceapps.goodtv.ui.nav.PlayerKey
+import com.keyspaceapps.goodtv.domain.label
 
 /**
  * Live TV: category sidebar on the left (selection follows focus), channels of the selected
@@ -73,8 +74,8 @@ fun LiveScreen(onPlay: (PlayerKey) -> Unit) {
                 val focusModifier = Modifier.rememberedFocus(vm.focus, ch.id, isTarget = ch.id == target, requested = requested)
                 ListItem(
                     selected = false,
-                    onClick = { onPlay(PlayerKey(ch.sourceId, PlayerKey.KIND_LIVE, ch.id, null, ch.name)) },
-                    headlineContent = { Text(ch.name) },
+                    onClick = { onPlay(PlayerKey(ch.sourceId, PlayerKey.KIND_LIVE, ch.id, null, ch.label)) },
+                    headlineContent = { Text(ch.label) },
                     supportingContent = ch.number?.let { n -> { Text(n.toString()) } },
                     leadingContent = {
                         Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
