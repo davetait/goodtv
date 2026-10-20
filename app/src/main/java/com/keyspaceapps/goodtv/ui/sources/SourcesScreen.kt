@@ -30,6 +30,7 @@ import com.keyspaceapps.goodtv.R
 import com.keyspaceapps.goodtv.data.repo.SyncState
 import com.keyspaceapps.goodtv.domain.SourceSummary
 import com.keyspaceapps.goodtv.ui.goodTvViewModel
+import com.keyspaceapps.goodtv.ui.nav.CategoriesKey
 import com.keyspaceapps.goodtv.ui.nav.EditSourceKey
 import com.keyspaceapps.goodtv.ui.nav.GoodTvKey
 
@@ -64,6 +65,7 @@ fun SourcesScreen(onNavigate: (GoodTvKey) -> Unit) {
                     syncing = (syncState as? SyncState.Syncing)?.sourceIds?.contains(source.id) == true,
                     onRefresh = { vm.refresh(source.id) },
                     onEdit = { onNavigate(EditSourceKey(source.id)) },
+                    onCategories = { onNavigate(CategoriesKey(source.id)) },
                     onRemove = { vm.remove(source.id) },
                 )
             }
@@ -72,7 +74,7 @@ fun SourcesScreen(onNavigate: (GoodTvKey) -> Unit) {
 }
 
 @Composable
-private fun SourceRow(source: SourceSummary, syncing: Boolean, onRefresh: () -> Unit, onEdit: () -> Unit, onRemove: () -> Unit) {
+private fun SourceRow(source: SourceSummary, syncing: Boolean, onRefresh: () -> Unit, onEdit: () -> Unit, onCategories: () -> Unit, onRemove: () -> Unit) {
     var confirming by remember(source.id) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
         Text(source.nickname, style = MaterialTheme.typography.titleLarge)
@@ -86,6 +88,7 @@ private fun SourceRow(source: SourceSummary, syncing: Boolean, onRefresh: () -> 
             } else {
                 Button(onClick = onRefresh) { Text(stringResource(R.string.refresh)) }
                 Button(onClick = onEdit) { Text(stringResource(R.string.edit)) }
+                Button(onClick = onCategories) { Text(stringResource(R.string.categories)) }
                 Button(onClick = { confirming = true }) { Text(stringResource(R.string.remove)) }
             }
         }
@@ -100,5 +103,6 @@ private fun statusLine(s: SourceSummary, syncing: Boolean): String {
         s.lastSyncAt == null -> "not synced yet"
         else -> "synced " + DateUtils.getRelativeTimeSpanString(s.lastSyncAt, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS)
     }
-    return "$counts · $state"
+    val hidden = if (s.hiddenCount > 0) " · ${s.hiddenCount} categories hidden" else ""
+    return "$counts · $state$hidden"
 }

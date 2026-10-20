@@ -21,6 +21,7 @@ import com.keyspaceapps.goodtv.appGraph
 import com.keyspaceapps.goodtv.domain.PlayableItem
 import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.ui.browse.CategoryGridScreen
+import com.keyspaceapps.goodtv.ui.categories.CategoriesScreen
 import com.keyspaceapps.goodtv.ui.home.HomeScreen
 import com.keyspaceapps.goodtv.ui.movies.MovieDetailScreen
 import com.keyspaceapps.goodtv.ui.series.SeriesDetailScreen
@@ -42,6 +43,7 @@ fun GoodTvNavigation() {
         entryProvider = entryProvider {
             entry<HomeKey> { HomeScreen(onNavigate = { backStack.add(it) }) }
             entry<EditSourceKey> { key -> EditSourceScreen(sourceId = key.sourceId, onDone = pop) }
+            entry<CategoriesKey> { key -> CategoriesScreen(key = key) }
             entry<PlayerKey> { key ->
                 val graph = LocalContext.current.appGraph()
                 var item by remember(key) { mutableStateOf<PlayableItem?>(null) }

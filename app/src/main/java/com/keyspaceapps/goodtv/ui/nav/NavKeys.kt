@@ -38,4 +38,7 @@ data class CategoryGridKey(val sourceId: Long, val kind: ContentKind, val catego
 @Serializable
 data class EditSourceKey(val sourceId: Long?) : GoodTvKey
 
+@Serializable
+data class CategoriesKey(val sourceId: Long) : GoodTvKey
+
 enum class HomeTab { LIVE, MOVIES, SERIES, SOURCES }
