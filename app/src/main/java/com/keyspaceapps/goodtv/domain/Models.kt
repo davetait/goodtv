@@ -116,6 +116,7 @@ data class SourceSummary(
     val seriesCount: Int,
     val lastSyncAt: Long?,
     val lastError: String?,
+    val hiddenCount: Int = 0,
 )
 
 data class CategoryWithSource(val category: Category, val sourceNickname: String)

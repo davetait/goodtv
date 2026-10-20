@@ -58,6 +58,9 @@ android {
         compose = true
         buildConfig = true
     }
+
+    // Exported Room schemas feed the migration test.
+    sourceSets.getByName("androidTest").assets.srcDirs("$projectDir/schemas")
 }
 
 ksp {
@@ -108,5 +111,6 @@ dependencies {
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.okhttp.mockwebserver3)
+    androidTestImplementation(libs.androidx.room.testing)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

@@ -103,10 +103,19 @@ data class EpisodeEntity(
     val containerExtension: String, val durationSecs: Int?, val plot: String?, val imageUrl: String?,
 )
 
+/** Only switched-off categories are stored; "everything shown" is the empty table. FK to sources only. */
+@Entity(
+    tableName = "hidden_categories",
+    primaryKeys = ["sourceId", "kind", "categoryId"],
+    foreignKeys = [ForeignKey(entity = SourceEntity::class, parentColumns = ["id"], childColumns = ["sourceId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("sourceId")],
+)
+data class HiddenCategoryEntity(val sourceId: Long, val kind: String, val categoryId: String)
+
 /** Query projections. */
 data class SummaryRow(
     val id: Long, val nickname: String, val type: String, val lastSyncAt: Long?, val lastError: String?,
-    val liveCount: Int, val movieCount: Int, val seriesCount: Int,
+    val liveCount: Int, val movieCount: Int, val seriesCount: Int, val hiddenCount: Int,
 )
 
 data class CategoryRow(val sourceId: Long, val kind: String, val id: String, val name: String, val sourceNickname: String)

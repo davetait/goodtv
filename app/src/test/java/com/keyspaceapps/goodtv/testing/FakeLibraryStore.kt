@@ -3,6 +3,7 @@ package com.keyspaceapps.goodtv.testing
 import com.keyspaceapps.goodtv.data.repo.CategoryKey
 import com.keyspaceapps.goodtv.data.repo.LibraryStore
 import com.keyspaceapps.goodtv.domain.Catalog
+import com.keyspaceapps.goodtv.domain.Category
 import com.keyspaceapps.goodtv.domain.CategoryWithSource
 import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.domain.LiveChannel
@@ -24,6 +25,7 @@ class FakeLibraryStore : LibraryStore {
     private val movieDetails = mutableMapOf<Pair<Long, String>, MovieDetail>()
     private val seriesDetails = mutableMapOf<Pair<Long, String>, SeriesDetail>()
     private var nextId = 1L
+    val hidden = MutableStateFlow<Set<Triple<Long, ContentKind, String>>>(emptySet())
     /** When set, replaceCatalog throws it (simulates a DB failure or a cascade-deleted source). */
     var replaceCatalogError: Throwable? = null
 
@@ -60,14 +62,27 @@ class FakeLibraryStore : LibraryStore {
     override fun observeSummaries(): Flow<List<SourceSummary>> = combine(sources, catalogs) { s, c ->
         s.map { r ->
             val cat = c[r.id]
-            SourceSummary(r.id, r.nickname, r.type, cat?.live?.size ?: 0, cat?.movies?.size ?: 0, cat?.series?.size ?: 0, r.lastSyncAt, r.lastError)
+            SourceSummary(r.id, r.nickname, r.type, cat?.live?.size ?: 0, cat?.movies?.size ?: 0, cat?.series?.size ?: 0, r.lastSyncAt, r.lastError, hidden.value.count { it.first == r.id })
         }
     }
 
-    override fun observeCategories(kind: ContentKind): Flow<List<CategoryWithSource>> = combine(sources, catalogs) { s, c ->
+    private fun isHidden(c: Category) = hidden.value.contains(Triple(c.sourceId, c.kind, c.id))
+
+    override fun observeCategories(kind: ContentKind): Flow<List<CategoryWithSource>> = combine(sources, catalogs, hidden) { s, c, _ ->
         s.filter { it.enabled }.flatMap { r ->
-            (c[r.id]?.categories ?: emptyList()).filter { it.kind == kind }.map { CategoryWithSource(it, r.nickname) }
+            (c[r.id]?.categories ?: emptyList()).filter { it.kind == kind && !isHidden(it) }.map { CategoryWithSource(it, r.nickname) }
         }
+    }
+
+    override fun observeAllCategories(sourceId: Long, kind: ContentKind): Flow<List<Category>> =
+        catalogs.map { c -> (c[sourceId]?.categories ?: emptyList()).filter { it.kind == kind }.sortedBy { it.name } }
+
+    override fun observeHiddenCategories(sourceId: Long): Flow<Set<Pair<ContentKind, String>>> =
+        hidden.map { set -> set.filter { it.first == sourceId }.map { it.second to it.third }.toSet() }
+
+    override suspend fun setCategoriesHidden(sourceId: Long, kind: ContentKind, ids: Collection<String>, hidden: Boolean) {
+        val rows = ids.map { Triple(sourceId, kind, it) }.toSet()
+        this.hidden.value = if (hidden) this.hidden.value + rows else this.hidden.value - rows
     }
 
     override fun observeLiveChannels(sourceId: Long, categoryId: String): Flow<List<LiveChannel>> =
@@ -79,17 +94,17 @@ class FakeLibraryStore : LibraryStore {
     override fun observeSeries(sourceId: Long, categoryId: String, limit: Int): Flow<List<Series>> =
         catalogs.map { it[sourceId]?.series?.filter { m -> m.categoryId == categoryId }?.take(limit) ?: emptyList() }
 
-    override fun observeMoviesByCategory(limitPerCategory: Int): Flow<Map<CategoryKey, List<Movie>>> = combine(sources, catalogs) { s, c ->
+    override fun observeMoviesByCategory(limitPerCategory: Int): Flow<Map<CategoryKey, List<Movie>>> = combine(sources, catalogs, hidden) { s, c, h ->
         s.filter { it.enabled }.flatMap { r -> c[r.id]?.movies ?: emptyList() }
-            .filter { it.categoryId != null }
+            .filter { it.categoryId != null && !h.contains(Triple(it.sourceId, ContentKind.MOVIE, it.categoryId!!)) }
             .sortedWith(compareByDescending<Movie> { it.addedAt ?: Long.MIN_VALUE }.thenBy { it.name })
             .groupBy { CategoryKey(it.sourceId, it.categoryId!!) }
             .mapValues { (_, v) -> v.take(limitPerCategory) }
     }
 
-    override fun observeSeriesByCategory(limitPerCategory: Int): Flow<Map<CategoryKey, List<Series>>> = combine(sources, catalogs) { s, c ->
+    override fun observeSeriesByCategory(limitPerCategory: Int): Flow<Map<CategoryKey, List<Series>>> = combine(sources, catalogs, hidden) { s, c, h ->
         s.filter { it.enabled }.flatMap { r -> c[r.id]?.series ?: emptyList() }
-            .filter { it.categoryId != null }
+            .filter { it.categoryId != null && !h.contains(Triple(it.sourceId, ContentKind.SERIES, it.categoryId!!)) }
             .sortedBy { it.name }
             .groupBy { CategoryKey(it.sourceId, it.categoryId!!) }
             .mapValues { (_, v) -> v.take(limitPerCategory) }
