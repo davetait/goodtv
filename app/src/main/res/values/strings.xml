@@ -6,6 +6,11 @@
     <string name="paused">Paused</string>
     <string name="playback_error">Playback failed: %1$s</string>
 
+    <string name="tab_home">Home</string>
+    <string name="home_search_hint">Search movies, shows and channels</string>
+    <string name="home_continue_watching">Continue Watching</string>
+    <string name="home_popular_movies">Popular Movies</string>
+    <string name="home_popular_shows">Popular Shows</string>
     <string name="tab_live">Live</string>
     <string name="tab_movies">Movies</string>
     <string name="tab_series">Series</string>
