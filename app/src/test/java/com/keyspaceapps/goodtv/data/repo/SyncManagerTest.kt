@@ -150,4 +150,18 @@ class SyncManagerTest {
         assertEquals(null, store.catalogs.value[id])
         assertEquals(SyncState.Idle, sync.state.value)
     }
+
+    @Test
+    fun outOfMemoryInsideRefreshIsRecordedAsAnError() = runTest {
+        val id = addSource("A")
+        source.catalogResults[id] = { Result.success(FakeChannelSource.catalog(id, "A")) }
+        store.replaceCatalogError = OutOfMemoryError("Failed to allocate")
+        val sync = SyncManager(store, registry, this, { now })
+
+        val result = sync.refreshNow(id)
+
+        assertTrue(result.isFailure)
+        assertEquals("Out of memory while loading the catalog; the provider's list is too large", store.getSource(id)!!.lastError)
+        assertEquals(SyncState.Error(id, "Out of memory while loading the catalog; the provider's list is too large"), sync.state.value)
+    }
 }

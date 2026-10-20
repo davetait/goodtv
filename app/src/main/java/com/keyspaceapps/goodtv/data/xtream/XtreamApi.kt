@@ -7,15 +7,22 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.DeserializationStrategy
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.decodeFromStream
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
 
-/** Thin client for `player_api.php`. Every failure surfaces as [SourceException] with on-screen copy. */
+/**
+ * Thin client for `player_api.php`. Every failure surfaces as [SourceException] with on-screen copy.
+ * Responses are parsed straight from the socket: real providers answer list calls with tens of
+ * megabytes of JSON, which does not fit in a TV app's heap as a String.
+ */
+@OptIn(ExperimentalSerializationApi::class)
 class XtreamApi(
     private val client: OkHttpClient,
     private val json: Json,
@@ -50,16 +57,13 @@ class XtreamApi(
 
     private suspend fun <T> get(url: HttpUrl, strategy: DeserializationStrategy<T>): T = withContext(io) {
         val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).build()
-        val body = try {
+        try {
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) throw SourceException("Server returned HTTP ${response.code}")
-                response.body.string()
+                response.body.byteStream().use { stream -> json.decodeFromStream(strategy, stream) }
             }
         } catch (e: IOException) {
             throw SourceException("Could not reach server: ${e.message ?: e.javaClass.simpleName}", e)
-        }
-        try {
-            json.decodeFromString(strategy, body)
         } catch (e: SerializationException) {
             throw SourceException("Server returned an unexpected response", e)
         } catch (e: IllegalArgumentException) {
