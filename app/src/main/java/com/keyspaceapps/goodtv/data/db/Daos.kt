@@ -290,13 +290,13 @@ data class ContinueRow(
 @Dao
 interface PopularDao {
     @Query("SELECT fetchedAt FROM tmdb_lists WHERE listKey = :listKey") suspend fun fetchedAt(listKey: String): Long?
-    @Query("DELETE FROM tmdb_lists") suspend fun deleteAll()
+    @Query("DELETE FROM tmdb_lists WHERE listKey LIKE :kindPrefix || '%'") suspend fun deleteKind(kindPrefix: String)
     @Insert suspend fun insertList(row: TmdbListEntity)
     @Insert suspend fun insertItems(rows: List<TmdbListItemEntity>)
 
     @Transaction
     suspend fun replace(listKey: String, tmdbIds: List<Long>, fetchedAt: Long) {
-        deleteAll() // items go with their list (cascade)
+        deleteKind(listKey.substringBefore(':') + ':') // items go with their list (cascade)
         insertList(TmdbListEntity(listKey, fetchedAt))
         insertItems(tmdbIds.mapIndexed { rank, id -> TmdbListItemEntity(listKey, rank, id) })
     }
@@ -315,5 +315,18 @@ interface PopularDao {
            WHERE i.listKey = :listKey ORDER BY i.rank LIMIT :limit""",
     )
     fun observeMovies(listKey: String, limit: Int): Flow<List<MovieEntity>>
+
+    // The same pick for series.
+    @Query(
+        """SELECT x.* FROM tmdb_list_items i
+           JOIN series x ON x.rowid = (
+               SELECT c.rowid FROM series c JOIN sources s ON s.id = c.sourceId
+               WHERE c.tmdbId = i.tmdbId AND s.enabled = 1
+                 AND NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = c.sourceId AND h.kind = 'SERIES' AND h.categoryId = c.categoryId)
+               ORDER BY CASE WHEN c.language = 'EN' THEN 0 WHEN c.language IS NULL THEN 1 ELSE 2 END, c.quality IS NOT NULL, c.sourceId, c.id
+               LIMIT 1)
+           WHERE i.listKey = :listKey ORDER BY i.rank LIMIT :limit""",
+    )
+    fun observeSeries(listKey: String, limit: Int): Flow<List<SeriesEntity>>
 }
 

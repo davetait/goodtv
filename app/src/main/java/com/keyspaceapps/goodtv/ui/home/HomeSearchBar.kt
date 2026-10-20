@@ -42,7 +42,13 @@ import androidx.tv.material3.Text
  * The keyboard's Search action, or D-pad UP/DOWN, leaves the field; BACK returns focus to the bar.
  */
 @Composable
-fun HomeSearchBar(query: String, onQueryChange: (String) -> Unit, hint: String, modifier: Modifier = Modifier) {
+fun HomeSearchBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    hint: String,
+    modifier: Modifier = Modifier,
+    onEditingChange: (Boolean) -> Unit = {},
+) {
     var editing by remember { mutableStateOf(false) }
     var hadFocus by remember { mutableStateOf(false) }
     val field = remember { FocusRequester() }
@@ -61,6 +67,7 @@ fun HomeSearchBar(query: String, onQueryChange: (String) -> Unit, hint: String, 
     }
 
     LaunchedEffect(editing) {
+        onEditingChange(editing)
         if (editing) { field.requestFocus(); keyboard?.show() }
     }
 

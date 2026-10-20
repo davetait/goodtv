@@ -8,6 +8,7 @@ import com.keyspaceapps.goodtv.domain.Catalog
 import com.keyspaceapps.goodtv.domain.Category
 import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.domain.Movie
+import com.keyspaceapps.goodtv.domain.Series
 import com.keyspaceapps.goodtv.domain.SourceRecord
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -18,18 +19,18 @@ import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 
-/** Popular Movies picks one playable copy per ranked TMDB id. */
-class PopularMoviesStoreTest {
+/** Popular rows pick one playable copy per ranked TMDB id. */
+class PopularStoreTest {
     private lateinit var db: GoodTvDatabase
     private lateinit var library: RoomLibraryStore
-    private lateinit var popular: RoomPopularMoviesStore
+    private lateinit var popular: RoomPopularStore
     private val key = "movie:test"
 
     @Before
     fun setUp() {
         db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), GoodTvDatabase::class.java).build()
         library = RoomLibraryStore(db, Json { ignoreUnknownKeys = true })
-        popular = RoomPopularMoviesStore(db.popular())
+        popular = RoomPopularStore(db.popular())
     }
 
     @After fun tearDown() = db.close()
@@ -83,10 +84,29 @@ class PopularMoviesStoreTest {
     }
 
     @Test
-    fun replacingDropsTheOldList() = runBlocking {
-        popular.replace("old", listOf(1), fetchedAt = 1)
+    fun replacingDropsTheOldListOfTheSameKindOnly() = runBlocking {
+        popular.replace("movie:old", listOf(1), fetchedAt = 1)
+        popular.replace("tv:shows", listOf(3), fetchedAt = 1)
         popular.replace(key, listOf(2), fetchedAt = 2)
-        assertNull(popular.fetchedAt("old"))
+        assertNull(popular.fetchedAt("movie:old"))
         assertEquals(2L, popular.fetchedAt(key))
+        assertEquals("a movie refresh keeps the shows list", 1L, popular.fetchedAt("tv:shows"))
+    }
+
+    @Test
+    fun seriesUseTheSamePickAndSkipHiddenSeriesCategories() = runBlocking {
+        val a = library.insertSource(source("a"))
+        fun series(id: String, tmdbId: Long, language: String?, category: String = "c") =
+            Series(a, id, category, "raw $id", null, null, null, tmdbId, title = "Show $tmdbId", language = language)
+        library.replaceCatalog(
+            a,
+            Catalog(
+                listOf(Category(a, ContentKind.SERIES, "c", "Shows"), Category(a, ContentKind.SERIES, "x", "Hidden")), emptyList(), emptyList(),
+                listOf(series("1-de", 1, "DE"), series("1-en", 1, "EN"), series("2-none", 2, null), series("2-fr", 2, "FR"), series("3-en", 3, "EN", category = "x")),
+            ),
+        )
+        library.setCategoriesHidden(a, ContentKind.SERIES, listOf("x"), hidden = true)
+        popular.replace("tv:test", listOf(2, 3, 1), fetchedAt = 1)
+        assertEquals(listOf("2-none", "1-en"), popular.observeSeries("tv:test", 20).first().map { it.id })
     }
 }

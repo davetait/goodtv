@@ -19,10 +19,12 @@ import androidx.test.core.app.ApplicationProvider
 import com.keyspaceapps.goodtv.MainActivity
 import com.keyspaceapps.goodtv.appGraph
 import com.keyspaceapps.goodtv.data.tmdb.PopularMoviesQuery
+import com.keyspaceapps.goodtv.data.tmdb.PopularShowsQuery
 import com.keyspaceapps.goodtv.data.source.SourceConfig
 import com.keyspaceapps.goodtv.data.source.SourceType
 import com.keyspaceapps.goodtv.domain.Catalog
 import com.keyspaceapps.goodtv.domain.Movie
+import com.keyspaceapps.goodtv.domain.Series
 import com.keyspaceapps.goodtv.domain.SourceRecord
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -30,14 +32,14 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 
-/** Home's Popular Movies: the stored TMDB ranking shown as the library's preferred copies. */
+/** Home's popular rows: the stored TMDB rankings shown as the library's preferred copies. */
 @OptIn(ExperimentalTestApi::class)
-class PopularMoviesUiTest {
+class PopularRowsUiTest {
     @get:Rule
     val composeRule = createEmptyComposeRule()
     private var scenario: ActivityScenario<MainActivity>? = null
 
-    /** A ranking stored "now", so nothing is fetched (TMDB is off in tests anyway). */
+    /** Rankings stored "now", so nothing is fetched (TMDB is off in tests anyway). */
     @Before
     fun seedAndLaunch() {
         runBlocking {
@@ -52,10 +54,15 @@ class PopularMoviesUiTest {
                 Catalog(
                     emptyList(), emptyList(),
                     listOf(movie("1", 10, "Heat (1995)", "DE"), movie("2", 10, "Heat (1995)", "EN"), movie("3", 20, "Ronin (1998)", "FR"), movie("4", 30, "Collateral (2004)", null)),
-                    emptyList(),
+                    listOf(
+                        Series(sid, "s1", null, "DE - Dark", null, null, null, 100, title = "Dark", language = "DE"),
+                        Series(sid, "s2", null, "EN - Dark", null, null, null, 100, title = "Dark", language = "EN"),
+                        Series(sid, "s3", null, "Silo", null, null, null, 200, title = "Silo"),
+                    ),
                 ),
             )
             graph.db.popular().replace(PopularMoviesQuery.listKey, listOf(10, 20, 30), System.currentTimeMillis())
+            graph.db.popular().replace(PopularShowsQuery.listKey, listOf(100, 200), System.currentTimeMillis())
         }
         scenario = ActivityScenario.launch(MainActivity::class.java)
     }
@@ -99,18 +106,43 @@ class PopularMoviesUiTest {
 
         // DOWN goes to the Popular Shows card underneath (whichever lines up), not back to the top.
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionDown) }
-        composeRule.onNode(isFocused() and hasText("Show ", substring = true)).assertExists()
+        composeRule.onNode(isFocused() and (hasText("Dark (EN)") or hasText("Silo"))).assertExists()
+        composeRule.onAllNodes(hasText("Dark (DE)")).assertCountEquals(0)
     }
 
-    /** On a fresh install the ranking arrives after Home is showing; the new row comes into view with focus. */
     @Test
-    fun aRankingThatArrivesLateTakesFocusFromThePlaceholders() {
+    fun aShowOpensItsSeriesPageAndBackReturnsToIt() {
+        waitFor("Popular Shows")
+        waitFocused { composeRule.onNodeWithText("Heat (1995) (EN)") }
+        composeRule.onRoot().performKeyInput { pressKey(Key.DirectionDown) }
+        composeRule.onNodeWithText("Dark (EN)").assertIsFocused()
+        composeRule.onRoot().performKeyInput { pressKey(Key.DirectionRight) }
+        composeRule.onNodeWithText("Silo").assertIsFocused()
+
+        composeRule.onRoot().performKeyInput { pressKey(Key.DirectionCenter) }
+        waitFor("Could not reach server", substring = true)
+        pressBack()
+        waitFor("Popular Shows")
+        waitFocused { composeRule.onNodeWithText("Silo") }
+    }
+
+    /**
+     * On a fresh install the rankings arrive after Home is showing, in either order. Each new row
+     * comes into view and takes focus while the user hasn't moved.
+     */
+    @Test
+    fun rankingsThatArriveLateTakeFocusUntilTheUserMoves() {
         scenario?.close()
-        runBlocking { graph().db.popular().replace("none", emptyList(), System.currentTimeMillis()) }
+        runBlocking {
+            graph().db.popular().replace("movie:none", emptyList(), System.currentTimeMillis())
+            graph().db.popular().replace("tv:none", emptyList(), System.currentTimeMillis())
+        }
         scenario = ActivityScenario.launch(MainActivity::class.java)
-        waitFor("Show 1")
-        waitFocused { composeRule.onNodeWithText("Show 1") }
-        composeRule.onAllNodes(hasText("Popular Movies")).assertCountEquals(0)
+        waitFor("Popular movies and shows appear here", substring = true)
+
+        runBlocking { graph().db.popular().replace(PopularShowsQuery.listKey, listOf(200), System.currentTimeMillis()) }
+        waitFor("Popular Shows")
+        waitFocused { composeRule.onNodeWithText("Silo") }
 
         runBlocking { graph().db.popular().replace(PopularMoviesQuery.listKey, listOf(20), System.currentTimeMillis()) }
         waitFor("Popular Movies")

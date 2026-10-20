@@ -7,7 +7,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.keyspaceapps.goodtv.data.settings.AppSettings
 import com.keyspaceapps.goodtv.data.db.GoodTvDatabase
 import com.keyspaceapps.goodtv.data.db.RoomLibraryStore
-import com.keyspaceapps.goodtv.data.db.RoomPopularMoviesStore
+import com.keyspaceapps.goodtv.data.db.RoomPopularStore
 import com.keyspaceapps.goodtv.data.db.RoomTmdbCache
 import com.keyspaceapps.goodtv.data.db.RoomTmdbGenreStore
 import com.keyspaceapps.goodtv.data.db.RoomWatchProgressStore
@@ -19,7 +19,10 @@ import com.keyspaceapps.goodtv.data.repo.SyncState
 import com.keyspaceapps.goodtv.data.source.SourceRegistry
 import com.keyspaceapps.goodtv.data.tmdb.TmdbApi
 import com.keyspaceapps.goodtv.data.tmdb.TmdbCredential
-import com.keyspaceapps.goodtv.data.tmdb.PopularMoviesRepository
+import com.keyspaceapps.goodtv.data.tmdb.PopularMoviesQuery
+import com.keyspaceapps.goodtv.data.tmdb.PopularRepository
+import com.keyspaceapps.goodtv.data.tmdb.PopularShowsQuery
+import com.keyspaceapps.goodtv.data.tmdb.PopularStore
 import com.keyspaceapps.goodtv.data.tmdb.TmdbGenreFetcher
 import com.keyspaceapps.goodtv.data.tmdb.TmdbRepository
 import com.keyspaceapps.goodtv.data.xtream.XtreamApi
@@ -90,10 +93,10 @@ class AppGraph(val context: Context) {
 
     val watchProgress: WatchProgressRepository by lazy { WatchProgressRepository(RoomWatchProgressStore(db.watchProgress())) }
 
-    /** Home's Popular Movies: TMDB's popular streaming films the library has, refreshed daily. */
-    val popularMovies: PopularMoviesRepository by lazy {
-        PopularMoviesRepository(tmdbApi, RoomPopularMoviesStore(db.popular()), tmdbLanguage)
-    }
+    /** Home's popular rows: TMDB's popular streaming titles the library has, rankings refreshed daily. */
+    val popularStore: PopularStore by lazy { RoomPopularStore(db.popular()) }
+    val popularMovies: PopularRepository by lazy { PopularRepository(tmdbApi, popularStore, PopularMoviesQuery, tmdbLanguage) }
+    val popularShows: PopularRepository by lazy { PopularRepository(tmdbApi, popularStore, PopularShowsQuery, tmdbLanguage) }
 
     /** Background TMDB genre fill for movies; started on launch after stale sources refresh. */
     val genreFetcher: TmdbGenreFetcher by lazy {

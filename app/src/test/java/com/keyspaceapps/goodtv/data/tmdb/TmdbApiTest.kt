@@ -139,5 +139,21 @@ class TmdbApiTest {
         assertEquals(53, page.total_pages)
         assertEquals(listOf(1148365L), page.results.map { it.id })
     }
+
+    @Test fun discoverTvFiltersByAirDatePremiereAndGenre() = runTest {
+        server.enqueue(ok("""{"page":1,"total_pages":17,"results":[{"id":136315,"name":"The Bear","first_air_date":"2022-06-23"}]}"""))
+        val page = api().discoverStreamingTv("US", listOf(8, 1899), "2025-10-20", "2026-10-20", "2021-10-20", 50, listOf(10764, 10766), 1, "en-US")
+        val url = server.takeRequest().url
+        assertEquals("/3/discover/tv", url.encodedPath)
+        assertEquals("8|1899", url.queryParameter("with_watch_providers"))
+        assertEquals("flatrate", url.queryParameter("with_watch_monetization_types"))
+        assertEquals("2025-10-20", url.queryParameter("air_date.gte"))
+        assertEquals("2026-10-20", url.queryParameter("air_date.lte"))
+        assertEquals("2021-10-20", url.queryParameter("first_air_date.gte"))
+        assertEquals("10764,10766", url.queryParameter("without_genres"))
+        assertEquals("popularity.desc", url.queryParameter("sort_by"))
+        assertEquals(17, page.total_pages)
+        assertEquals("The Bear", page.results.single().name)
+    }
 }
 

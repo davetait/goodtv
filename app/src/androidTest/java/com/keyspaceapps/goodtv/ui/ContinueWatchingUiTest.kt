@@ -20,6 +20,7 @@ import com.keyspaceapps.goodtv.AppGraph
 import com.keyspaceapps.goodtv.MainActivity
 import com.keyspaceapps.goodtv.appGraph
 import com.keyspaceapps.goodtv.data.progress.PlaybackInfo
+import com.keyspaceapps.goodtv.data.tmdb.PopularMoviesQuery
 import com.keyspaceapps.goodtv.data.progress.WatchKind
 import com.keyspaceapps.goodtv.data.progress.WatchRef
 import com.keyspaceapps.goodtv.data.source.SourceConfig
@@ -57,8 +58,13 @@ class ContinueWatchingUiTest {
             sid = graph.store.insertSource(SourceRecord(0, SourceType.XTREAM, "A", SourceConfig.Xtream("http://s", "u", "p"), true, System.currentTimeMillis(), null))
             graph.store.replaceCatalog(
                 sid,
-                Catalog(emptyList(), emptyList(), listOf(Movie(sid, "m1", null, "Heat", null, "mkv", null, null)), listOf(Series(sid, "s1", null, "Dark", null, null, null))),
+                Catalog(
+                    emptyList(), emptyList(),
+                    listOf(Movie(sid, "m1", null, "Heat", null, "mkv", null, null), Movie(sid, "m2", null, "Ronin", null, "mkv", null, null, tmdbId = 8195)),
+                    listOf(Series(sid, "s1", null, "Dark", null, null, null)),
+                ),
             )
+            graph.db.popular().replace(PopularMoviesQuery.listKey, listOf(8195), System.currentTimeMillis())
             graph.watchProgress.record(movie, 42 * 60_000L, 170 * 60_000L, PlaybackInfo("Heat", "mkv"))
             Thread.sleep(5)
             graph.watchProgress.record(WatchRef(sid, WatchKind.EPISODE, "e1", "s1"), 10 * 60_000L, 50 * 60_000L, PlaybackInfo("Dark S1 E1", "mp4", 1, 1))
@@ -105,7 +111,7 @@ class ContinueWatchingUiTest {
         openDialog().performKeyInput { pressKey(Key.DirectionCenter) }
         composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasText("Continue Watching")).fetchSemanticsNodes().isEmpty() }
         assertNull(runBlocking { graph.watchProgress.observe(movie).first() })
-        waitFocused { composeRule.onNodeWithText("Show 1") }
+        waitFocused { composeRule.onNodeWithText("Ronin") }
     }
 
     @Test
