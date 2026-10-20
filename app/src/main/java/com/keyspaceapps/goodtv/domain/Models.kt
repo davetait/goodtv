@@ -39,6 +39,8 @@ data class Series(
     val rating: Double?,
     /** themoviedb.org TV series id when the provider supplies one. */
     val tmdbId: Long? = null,
+    /** From the provider's genre text at sync time; stored separately, so not filled when read back. */
+    val genres: Set<Genre> = emptySet(),
 )
 
 data class Catalog(

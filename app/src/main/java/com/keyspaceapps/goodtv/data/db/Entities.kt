@@ -41,7 +41,7 @@ data class LiveChannelEntity(
     tableName = "movies",
     primaryKeys = ["sourceId", "id"],
     foreignKeys = [ForeignKey(entity = SourceEntity::class, parentColumns = ["id"], childColumns = ["sourceId"], onDelete = ForeignKey.CASCADE)],
-    indices = [Index("sourceId", "categoryId")],
+    indices = [Index("sourceId", "categoryId"), Index("tmdbId")],
 )
 data class MovieEntity(
     val sourceId: Long, val id: String, val categoryId: String?, val name: String, val posterUrl: String?,
@@ -135,3 +135,23 @@ data class TmdbMetaEntity(
 /** Result of a title search for an item without a TMDB id. [tmdbId] null records "no confident match". */
 @Entity(tableName = "tmdb_title_match", primaryKeys = ["kind", "queryKey"])
 data class TmdbTitleMatchEntity(val kind: String, val queryKey: String, val tmdbId: Long?, val fetchedAt: Long)
+
+/** A series' genres, mapped from the provider's genre text at sync ([com.keyspaceapps.goodtv.domain.Genre] names). */
+@Entity(
+    tableName = "series_genres",
+    primaryKeys = ["sourceId", "seriesId", "genre"],
+    foreignKeys = [ForeignKey(entity = SourceEntity::class, parentColumns = ["id"], childColumns = ["sourceId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("genre")],
+)
+data class SeriesGenreEntity(val sourceId: Long, val seriesId: String, val genre: String)
+
+/**
+ * TMDB genres per TMDB id ([kind] "MOVIE"). Keyed by TMDB id rather than catalog row, so they survive
+ * re-syncs and one fetch covers every language copy of a film.
+ */
+@Entity(tableName = "tmdb_genres", primaryKeys = ["kind", "tmdbId", "genre"], indices = [Index("kind", "genre")])
+data class TmdbGenreEntity(val kind: String, val tmdbId: Long, val genre: String)
+
+/** When genres for a TMDB id were last fetched (also for ids TMDB had none for, so they aren't re-asked). */
+@Entity(tableName = "tmdb_genre_status", primaryKeys = ["kind", "tmdbId"])
+data class TmdbGenreStatusEntity(val kind: String, val tmdbId: Long, val fetchedAt: Long)

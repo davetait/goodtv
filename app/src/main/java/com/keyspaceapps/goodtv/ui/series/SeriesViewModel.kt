@@ -8,6 +8,8 @@ import com.keyspaceapps.goodtv.ui.browse.CategoryRow
 import com.keyspaceapps.goodtv.ui.browse.BrowseEmptyState
 import com.keyspaceapps.goodtv.ui.browse.EmptyStates
 import com.keyspaceapps.goodtv.ui.browse.FocusMemory
+import com.keyspaceapps.goodtv.ui.browse.GENRE_LIMIT
+import com.keyspaceapps.goodtv.ui.browse.GenreFilter
 import com.keyspaceapps.goodtv.ui.browse.ROW_LIMIT
 import com.keyspaceapps.goodtv.ui.browse.RowItem
 import com.keyspaceapps.goodtv.ui.browse.isMultiSource
@@ -34,4 +36,8 @@ class SeriesViewModel(repo: LibraryRepository) : ViewModel() {
         categories,
         repo.seriesByCategory(ROW_LIMIT + 1).map { grouped -> grouped.mapValues { (_, list) -> list.map { RowItem(it.sourceId, it.id, it.name, it.coverUrl, it.tmdbId) } } },
     ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val genres = GenreFilter(viewModelScope, repo.genreCounts(ContentKind.SERIES)) { g ->
+        repo.seriesByGenre(g, GENRE_LIMIT).map { list -> list.map { RowItem(it.sourceId, it.id, it.name, it.coverUrl, it.tmdbId) } }
+    }
 }

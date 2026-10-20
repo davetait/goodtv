@@ -13,6 +13,8 @@ import androidx.tv.material3.Text
 import com.keyspaceapps.goodtv.R
 import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.ui.browse.CategoryRows
+import com.keyspaceapps.goodtv.ui.browse.GenreBrowse
+import com.keyspaceapps.goodtv.ui.browse.genreFillStatus
 import com.keyspaceapps.goodtv.ui.browse.Labels
 import com.keyspaceapps.goodtv.ui.browse.messageRes
 import com.keyspaceapps.goodtv.ui.goodTvViewModel
@@ -21,7 +23,7 @@ import com.keyspaceapps.goodtv.ui.nav.MovieDetailKey
 
 @Composable
 fun MoviesScreen(onMovie: (MovieDetailKey) -> Unit, onSeeAll: (CategoryGridKey) -> Unit) {
-    val vm = goodTvViewModel { MoviesViewModel(it.repository) }
+    val vm = goodTvViewModel { MoviesViewModel(it.repository, it.genreFetcher.state) }
     val rows by vm.rows.collectAsState()
     val multiSource by vm.multiSource.collectAsState()
     val emptyState by vm.emptyState.collectAsState()
@@ -33,14 +35,22 @@ fun MoviesScreen(onMovie: (MovieDetailKey) -> Unit, onSeeAll: (CategoryGridKey) 
         }
         return
     }
-    CategoryRows(
-        rows = loaded,
-        focus = vm.focus,
-        multiSource = multiSource,
-        onItem = { _, item -> onMovie(MovieDetailKey(item.sourceId, item.id)) },
-        onSeeAll = { row ->
-            val c = row.category
-            onSeeAll(CategoryGridKey(c.category.sourceId, ContentKind.MOVIE, c.category.id, Labels.categoryLabel(c.category.name, c.sourceNickname, multiSource)))
-        },
-    )
+    val status = genreFillStatus(vm.genreFill.collectAsState().value)
+    GenreBrowse(
+        kind = ContentKind.MOVIE,
+        filter = vm.genres,
+        status = status,
+        onItem = { onMovie(MovieDetailKey(it.sourceId, it.id)) },
+    ) {
+        CategoryRows(
+            rows = loaded,
+            focus = vm.focus,
+            multiSource = multiSource,
+            onItem = { _, item -> onMovie(MovieDetailKey(item.sourceId, item.id)) },
+            onSeeAll = { row ->
+                val c = row.category
+                onSeeAll(CategoryGridKey(c.category.sourceId, ContentKind.MOVIE, c.category.id, Labels.categoryLabel(c.category.name, c.sourceNickname, multiSource)))
+            },
+        )
+    }
 }

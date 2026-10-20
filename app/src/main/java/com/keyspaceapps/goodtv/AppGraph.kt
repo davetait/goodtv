@@ -8,12 +8,15 @@ import com.keyspaceapps.goodtv.data.settings.AppSettings
 import com.keyspaceapps.goodtv.data.db.GoodTvDatabase
 import com.keyspaceapps.goodtv.data.db.RoomLibraryStore
 import com.keyspaceapps.goodtv.data.db.RoomTmdbCache
+import com.keyspaceapps.goodtv.data.db.RoomTmdbGenreStore
 import com.keyspaceapps.goodtv.data.repo.LibraryRepository
 import com.keyspaceapps.goodtv.data.repo.LibraryStore
 import com.keyspaceapps.goodtv.data.repo.SyncManager
+import com.keyspaceapps.goodtv.data.repo.SyncState
 import com.keyspaceapps.goodtv.data.source.SourceRegistry
 import com.keyspaceapps.goodtv.data.tmdb.TmdbApi
 import com.keyspaceapps.goodtv.data.tmdb.TmdbCredential
+import com.keyspaceapps.goodtv.data.tmdb.TmdbGenreFetcher
 import com.keyspaceapps.goodtv.data.tmdb.TmdbRepository
 import com.keyspaceapps.goodtv.data.xtream.XtreamApi
 import com.keyspaceapps.goodtv.data.xtream.XtreamChannelSource
@@ -22,6 +25,11 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import java.util.Locale
@@ -68,12 +76,28 @@ class AppGraph(val context: Context) {
      * TMDB ratings and summaries; a no-op when no TMDB key is configured or [GoodTvApp.disableTmdb] is
      * set (instrumented tests, which must not call the real API). Language follows the device.
      */
-    private val defaultTmdb: TmdbRepository by lazy {
-        TmdbRepository(
-            api = TmdbCredential.from(BuildConfig.TMDB_API_KEY)?.takeUnless { GoodTvApp.disableTmdb }?.let { TmdbApi(okHttp, it) },
-            cache = RoomTmdbCache(db.tmdb()),
-            language = { Locale.getDefault().toLanguageTag() },
-        )
+    private val tmdbApi: TmdbApi? by lazy {
+        TmdbCredential.from(BuildConfig.TMDB_API_KEY)?.takeUnless { GoodTvApp.disableTmdb }?.let { TmdbApi(okHttp, it) }
+    }
+    private val tmdbCache by lazy { RoomTmdbCache(db.tmdb()) }
+    private val tmdbLanguage: () -> String = { Locale.getDefault().toLanguageTag() }
+
+    private val defaultTmdb: TmdbRepository by lazy { TmdbRepository(api = tmdbApi, cache = tmdbCache, language = tmdbLanguage) }
+
+    /** Background TMDB genre fill for movies; started on launch after stale sources refresh. */
+    val genreFetcher: TmdbGenreFetcher by lazy {
+        TmdbGenreFetcher(tmdbApi, RoomTmdbGenreStore(db), tmdbCache, appScope, tmdbLanguage)
+    }
+
+    /**
+     * Starts the movie genre fill whenever syncing finishes (a first sync, an added source, a manual
+     * refresh), so new movies get genres without waiting for the next launch. Call once per process.
+     */
+    fun startGenreFillAfterSyncs() {
+        appScope.launch {
+            syncManager.state.map { it is SyncState.Syncing }.distinctUntilChanged().drop(1).filter { syncing -> !syncing }
+                .collect { genreFetcher.start() }
+        }
     }
 
     /** Instrumented tests point this at a mock TMDB server. */

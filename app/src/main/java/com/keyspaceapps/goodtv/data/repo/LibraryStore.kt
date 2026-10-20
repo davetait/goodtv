@@ -4,6 +4,7 @@ import com.keyspaceapps.goodtv.domain.Catalog
 import com.keyspaceapps.goodtv.domain.Category
 import com.keyspaceapps.goodtv.domain.CategoryWithSource
 import com.keyspaceapps.goodtv.domain.ContentKind
+import com.keyspaceapps.goodtv.domain.Genre
 import com.keyspaceapps.goodtv.domain.LiveChannel
 import com.keyspaceapps.goodtv.domain.Movie
 import com.keyspaceapps.goodtv.domain.MovieDetail
@@ -50,6 +51,13 @@ interface LibraryStore {
     fun searchLive(query: String, limit: Int): Flow<List<LiveChannel>>
     fun searchMovies(query: String, limit: Int): Flow<List<Movie>>
     fun searchSeries(query: String, limit: Int): Flow<List<Series>>
+
+    /** Enabled, non-hidden movies TMDB lists under [genre], newest first, at most [limit]. */
+    fun observeMoviesByGenre(genre: Genre, limit: Int): Flow<List<Movie>>
+    /** Enabled, non-hidden series the provider files under [genre], by name, at most [limit]. */
+    fun observeSeriesByGenre(genre: Genre, limit: Int): Flow<List<Series>>
+    /** How many enabled, non-hidden titles of [kind] (MOVIE or SERIES) each genre has; absent = none. */
+    fun observeGenreCounts(kind: ContentKind): Flow<Map<Genre, Int>>
 
     /** Every category of one source and kind, hidden or not, in name order (for the Categories screen). */
     fun observeAllCategories(sourceId: Long, kind: ContentKind): Flow<List<Category>>

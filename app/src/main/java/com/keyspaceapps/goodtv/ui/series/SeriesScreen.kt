@@ -13,6 +13,7 @@ import androidx.tv.material3.Text
 import com.keyspaceapps.goodtv.R
 import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.ui.browse.CategoryRows
+import com.keyspaceapps.goodtv.ui.browse.GenreBrowse
 import com.keyspaceapps.goodtv.ui.browse.Labels
 import com.keyspaceapps.goodtv.ui.browse.messageRes
 import com.keyspaceapps.goodtv.ui.goodTvViewModel
@@ -33,14 +34,22 @@ fun SeriesScreen(onSeries: (SeriesDetailKey) -> Unit, onSeeAll: (CategoryGridKey
         }
         return
     }
-    CategoryRows(
-        rows = loaded,
-        focus = vm.focus,
-        multiSource = multiSource,
-        onItem = { _, item -> onSeries(SeriesDetailKey(item.sourceId, item.id)) },
-        onSeeAll = { row ->
-            val c = row.category
-            onSeeAll(CategoryGridKey(c.category.sourceId, ContentKind.SERIES, c.category.id, Labels.categoryLabel(c.category.name, c.sourceNickname, multiSource)))
-        },
-    )
+    val status = null
+    GenreBrowse(
+        kind = ContentKind.SERIES,
+        filter = vm.genres,
+        status = status,
+        onItem = { onSeries(SeriesDetailKey(it.sourceId, it.id)) },
+    ) {
+        CategoryRows(
+            rows = loaded,
+            focus = vm.focus,
+            multiSource = multiSource,
+            onItem = { _, item -> onSeries(SeriesDetailKey(item.sourceId, item.id)) },
+            onSeeAll = { row ->
+                val c = row.category
+                onSeeAll(CategoryGridKey(c.category.sourceId, ContentKind.SERIES, c.category.id, Labels.categoryLabel(c.category.name, c.sourceNickname, multiSource)))
+            },
+        )
+    }
 }

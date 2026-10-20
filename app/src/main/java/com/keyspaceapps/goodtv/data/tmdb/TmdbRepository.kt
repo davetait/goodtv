@@ -99,22 +99,8 @@ class TmdbRepository(
         cache.meta(kind, id)?.takeIf { it.language == lang && clock() - it.fetchedAt < META_TTL_MS }?.let { return it }
         val now = clock()
         val meta = when (kind) {
-            TmdbKind.MOVIE -> api.movie(id, lang)?.let { m ->
-                TmdbMeta(
-                    kind, m.id, m.title.ifBlank { m.original_title.orEmpty() }, m.overview?.takeIf { it.isNotBlank() },
-                    m.vote_average?.takeIf { m.vote_count > 0 }, m.vote_count, m.release_date.tmdbYear(), m.genres.map { it.name },
-                    m.runtime?.takeIf { it > 0 }, TmdbImages.url(m.poster_path, TmdbImages.POSTER), TmdbImages.url(m.backdrop_path, TmdbImages.BACKDROP),
-                    lang, now,
-                )
-            }
-            TmdbKind.TV -> api.tv(id, lang)?.let { t ->
-                TmdbMeta(
-                    kind, t.id, t.name.ifBlank { t.original_name.orEmpty() }, t.overview?.takeIf { it.isNotBlank() },
-                    t.vote_average?.takeIf { t.vote_count > 0 }, t.vote_count, t.first_air_date.tmdbYear(), t.genres.map { it.name },
-                    t.episode_run_time.firstOrNull()?.takeIf { it > 0 }, TmdbImages.url(t.poster_path, TmdbImages.POSTER),
-                    TmdbImages.url(t.backdrop_path, TmdbImages.BACKDROP), lang, now,
-                )
-            }
+            TmdbKind.MOVIE -> api.movie(id, lang)?.let { movieMeta(it, lang, now) }
+            TmdbKind.TV -> api.tv(id, lang)?.let { tvMeta(it, lang, now) }
         }
         meta?.let { cache.putMeta(it) }
         return meta
@@ -173,3 +159,17 @@ class TmdbRepository(
         }
     }
 }
+
+internal fun movieMeta(m: TmdbMovieDetails, lang: String, now: Long) = TmdbMeta(
+    TmdbKind.MOVIE, m.id, m.title.ifBlank { m.original_title.orEmpty() }, m.overview?.takeIf { it.isNotBlank() },
+    m.vote_average?.takeIf { m.vote_count > 0 }, m.vote_count, m.release_date.tmdbYear(), m.genres.map { it.name },
+    m.runtime?.takeIf { it > 0 }, TmdbImages.url(m.poster_path, TmdbImages.POSTER), TmdbImages.url(m.backdrop_path, TmdbImages.BACKDROP),
+    lang, now,
+)
+
+internal fun tvMeta(t: TmdbTvDetails, lang: String, now: Long) = TmdbMeta(
+    TmdbKind.TV, t.id, t.name.ifBlank { t.original_name.orEmpty() }, t.overview?.takeIf { it.isNotBlank() },
+    t.vote_average?.takeIf { t.vote_count > 0 }, t.vote_count, t.first_air_date.tmdbYear(), t.genres.map { it.name },
+    t.episode_run_time.firstOrNull()?.takeIf { it > 0 }, TmdbImages.url(t.poster_path, TmdbImages.POSTER),
+    TmdbImages.url(t.backdrop_path, TmdbImages.BACKDROP), lang, now,
+)

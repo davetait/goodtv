@@ -6,6 +6,7 @@ import com.keyspaceapps.goodtv.domain.Catalog
 import com.keyspaceapps.goodtv.domain.Category
 import com.keyspaceapps.goodtv.domain.CategoryWithSource
 import com.keyspaceapps.goodtv.domain.ContentKind
+import com.keyspaceapps.goodtv.domain.Genre
 import com.keyspaceapps.goodtv.domain.LiveChannel
 import com.keyspaceapps.goodtv.domain.Movie
 import com.keyspaceapps.goodtv.domain.MovieDetail
@@ -16,6 +17,7 @@ import com.keyspaceapps.goodtv.domain.SourceSummary
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 
 /** In-memory LibraryStore for JVM tests. Not thread-safe beyond what StateFlow gives. */
@@ -26,6 +28,8 @@ class FakeLibraryStore : LibraryStore {
     private val seriesDetails = mutableMapOf<Pair<Long, String>, SeriesDetail>()
     private var nextId = 1L
     val hidden = MutableStateFlow<Set<Triple<Long, ContentKind, String>>>(emptySet())
+    /** TMDB genres by TMDB movie id, as the background fetcher would have stored them. */
+    val movieGenres = MutableStateFlow<Map<Long, Set<Genre>>>(emptyMap())
     /** When set, replaceCatalog throws it (simulates a DB failure or a cascade-deleted source). */
     var replaceCatalogError: Throwable? = null
 
@@ -107,6 +111,33 @@ class FakeLibraryStore : LibraryStore {
         search(query, limit, ContentKind.MOVIE, { it.movies }, { it.name }, { it.sourceId }, { it.categoryId })
     override fun searchSeries(query: String, limit: Int): Flow<List<Series>> =
         search(query, limit, ContentKind.SERIES, { it.series }, { it.name }, { it.sourceId }, { it.categoryId })
+
+    private fun <T> visible(kind: ContentKind, pick: (Catalog) -> List<T>, sid: (T) -> Long, cat: (T) -> String?): Flow<List<T>> =
+        combine(sources, catalogs, hidden) { s, c, h ->
+            s.filter { it.enabled }.flatMap { r -> c[r.id]?.let(pick).orEmpty() }
+                .filterNot { item -> cat(item)?.let { Triple(sid(item), kind, it) in h } ?: false }
+        }
+
+    override fun observeMoviesByGenre(genre: Genre, limit: Int): Flow<List<Movie>> =
+        combine(visible(ContentKind.MOVIE, { it.movies }, { it.sourceId }, { it.categoryId }), movieGenres) { list, g ->
+            list.filter { m -> m.tmdbId?.let { genre in g[it].orEmpty() } ?: false }
+                .sortedWith(compareByDescending<Movie> { it.addedAt ?: 0 }.thenBy { it.name }).take(limit)
+        }
+
+    override fun observeSeriesByGenre(genre: Genre, limit: Int): Flow<List<Series>> =
+        visible(ContentKind.SERIES, { it.series }, { it.sourceId }, { it.categoryId }).map { list ->
+            list.filter { genre in it.genres }.sortedBy { it.name }.take(limit)
+        }
+
+    override fun observeGenreCounts(kind: ContentKind): Flow<Map<Genre, Int>> = when (kind) {
+        ContentKind.MOVIE -> combine(visible(ContentKind.MOVIE, { it.movies }, { it.sourceId }, { it.categoryId }), movieGenres) { list, g ->
+            list.flatMap { m -> m.tmdbId?.let { g[it] }.orEmpty() }.groupingBy { it }.eachCount()
+        }
+        ContentKind.SERIES -> visible(ContentKind.SERIES, { it.series }, { it.sourceId }, { it.categoryId }).map { list ->
+            list.flatMap { it.genres }.groupingBy { it }.eachCount()
+        }
+        ContentKind.LIVE -> flowOf(emptyMap())
+    }
 
     override fun observeLiveChannels(sourceId: Long, categoryId: String): Flow<List<LiveChannel>> =
         catalogs.map { it[sourceId]?.live?.filter { ch -> ch.categoryId == categoryId } ?: emptyList() }

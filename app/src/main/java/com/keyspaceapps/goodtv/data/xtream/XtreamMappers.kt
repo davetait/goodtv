@@ -4,6 +4,7 @@ import com.keyspaceapps.goodtv.domain.Catalog
 import com.keyspaceapps.goodtv.domain.Category
 import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.domain.Episode
+import com.keyspaceapps.goodtv.domain.Genre
 import com.keyspaceapps.goodtv.domain.LiveChannel
 import com.keyspaceapps.goodtv.domain.Movie
 import com.keyspaceapps.goodtv.domain.MovieDetail
@@ -41,7 +42,7 @@ object XtreamMappers {
 
     fun series(sourceId: Long, list: List<XtSeries>): List<Series> =
         list.mapNotNull { s ->
-            s.series_id?.let { Series(sourceId, it, s.category_id, s.name ?: it, s.cover, s.plot, s.rating, tmdbIdOf(s.tmdb)) }
+            s.series_id?.let { Series(sourceId, it, s.category_id, s.name ?: it, s.cover, s.plot, s.rating, tmdbIdOf(s.tmdb), Genre.fromPanelText(s.genre)) }
         }
 
     fun toCatalog(

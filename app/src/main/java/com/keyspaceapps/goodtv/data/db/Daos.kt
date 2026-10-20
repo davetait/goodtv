@@ -174,3 +174,62 @@ interface TmdbDao {
     @Query("DELETE FROM tmdb_meta WHERE fetchedAt < :before") suspend fun pruneMeta(before: Long)
     @Query("DELETE FROM tmdb_title_match WHERE fetchedAt < :before") suspend fun pruneTitleMatches(before: Long)
 }
+
+data class GenreCountRow(val genre: String, val count: Int)
+
+@Dao
+interface GenreDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertSeriesGenres(rows: List<SeriesGenreEntity>)
+    @Query("DELETE FROM series_genres WHERE sourceId = :sourceId") suspend fun deleteSeriesGenres(sourceId: Long)
+
+    // Genre browsing: enabled sources only, hidden categories left out, newest first.
+    @Query(
+        """SELECT m.* FROM movies m JOIN sources s ON s.id = m.sourceId
+           WHERE s.enabled = 1 AND m.tmdbId IN (SELECT tmdbId FROM tmdb_genres WHERE kind = 'MOVIE' AND genre = :genre)
+             AND NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = m.sourceId AND h.kind = 'MOVIE' AND h.categoryId = m.categoryId)
+           ORDER BY m.addedAt DESC, m.name LIMIT :limit""",
+    )
+    fun observeMovies(genre: String, limit: Int): Flow<List<MovieEntity>>
+
+    @Query(
+        """SELECT x.* FROM series x JOIN sources s ON s.id = x.sourceId
+           WHERE s.enabled = 1
+             AND EXISTS (SELECT 1 FROM series_genres g WHERE g.sourceId = x.sourceId AND g.seriesId = x.id AND g.genre = :genre)
+             AND NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = x.sourceId AND h.kind = 'SERIES' AND h.categoryId = x.categoryId)
+           ORDER BY x.name LIMIT :limit""",
+    )
+    fun observeSeries(genre: String, limit: Int): Flow<List<SeriesEntity>>
+
+    @Query(
+        """SELECT g.genre AS genre, COUNT(*) AS count FROM movies m JOIN sources s ON s.id = m.sourceId
+           JOIN tmdb_genres g ON g.kind = 'MOVIE' AND g.tmdbId = m.tmdbId
+           WHERE s.enabled = 1
+             AND NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = m.sourceId AND h.kind = 'MOVIE' AND h.categoryId = m.categoryId)
+           GROUP BY g.genre""",
+    )
+    fun observeMovieCounts(): Flow<List<GenreCountRow>>
+
+    @Query(
+        """SELECT g.genre AS genre, COUNT(*) AS count FROM series x JOIN sources s ON s.id = x.sourceId
+           JOIN series_genres g ON g.sourceId = x.sourceId AND g.seriesId = x.id
+           WHERE s.enabled = 1
+             AND NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = x.sourceId AND h.kind = 'SERIES' AND h.categoryId = x.categoryId)
+           GROUP BY g.genre""",
+    )
+    fun observeSeriesCounts(): Flow<List<GenreCountRow>>
+
+    /** Distinct TMDB ids of enabled movies whose genres were never fetched, or not since [before]. */
+    @Query(
+        """SELECT DISTINCT m.tmdbId FROM movies m JOIN sources s ON s.id = m.sourceId
+           WHERE s.enabled = 1 AND m.tmdbId IS NOT NULL
+             AND NOT EXISTS (SELECT 1 FROM tmdb_genre_status st WHERE st.kind = 'MOVIE' AND st.tmdbId = m.tmdbId AND st.fetchedAt >= :before)""",
+    )
+    suspend fun pendingMovieTmdbIds(before: Long): List<Long>
+
+    @Query("SELECT COUNT(DISTINCT m.tmdbId) FROM movies m JOIN sources s ON s.id = m.sourceId WHERE s.enabled = 1 AND m.tmdbId IS NOT NULL")
+    suspend fun movieTmdbIdCount(): Int
+
+    @Query("DELETE FROM tmdb_genres WHERE kind = :kind AND tmdbId IN (:ids)") suspend fun deleteTmdbGenres(kind: String, ids: List<Long>)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertTmdbGenres(rows: List<TmdbGenreEntity>)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertTmdbGenreStatus(rows: List<TmdbGenreStatusEntity>)
+}

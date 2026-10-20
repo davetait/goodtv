@@ -49,4 +49,23 @@ class MigrationTest {
         db.query("SELECT COUNT(*) FROM tmdb_meta").use { c -> c.moveToFirst(); assertEquals(0, c.getInt(0)) }
         db.close()
     }
+
+    /** v3 → v4 adds the genre tables and marks sources stale so the next sync fills series genres. */
+    @Test
+    fun migrate3To4AddsGenreTables() {
+        helper.createDatabase(dbName, 3).apply {
+            execSQL("INSERT INTO sources (id, type, nickname, configJson, enabled, lastSyncAt, lastError, createdAt) VALUES (1, 'XTREAM', 'Home', '{\"type\":\"xtream\",\"server\":\"http://s\",\"username\":\"u\",\"password\":\"p\"}', 1, 1700000000000, NULL, 0)")
+            execSQL("INSERT INTO movies (sourceId, id, categoryId, name, posterUrl, containerExtension, rating, addedAt, tmdbId) VALUES (1, 'm1', 'c', 'Heat', NULL, 'mkv', NULL, NULL, 949)")
+            close()
+        }
+
+        val db = helper.runMigrationsAndValidate(dbName, 4, true, MIGRATION_3_4)
+
+        db.query("SELECT tmdbId FROM movies").use { c -> c.moveToFirst(); assertEquals(949L, c.getLong(0)) }
+        db.query("SELECT lastSyncAt FROM sources").use { c -> c.moveToFirst(); assertTrue(c.isNull(0)) }
+        db.execSQL("INSERT INTO series_genres (sourceId, seriesId, genre) VALUES (1, 's1', 'DRAMA')")
+        db.execSQL("INSERT INTO tmdb_genres (kind, tmdbId, genre) VALUES ('MOVIE', 949, 'CRIME')")
+        db.execSQL("INSERT INTO tmdb_genre_status (kind, tmdbId, fetchedAt) VALUES ('MOVIE', 949, 1)")
+        db.close()
+    }
 }

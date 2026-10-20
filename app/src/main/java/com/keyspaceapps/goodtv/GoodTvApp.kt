@@ -12,6 +12,7 @@ class GoodTvApp : Application() {
     override fun onCreate() {
         super.onCreate()
         graph = AppGraph(this)
+        graph.startGenreFillAfterSyncs()
         graph.appScope.launch {
             graph.repository.ensureDebugSource(
                 DebugSource.fromBuildConfig(BuildConfig.XTREAM_SERVER, BuildConfig.XTREAM_USERNAME, BuildConfig.XTREAM_PASSWORD, skipDebugSource),
