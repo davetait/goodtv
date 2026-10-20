@@ -10,12 +10,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import com.keyspaceapps.goodtv.domain.label
 
 class CategoryGridViewModel(repo: LibraryRepository, val key: CategoryGridKey) : ViewModel() {
     val focus = FocusMemory()
     val items: StateFlow<List<RowItem>> = when (key.kind) {
-        ContentKind.MOVIE -> repo.movies(key.sourceId, key.categoryId, Int.MAX_VALUE).map { list -> list.map { RowItem(it.sourceId, it.id, it.name, it.posterUrl, it.tmdbId) } }
-        ContentKind.SERIES -> repo.series(key.sourceId, key.categoryId, Int.MAX_VALUE).map { list -> list.map { RowItem(it.sourceId, it.id, it.name, it.coverUrl, it.tmdbId) } }
+        ContentKind.MOVIE -> repo.movies(key.sourceId, key.categoryId, Int.MAX_VALUE).map { list -> list.map { RowItem(it.sourceId, it.id, it.label, it.posterUrl, it.tmdbId, lookupName = it.name) } }
+        ContentKind.SERIES -> repo.series(key.sourceId, key.categoryId, Int.MAX_VALUE).map { list -> list.map { RowItem(it.sourceId, it.id, it.label, it.coverUrl, it.tmdbId, lookupName = it.name) } }
         ContentKind.LIVE -> flowOf(emptyList())
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 }

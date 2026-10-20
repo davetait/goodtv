@@ -113,7 +113,7 @@ private fun SearchResultsGrid(
         modifier = Modifier.fillMaxSize(),
     ) {
         items(results, key = { it.key }) { r ->
-            val tmdb = rememberTmdbMeta(r.kind.tmdbKind(), r.tmdbId, r.title, POSTER_SETTLE_MS)
+            val tmdb = rememberTmdbMeta(r.kind.tmdbKind(), r.tmdbId, r.lookupName, POSTER_SETTLE_MS)
             PosterCard(
                 title = r.title,
                 imageUrl = r.imageUrl,

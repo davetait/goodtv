@@ -3,6 +3,7 @@ package com.keyspaceapps.goodtv.data.xtream
 import com.keyspaceapps.goodtv.domain.Catalog
 import com.keyspaceapps.goodtv.domain.Category
 import com.keyspaceapps.goodtv.domain.ContentKind
+import com.keyspaceapps.goodtv.domain.DisplayTitle
 import com.keyspaceapps.goodtv.domain.Episode
 import com.keyspaceapps.goodtv.domain.Genre
 import com.keyspaceapps.goodtv.domain.LiveChannel
@@ -30,19 +31,30 @@ object XtreamMappers {
 
     fun live(sourceId: Long, list: List<XtLiveStream>): List<LiveChannel> =
         list.mapNotNull { s ->
-            s.stream_id?.let { LiveChannel(sourceId, it, s.category_id, s.name ?: it, s.stream_icon, s.num) }
+            s.stream_id?.let {
+                val name = s.name ?: it
+                val d = DisplayTitle.parse(name, live = true)
+                LiveChannel(sourceId, it, s.category_id, name, s.stream_icon, s.num, d.base, d.language, d.quality)
+            }
         }
 
     fun movies(sourceId: Long, list: List<XtVodStream>): List<Movie> =
         list.mapNotNull { s ->
             s.stream_id?.let {
-                Movie(sourceId, it, s.category_id, s.name ?: it, s.stream_icon, s.container_extension ?: "mp4", s.rating, s.added, tmdbIdOf(s.tmdb))
+                (s.name ?: it).let { name ->
+                    val d = DisplayTitle.parse(name)
+                    Movie(sourceId, it, s.category_id, name, s.stream_icon, s.container_extension ?: "mp4", s.rating, s.added, tmdbIdOf(s.tmdb), d.base, d.language, d.quality)
+                }
             }
         }
 
     fun series(sourceId: Long, list: List<XtSeries>): List<Series> =
         list.mapNotNull { s ->
-            s.series_id?.let { Series(sourceId, it, s.category_id, s.name ?: it, s.cover, s.plot, s.rating, tmdbIdOf(s.tmdb), Genre.fromPanelText(s.genre)) }
+            s.series_id?.let {
+                val name = s.name ?: it
+                val d = DisplayTitle.parse(name)
+                Series(sourceId, it, s.category_id, name, s.cover, s.plot, s.rating, tmdbIdOf(s.tmdb), Genre.fromPanelText(s.genre), d.base, d.language, d.quality)
+            }
         }
 
     fun toCatalog(

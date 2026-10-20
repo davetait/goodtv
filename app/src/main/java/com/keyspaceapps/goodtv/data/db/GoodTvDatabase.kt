@@ -63,6 +63,19 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
     }
 }
 
+/** v4 → v5: clean display titles (title, language, quality) on channels, movies and series. */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        for (table in listOf("live_channels", "movies", "series")) {
+            db.execSQL("ALTER TABLE `$table` ADD COLUMN `title` TEXT")
+            db.execSQL("ALTER TABLE `$table` ADD COLUMN `language` TEXT")
+            db.execSQL("ALTER TABLE `$table` ADD COLUMN `quality` TEXT")
+        }
+        // Titles are computed at sync; until the next one, lists fall back to the raw name.
+        db.execSQL("UPDATE `sources` SET `lastSyncAt` = NULL")
+    }
+}
+
 @Database(
     entities = [
         SourceEntity::class, CategoryEntity::class, LiveChannelEntity::class, MovieEntity::class, SeriesEntity::class,
@@ -70,7 +83,7 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
         HiddenCategoryEntity::class, TmdbMetaEntity::class, TmdbTitleMatchEntity::class,
         SeriesGenreEntity::class, TmdbGenreEntity::class, TmdbGenreStatusEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true, // schemas/ holds the baseline every future migration is written against
 )
 abstract class GoodTvDatabase : RoomDatabase() {
@@ -83,7 +96,7 @@ abstract class GoodTvDatabase : RoomDatabase() {
     companion object {
         fun create(context: Context): GoodTvDatabase =
             Room.databaseBuilder(context, GoodTvDatabase::class.java, "goodtv.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .fallbackToDestructiveMigration(dropAllTables = true) // last resort for an unknown version only
                 .build()
     }

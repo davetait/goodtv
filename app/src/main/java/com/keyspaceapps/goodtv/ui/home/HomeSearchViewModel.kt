@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import com.keyspaceapps.goodtv.domain.label
 
 /** What the search covers. ALL is the default. */
 enum class SearchScope(val kinds: List<ContentKind>) {
@@ -26,8 +27,11 @@ enum class SearchScope(val kinds: List<ContentKind>) {
     SERIES(listOf(ContentKind.SERIES)),
 }
 
-/** One search hit; [key] is unique across kinds and sources. */
-data class SearchResult(val kind: ContentKind, val sourceId: Long, val id: String, val title: String, val imageUrl: String?, val tmdbId: Long? = null) {
+/** One search hit; [key] is unique across kinds and sources. [title] is the clean label, [lookupName] the raw name. */
+data class SearchResult(
+    val kind: ContentKind, val sourceId: Long, val id: String, val title: String, val imageUrl: String?,
+    val tmdbId: Long? = null, val lookupName: String = title,
+) {
     val key: String get() = "${kind.name}:$sourceId:$id"
 }
 
@@ -67,13 +71,13 @@ class HomeSearchViewModel(private val repo: LibraryRepository) : ViewModel() {
 
     private fun resultsOf(kind: ContentKind, query: String): Flow<List<SearchResult>> = when (kind) {
         ContentKind.LIVE -> repo.searchLive(query, SEARCH_LIMIT_PER_KIND).map { list ->
-            list.map { SearchResult(kind, it.sourceId, it.id, it.name, it.logoUrl) }
+            list.map { SearchResult(kind, it.sourceId, it.id, it.label, it.logoUrl, lookupName = it.name) }
         }
         ContentKind.MOVIE -> repo.searchMovies(query, SEARCH_LIMIT_PER_KIND).map { list ->
-            list.map { SearchResult(kind, it.sourceId, it.id, it.name, it.posterUrl, it.tmdbId) }
+            list.map { SearchResult(kind, it.sourceId, it.id, it.label, it.posterUrl, it.tmdbId, it.name) }
         }
         ContentKind.SERIES -> repo.searchSeries(query, SEARCH_LIMIT_PER_KIND).map { list ->
-            list.map { SearchResult(kind, it.sourceId, it.id, it.name, it.coverUrl, it.tmdbId) }
+            list.map { SearchResult(kind, it.sourceId, it.id, it.label, it.coverUrl, it.tmdbId, it.name) }
         }
     }
 }

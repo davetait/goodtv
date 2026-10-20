@@ -40,7 +40,7 @@ fun PosterGrid(
         modifier = modifier,
     ) {
         itemsIndexed(items, key = { i, _ -> keys[i] }) { i, item ->
-            val tmdb = rememberTmdbMeta(kind.tmdbKind(), item.tmdbId, item.title, POSTER_SETTLE_MS)
+            val tmdb = rememberTmdbMeta(kind.tmdbKind(), item.tmdbId, item.lookupName, POSTER_SETTLE_MS)
             PosterCard(
                 title = item.title, imageUrl = item.imageUrl, onClick = { onItem(item) }, rating = tmdb?.reliableRating,
                 modifier = Modifier.rememberedFocus(focus, keys[i], isTarget = keys[i] == target, requested = requested),

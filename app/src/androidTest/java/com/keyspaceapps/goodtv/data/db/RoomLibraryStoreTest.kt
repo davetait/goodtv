@@ -285,4 +285,26 @@ class RoomLibraryStoreTest {
         assertEquals(listOf("100% Hits"), store.searchLive("100%", 10).first().map { it.name })
         assertEquals(listOf("A_B"), store.searchLive("a_b", 10).first().map { it.name })
     }
+
+    @Test
+    fun listsSortAndSearchByCleanTitleNotTag() = runBlocking {
+        val a = store.insertSource(record("A"))
+        fun s(id: String, raw: String, title: String, lang: String?) = Series(a, id, "s1", raw, null, null, null, title = title, language = lang)
+        store.replaceCatalog(
+            a,
+            catalog(a, live = 0, movies = 0, series = 0).copy(
+                series = listOf(
+                    s("1", "EN - Zorro", "Zorro", "EN"),
+                    s("2", "4K-AR - Breaking Bad", "Breaking Bad", "AR"),
+                    s("3", "DE - Breaking Bad", "Breaking Bad", "DE"),
+                    s("4", "AR-SUBS - Arrow", "Arrow", "AR-SUB"),
+                ),
+            ),
+        )
+        assertEquals(listOf("4", "2", "3", "1"), store.observeSeries(a, "s1", 10).first().map { it.id })
+        // "ar" no longer matches every Arabic-tagged title; "br" finds Breaking Bad by its own name, first.
+        assertEquals(listOf("4"), store.searchSeries("arr", 10).first().map { it.id })
+        assertEquals(listOf("2", "3"), store.searchSeries("break", 10).first().map { it.id })
+        assertEquals("Breaking Bad", store.observeSeries(a, "s1", 10).first()[1].title)
+    }
 }

@@ -47,6 +47,7 @@ import com.keyspaceapps.goodtv.ui.browse.Formats
 import com.keyspaceapps.goodtv.ui.goodTvViewModel
 import com.keyspaceapps.goodtv.ui.nav.PlayerKey
 import com.keyspaceapps.goodtv.ui.nav.SeriesDetailKey
+import com.keyspaceapps.goodtv.domain.DisplayTitle
 
 @Composable
 fun SeriesDetailScreen(key: SeriesDetailKey, onPlay: (PlayerKey) -> Unit) {
@@ -66,16 +67,21 @@ private fun Centered(text: String) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant) }
 }
 
-fun episodeLine(e: Episode): String = Formats.metaLine(listOf("E${e.number}", e.title, Formats.duration(e.durationSecs)))
+/** "E3 · Pilot · 45m"; the episode title loses the series name and "S01E03" panels prefix it with. */
+fun episodeLine(e: Episode, seriesTitle: String): String =
+    Formats.metaLine(listOf("E${e.number}", DisplayTitle.episodeTitle(e.title, seriesTitle), Formats.duration(e.durationSecs)))
 
 fun episodePlayerKey(detail: SeriesDetail, e: Episode) = PlayerKey(
     e.sourceId, PlayerKey.KIND_EPISODE, e.id, e.containerExtension,
-    "${detail.series.name} · S${e.season}E${e.number} ${e.title}",
+    DisplayTitle.parse(detail.series.name).let { d ->
+        listOfNotNull(d.label, "S${e.season}E${e.number}", DisplayTitle.episodeTitle(e.title, d.title)).joinToString(" · ")
+    },
 )
 
 @Composable
 private fun SeriesDetailContent(state: SeriesDetailViewModel.State.Ready, tmdb: TmdbMeta?, onSelectSeason: (Int) -> Unit, onPlay: (PlayerKey) -> Unit) {
     val detail = state.detail
+    val display = DisplayTitle.parse(detail.series.name)
     val episodes = state.episodes()
     val firstEpisodeFocus = remember { FocusRequester() }
     var focusedForSeason by remember { mutableIntStateOf(Int.MIN_VALUE) }
@@ -91,7 +97,7 @@ private fun SeriesDetailContent(state: SeriesDetailViewModel.State.Ready, tmdb: 
                 }
             }
             Column(Modifier.padding(start = 40.dp).weight(1f)) {
-                Text(detail.series.name, style = MaterialTheme.typography.headlineLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(display.labelWithoutYear, style = MaterialTheme.typography.headlineLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(8.dp))
                 Text(
                     Formats.metaLine(listOf(Formats.year(detail.releaseDate), detail.genre, detailRating(tmdb, detail.series.rating))),
@@ -134,7 +140,7 @@ private fun SeriesDetailContent(state: SeriesDetailViewModel.State.Ready, tmdb: 
                         ListItem(
                             selected = false,
                             onClick = { onPlay(episodePlayerKey(detail, e)) },
-                            headlineContent = { Text(episodeLine(e)) },
+                            headlineContent = { Text(episodeLine(e, display.title)) },
                             supportingContent = e.plot?.let { p -> { Text(p, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
                             modifier = focusModifier.padding(vertical = 2.dp),
                         )

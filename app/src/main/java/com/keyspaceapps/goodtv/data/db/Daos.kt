@@ -58,20 +58,20 @@ interface LibraryDao {
     @Query("SELECT * FROM categories WHERE sourceId = :sourceId AND kind = :kind ORDER BY name")
     fun observeAllCategories(sourceId: Long, kind: String): Flow<List<CategoryEntity>>
 
-    @Query("SELECT * FROM live_channels WHERE sourceId = :sourceId AND categoryId = :categoryId ORDER BY number, name")
+    @Query("SELECT * FROM live_channels WHERE sourceId = :sourceId AND categoryId = :categoryId ORDER BY number, COALESCE(title, name), language")
     fun observeLive(sourceId: Long, categoryId: String): Flow<List<LiveChannelEntity>>
 
-    @Query("SELECT * FROM movies WHERE sourceId = :sourceId AND categoryId = :categoryId ORDER BY addedAt DESC, name LIMIT :limit")
+    @Query("SELECT * FROM movies WHERE sourceId = :sourceId AND categoryId = :categoryId ORDER BY addedAt DESC, COALESCE(title, name), language LIMIT :limit")
     fun observeMovies(sourceId: Long, categoryId: String, limit: Int): Flow<List<MovieEntity>>
 
-    @Query("SELECT * FROM series WHERE sourceId = :sourceId AND categoryId = :categoryId ORDER BY name LIMIT :limit")
+    @Query("SELECT * FROM series WHERE sourceId = :sourceId AND categoryId = :categoryId ORDER BY COALESCE(title, name), language LIMIT :limit")
     fun observeSeries(sourceId: Long, categoryId: String, limit: Int): Flow<List<SeriesEntity>>
 
     @Query(
         """SELECT m.* FROM movies m JOIN sources s ON s.id = m.sourceId
            WHERE s.enabled = 1 AND m.categoryId IS NOT NULL
              AND NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = m.sourceId AND h.kind = 'MOVIE' AND h.categoryId = m.categoryId)
-           ORDER BY m.sourceId, m.categoryId, m.addedAt DESC, m.name""",
+           ORDER BY m.sourceId, m.categoryId, m.addedAt DESC, COALESCE(m.title, m.name), m.language""",
     )
     fun observeEnabledMovies(): Flow<List<MovieEntity>>
 
@@ -79,35 +79,35 @@ interface LibraryDao {
         """SELECT x.* FROM series x JOIN sources s ON s.id = x.sourceId
            WHERE s.enabled = 1 AND x.categoryId IS NOT NULL
              AND NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = x.sourceId AND h.kind = 'SERIES' AND h.categoryId = x.categoryId)
-           ORDER BY x.sourceId, x.categoryId, x.name""",
+           ORDER BY x.sourceId, x.categoryId, COALESCE(x.title, x.name), x.language""",
     )
     fun observeEnabledSeries(): Flow<List<SeriesEntity>>
 
-    // Search: name contains [pattern] (already LIKE-escaped with backslash), names starting with it first.
+    // Search: clean title contains [pattern] (already LIKE-escaped with backslash), titles starting with it first.
     // Enabled sources only; items in hidden categories are left out, uncategorised ones are kept.
     @Query(
         """SELECT c.* FROM live_channels c JOIN sources s ON s.id = c.sourceId
-           WHERE s.enabled = 1 AND c.name LIKE '%' || :pattern || '%' ESCAPE '\'
+           WHERE s.enabled = 1 AND COALESCE(c.title, c.name) LIKE '%' || :pattern || '%' ESCAPE '\'
              AND NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = c.sourceId AND h.kind = 'LIVE' AND h.categoryId = c.categoryId)
-           ORDER BY CASE WHEN c.name LIKE :pattern || '%' ESCAPE '\' THEN 0 ELSE 1 END, c.name
+           ORDER BY CASE WHEN COALESCE(c.title, c.name) LIKE :pattern || '%' ESCAPE '\' THEN 0 ELSE 1 END, COALESCE(c.title, c.name), c.language
            LIMIT :limit""",
     )
     fun searchLive(pattern: String, limit: Int): Flow<List<LiveChannelEntity>>
 
     @Query(
         """SELECT m.* FROM movies m JOIN sources s ON s.id = m.sourceId
-           WHERE s.enabled = 1 AND m.name LIKE '%' || :pattern || '%' ESCAPE '\'
+           WHERE s.enabled = 1 AND COALESCE(m.title, m.name) LIKE '%' || :pattern || '%' ESCAPE '\'
              AND NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = m.sourceId AND h.kind = 'MOVIE' AND h.categoryId = m.categoryId)
-           ORDER BY CASE WHEN m.name LIKE :pattern || '%' ESCAPE '\' THEN 0 ELSE 1 END, m.name
+           ORDER BY CASE WHEN COALESCE(m.title, m.name) LIKE :pattern || '%' ESCAPE '\' THEN 0 ELSE 1 END, COALESCE(m.title, m.name), m.language
            LIMIT :limit""",
     )
     fun searchMovies(pattern: String, limit: Int): Flow<List<MovieEntity>>
 
     @Query(
         """SELECT x.* FROM series x JOIN sources s ON s.id = x.sourceId
-           WHERE s.enabled = 1 AND x.name LIKE '%' || :pattern || '%' ESCAPE '\'
+           WHERE s.enabled = 1 AND COALESCE(x.title, x.name) LIKE '%' || :pattern || '%' ESCAPE '\'
              AND NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = x.sourceId AND h.kind = 'SERIES' AND h.categoryId = x.categoryId)
-           ORDER BY CASE WHEN x.name LIKE :pattern || '%' ESCAPE '\' THEN 0 ELSE 1 END, x.name
+           ORDER BY CASE WHEN COALESCE(x.title, x.name) LIKE :pattern || '%' ESCAPE '\' THEN 0 ELSE 1 END, COALESCE(x.title, x.name), x.language
            LIMIT :limit""",
     )
     fun searchSeries(pattern: String, limit: Int): Flow<List<SeriesEntity>>
@@ -187,7 +187,7 @@ interface GenreDao {
         """SELECT m.* FROM movies m JOIN sources s ON s.id = m.sourceId
            WHERE s.enabled = 1 AND m.tmdbId IN (SELECT tmdbId FROM tmdb_genres WHERE kind = 'MOVIE' AND genre = :genre)
              AND NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = m.sourceId AND h.kind = 'MOVIE' AND h.categoryId = m.categoryId)
-           ORDER BY m.addedAt DESC, m.name LIMIT :limit""",
+           ORDER BY m.addedAt DESC, COALESCE(m.title, m.name), m.language LIMIT :limit""",
     )
     fun observeMovies(genre: String, limit: Int): Flow<List<MovieEntity>>
 
@@ -196,7 +196,7 @@ interface GenreDao {
            WHERE s.enabled = 1
              AND EXISTS (SELECT 1 FROM series_genres g WHERE g.sourceId = x.sourceId AND g.seriesId = x.id AND g.genre = :genre)
              AND NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = x.sourceId AND h.kind = 'SERIES' AND h.categoryId = x.categoryId)
-           ORDER BY x.name LIMIT :limit""",
+           ORDER BY COALESCE(x.title, x.name), x.language LIMIT :limit""",
     )
     fun observeSeries(genre: String, limit: Int): Flow<List<SeriesEntity>>
 

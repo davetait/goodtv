@@ -68,4 +68,20 @@ class MigrationTest {
         db.execSQL("INSERT INTO tmdb_genre_status (kind, tmdbId, fetchedAt) VALUES ('MOVIE', 949, 1)")
         db.close()
     }
+
+    /** v4 → v5 adds clean-title columns; existing rows keep working on their raw name until the next sync. */
+    @Test
+    fun migrate4To5AddsTitleColumns() {
+        helper.createDatabase(dbName, 4).apply {
+            execSQL("INSERT INTO sources (id, type, nickname, configJson, enabled, lastSyncAt, lastError, createdAt) VALUES (1, 'XTREAM', 'Home', '{\"type\":\"xtream\",\"server\":\"http://s\",\"username\":\"u\",\"password\":\"p\"}', 1, 1700000000000, NULL, 0)")
+            execSQL("INSERT INTO live_channels (sourceId, id, categoryId, name, logoUrl, number) VALUES (1, 'l1', 'c', 'UK: BBC ONE', NULL, 1)")
+            close()
+        }
+        val db = helper.runMigrationsAndValidate(dbName, 5, true, MIGRATION_4_5)
+        db.query("SELECT name, title, language FROM live_channels").use { c ->
+            c.moveToFirst(); assertEquals("UK: BBC ONE", c.getString(0)); assertTrue(c.isNull(1)); assertTrue(c.isNull(2))
+        }
+        db.query("SELECT lastSyncAt FROM sources").use { c -> c.moveToFirst(); assertTrue(c.isNull(0)) }
+        db.close()
+    }
 }

@@ -35,6 +35,7 @@ data class CategoryEntity(val sourceId: Long, val kind: String, val id: String, 
 )
 data class LiveChannelEntity(
     val sourceId: Long, val id: String, val categoryId: String?, val name: String, val logoUrl: String?, val number: Int?,
+    val title: String? = null, val language: String? = null, val quality: String? = null,
 )
 
 @Entity(
@@ -46,6 +47,7 @@ data class LiveChannelEntity(
 data class MovieEntity(
     val sourceId: Long, val id: String, val categoryId: String?, val name: String, val posterUrl: String?,
     val containerExtension: String, val rating: Double?, val addedAt: Long?, val tmdbId: Long? = null,
+    val title: String? = null, val language: String? = null, val quality: String? = null,
 )
 
 @Entity(
@@ -56,7 +58,7 @@ data class MovieEntity(
 )
 data class SeriesEntity(
     val sourceId: Long, val id: String, val categoryId: String?, val name: String, val coverUrl: String?, val plot: String?, val rating: Double?,
-    val tmdbId: Long? = null,
+    val tmdbId: Long? = null, val title: String? = null, val language: String? = null, val quality: String? = null,
 )
 
 /** Full movie detail snapshot (includes the movie fields so the detail survives a catalog refresh). */

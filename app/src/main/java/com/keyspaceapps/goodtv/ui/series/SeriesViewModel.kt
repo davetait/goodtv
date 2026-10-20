@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import com.keyspaceapps.goodtv.domain.label
 
 class SeriesViewModel(repo: LibraryRepository) : ViewModel() {
     private val categories = repo.categories(ContentKind.SERIES)
@@ -34,10 +35,10 @@ class SeriesViewModel(repo: LibraryRepository) : ViewModel() {
     /** null until the first query result arrives, so the screen can tell "loading" from "empty". */
     val rows: StateFlow<List<CategoryRow>?> = rowsFlow(
         categories,
-        repo.seriesByCategory(ROW_LIMIT + 1).map { grouped -> grouped.mapValues { (_, list) -> list.map { RowItem(it.sourceId, it.id, it.name, it.coverUrl, it.tmdbId) } } },
+        repo.seriesByCategory(ROW_LIMIT + 1).map { grouped -> grouped.mapValues { (_, list) -> list.map { RowItem(it.sourceId, it.id, it.label, it.coverUrl, it.tmdbId, lookupName = it.name) } } },
     ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val genres = GenreFilter(viewModelScope, repo.genreCounts(ContentKind.SERIES)) { g ->
-        repo.seriesByGenre(g, GENRE_LIMIT).map { list -> list.map { RowItem(it.sourceId, it.id, it.name, it.coverUrl, it.tmdbId) } }
+        repo.seriesByGenre(g, GENRE_LIMIT).map { list -> list.map { RowItem(it.sourceId, it.id, it.label, it.coverUrl, it.tmdbId, lookupName = it.name) } }
     }
 }

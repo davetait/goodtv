@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import com.keyspaceapps.goodtv.domain.label
 
 /** [genreFill] is the background TMDB genre fill's state, for the progress note; null in tests. */
 class MoviesViewModel(repo: LibraryRepository, genreFill: StateFlow<TmdbGenreFetcher.State>? = null) : ViewModel() {
@@ -37,11 +38,11 @@ class MoviesViewModel(repo: LibraryRepository, genreFill: StateFlow<TmdbGenreFet
     /** null until the first query result arrives, so the screen can tell "loading" from "empty". */
     val rows: StateFlow<List<CategoryRow>?> = rowsFlow(
         categories,
-        repo.moviesByCategory(ROW_LIMIT + 1).map { grouped -> grouped.mapValues { (_, list) -> list.map { RowItem(it.sourceId, it.id, it.name, it.posterUrl, it.tmdbId) } } },
+        repo.moviesByCategory(ROW_LIMIT + 1).map { grouped -> grouped.mapValues { (_, list) -> list.map { RowItem(it.sourceId, it.id, it.label, it.posterUrl, it.tmdbId, lookupName = it.name) } } },
     ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val genres = GenreFilter(viewModelScope, repo.genreCounts(ContentKind.MOVIE)) { g ->
-        repo.moviesByGenre(g, GENRE_LIMIT).map { list -> list.map { RowItem(it.sourceId, it.id, it.name, it.posterUrl, it.tmdbId) } }
+        repo.moviesByGenre(g, GENRE_LIMIT).map { list -> list.map { RowItem(it.sourceId, it.id, it.label, it.posterUrl, it.tmdbId, lookupName = it.name) } }
     }
 
     val genreFill: StateFlow<TmdbGenreFetcher.State> = genreFill ?: MutableStateFlow(TmdbGenreFetcher.State.Idle)

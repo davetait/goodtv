@@ -39,6 +39,7 @@ import com.keyspaceapps.goodtv.ui.browse.Formats
 import com.keyspaceapps.goodtv.ui.goodTvViewModel
 import com.keyspaceapps.goodtv.ui.nav.MovieDetailKey
 import com.keyspaceapps.goodtv.ui.nav.PlayerKey
+import com.keyspaceapps.goodtv.domain.DisplayTitle
 
 @Composable
 fun MovieDetailScreen(key: MovieDetailKey, onPlay: (PlayerKey) -> Unit) {
@@ -63,6 +64,7 @@ private fun MovieDetailContent(detail: MovieDetail, tmdb: TmdbMeta?, onPlay: (Pl
     val playFocus = remember { FocusRequester() }
     var focusRequested by remember { mutableStateOf(false) }
     val movie = detail.movie
+    val display = DisplayTitle.parse(movie.name)
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         detail.backdropUrl?.let {
@@ -73,7 +75,7 @@ private fun MovieDetailContent(detail: MovieDetail, tmdb: TmdbMeta?, onPlay: (Pl
                 movie.posterUrl?.let { AsyncImage(model = it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
             }
             Column(Modifier.padding(start = 40.dp).weight(1f)) {
-                Text(movie.name, style = MaterialTheme.typography.headlineLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(display.labelWithoutYear, style = MaterialTheme.typography.headlineLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(8.dp))
                 Text(
                     Formats.metaLine(listOf(Formats.year(detail.releaseDate), detail.genre, Formats.duration(detail.durationSecs), detailRating(tmdb, movie.rating))),
@@ -81,7 +83,7 @@ private fun MovieDetailContent(detail: MovieDetail, tmdb: TmdbMeta?, onPlay: (Pl
                 )
                 Spacer(Modifier.height(20.dp))
                 Button(
-                    onClick = { onPlay(PlayerKey(movie.sourceId, PlayerKey.KIND_MOVIE, movie.id, movie.containerExtension, movie.name)) },
+                    onClick = { onPlay(PlayerKey(movie.sourceId, PlayerKey.KIND_MOVIE, movie.id, movie.containerExtension, display.label)) },
                     modifier = Modifier.focusRequester(playFocus).onPlaced {
                         if (!focusRequested) { focusRequested = true; playFocus.requestFocus() }
                     },

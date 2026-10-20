@@ -94,4 +94,19 @@ class XtreamDtosTest {
         assertEquals(1, yes.user_info?.auth)
         assertEquals(0, no.user_info?.auth)
     }
+
+    @Test
+    fun mappersStoreCleanTitlesLanguageAndQuality() {
+        val movie = XtreamMappers.movies(1, listOf(XtVodStream(stream_id = "1", name = "4K-AR - The Matrix (1999)"))).single()
+        assertEquals("4K-AR - The Matrix (1999)", movie.name) // raw name kept for matching
+        assertEquals("The Matrix (1999)", movie.title)
+        assertEquals("AR", movie.language)
+        assertEquals("4K", movie.quality)
+        val series = XtreamMappers.series(1, listOf(XtSeries(series_id = "s", name = "AR-SUBS - Broadchurch (2013) (GB)"))).single()
+        assertEquals("Broadchurch (2013)", series.title)
+        assertEquals("AR-SUB", series.language)
+        val live = XtreamMappers.live(1, listOf(XtLiveStream(stream_id = "l", name = "UK: SKY SPORT NEWS ᴿᴬᵂ"))).single()
+        assertEquals("SKY SPORT NEWS", live.title)
+        assertEquals("UK", live.language)
+    }
 }
