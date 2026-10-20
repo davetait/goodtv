@@ -26,9 +26,10 @@ internal fun SourceRecord.toEntity(json: Json, createdAt: Long) = SourceEntity(
     enabled = enabled, lastSyncAt = lastSyncAt, lastError = lastError, createdAt = createdAt,
 )
 
-internal fun SummaryRow.toSummary() = SourceSummary(id, nickname, SourceType.valueOf(type), liveCount, movieCount, seriesCount, lastSyncAt, lastError)
+internal fun SummaryRow.toSummary() = SourceSummary(id, nickname, SourceType.valueOf(type), liveCount, movieCount, seriesCount, lastSyncAt, lastError, hiddenCount)
 
 internal fun CategoryRow.toDomain() = CategoryWithSource(Category(sourceId, ContentKind.valueOf(kind), id, name), sourceNickname)
+internal fun CategoryEntity.toDomain() = Category(sourceId, ContentKind.valueOf(kind), id, name)
 
 internal fun Category.toEntity() = CategoryEntity(sourceId, kind.name, id, name)
 internal fun LiveChannel.toEntity() = LiveChannelEntity(sourceId, id, categoryId, name, logoUrl, number)

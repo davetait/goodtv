@@ -4,6 +4,7 @@ import androidx.room.withTransaction
 import com.keyspaceapps.goodtv.data.repo.CategoryKey
 import com.keyspaceapps.goodtv.data.repo.LibraryStore
 import com.keyspaceapps.goodtv.domain.Catalog
+import com.keyspaceapps.goodtv.domain.Category
 import com.keyspaceapps.goodtv.domain.CategoryWithSource
 import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.domain.LiveChannel
@@ -25,6 +26,7 @@ class RoomLibraryStore(
 ) : LibraryStore {
     private val sources get() = db.sources()
     private val library get() = db.library()
+    private val hidden get() = db.hidden()
 
     override fun observeSources(): Flow<List<SourceRecord>> = sources.observeAll().map { list -> list.map { it.toRecord(json) } }
     override suspend fun getSources(): List<SourceRecord> = sources.getAll().map { it.toRecord(json) }
@@ -53,6 +55,11 @@ class RoomLibraryStore(
         library.insertLive(catalog.live.map { it.toEntity() })
         library.insertMovies(catalog.movies.map { it.toEntity() })
         library.insertSeries(catalog.series.map { it.toEntity() })
+        // Prune hidden rows for categories that are gone, but only for kinds the panel actually
+        // listed this time: an empty list on a bad day must not wipe the user's choices.
+        ContentKind.entries
+            .filter { kind -> catalog.categories.any { it.kind == kind } }
+            .forEach { kind -> hidden.pruneMissing(sourceId, kind.name) }
     }
 
     override suspend fun markSync(sourceId: Long, syncedAt: Long?, error: String?) = sources.markSync(sourceId, syncedAt, error)
@@ -80,6 +87,20 @@ class RoomLibraryStore(
         library.observeEnabledSeries()
             .map { rows -> rows.groupBy { CategoryKey(it.sourceId, it.categoryId!!) }.mapValues { (_, v) -> v.take(limitPerCategory).map { it.toDomain() } } }
             .distinctUntilChanged()
+
+    override fun observeAllCategories(sourceId: Long, kind: ContentKind): Flow<List<Category>> =
+        library.observeAllCategories(sourceId, kind.name).map { rows -> rows.map { it.toDomain() } }
+
+    override fun observeHiddenCategories(sourceId: Long): Flow<Set<Pair<ContentKind, String>>> =
+        hidden.observeForSource(sourceId).map { rows -> rows.map { ContentKind.valueOf(it.kind) to it.categoryId }.toSet() }
+
+    override fun observeHiddenCount(kind: ContentKind): Flow<Int> = hidden.observeHiddenCount(kind.name)
+
+    override suspend fun setCategoriesHidden(sourceId: Long, kind: ContentKind, ids: Collection<String>, hidden: Boolean) {
+        if (ids.isEmpty()) return
+        if (hidden) this.hidden.insertAll(ids.map { HiddenCategoryEntity(sourceId, kind.name, it) })
+        else ids.chunked(500).forEach { this.hidden.delete(sourceId, kind.name, it) }
+    }
 
     override suspend fun getMovie(sourceId: Long, id: String): Movie? = library.getMovie(sourceId, id)?.toDomain()
     override suspend fun getSeries(sourceId: Long, id: String): Series? = library.getSeries(sourceId, id)?.toDomain()

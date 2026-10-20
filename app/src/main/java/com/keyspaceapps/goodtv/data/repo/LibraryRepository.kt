@@ -4,6 +4,7 @@ import com.keyspaceapps.goodtv.data.settings.AppSettings
 import com.keyspaceapps.goodtv.data.source.SourceConfig
 import com.keyspaceapps.goodtv.data.source.SourceException
 import com.keyspaceapps.goodtv.data.source.SourceRegistry
+import com.keyspaceapps.goodtv.domain.Category
 import com.keyspaceapps.goodtv.domain.CategoryWithSource
 import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.domain.LiveChannel
@@ -37,6 +38,11 @@ class LibraryRepository(
     fun series(sourceId: Long, categoryId: String, limit: Int): Flow<List<Series>> = store.observeSeries(sourceId, categoryId, limit)
     fun moviesByCategory(limitPerCategory: Int): Flow<Map<CategoryKey, List<Movie>>> = store.observeMoviesByCategory(limitPerCategory)
     fun seriesByCategory(limitPerCategory: Int): Flow<Map<CategoryKey, List<Series>>> = store.observeSeriesByCategory(limitPerCategory)
+    fun allCategories(sourceId: Long, kind: ContentKind): Flow<List<Category>> = store.observeAllCategories(sourceId, kind)
+    fun hiddenCategories(sourceId: Long): Flow<Set<Pair<ContentKind, String>>> = store.observeHiddenCategories(sourceId)
+    fun hiddenCount(kind: ContentKind): Flow<Int> = store.observeHiddenCount(kind)
+    suspend fun setCategoriesHidden(sourceId: Long, kind: ContentKind, ids: Collection<String>, hidden: Boolean) =
+        store.setCategoriesHidden(sourceId, kind, ids, hidden)
     fun enabledSourceCount(): Flow<Int> = store.observeSources().map { list -> list.count { it.enabled } }
 
     suspend fun source(id: Long): SourceRecord? = store.getSource(id)

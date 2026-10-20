@@ -201,4 +201,60 @@ class RoomLibraryStoreTest {
         assertEquals(listOf("X1"), grouped[CategoryKey(a, "m2")]!!.map { it.id })
         assertEquals(1, store.observeSeriesByCategory(3).first()[CategoryKey(a, "s1")]!!.size)
     }
+
+    @Test
+    fun hiddenCategoriesAreExcludedFromBrowsingQueriesButNotFromAll() = runBlocking {
+        val a = store.insertSource(record("A"))
+        store.replaceCatalog(a, catalog(a, live = 1, movies = 2, series = 1))
+        store.setCategoriesHidden(a, ContentKind.MOVIE, listOf("m1"), hidden = true)
+
+        assertTrue(store.observeCategories(ContentKind.MOVIE).first().isEmpty())
+        assertTrue(store.observeMoviesByCategory(10).first().isEmpty())
+        assertEquals(listOf("m1"), store.observeAllCategories(a, ContentKind.MOVIE).first().map { it.id })
+        assertEquals(setOf(ContentKind.MOVIE to "m1"), store.observeHiddenCategories(a).first())
+        assertEquals(1, store.observeSummaries().first().single().hiddenCount)
+        // other kinds untouched
+        assertEquals(1, store.observeCategories(ContentKind.LIVE).first().size)
+        assertEquals(1, store.observeSeriesByCategory(10).first().size)
+    }
+
+    @Test
+    fun hiddenSetSurvivesReplaceCatalogAndEmptyKindDoesNotPrune() = runBlocking {
+        val a = store.insertSource(record("A"))
+        store.replaceCatalog(a, catalog(a, live = 1))
+        store.setCategoriesHidden(a, ContentKind.LIVE, listOf("c1"), hidden = true)
+
+        // A sync whose live category list is empty (panel hiccup) must keep the choice.
+        val noLiveCats = catalog(a, live = 0).let { c -> c.copy(categories = c.categories.filter { it.kind != ContentKind.LIVE }) }
+        store.replaceCatalog(a, noLiveCats)
+        assertEquals(setOf(ContentKind.LIVE to "c1"), store.observeHiddenCategories(a).first())
+
+        // A sync with live categories that no longer include c1 prunes it.
+        val renamed = catalog(a, live = 1).let { c -> c.copy(categories = c.categories.map { if (it.id == "c1") it.copy(id = "c9", name = "Other") else it }) }
+        store.replaceCatalog(a, renamed)
+        assertTrue(store.observeHiddenCategories(a).first().isEmpty())
+    }
+
+    @Test
+    fun deleteSourceRemovesHiddenRows() = runBlocking {
+        val a = store.insertSource(record("A"))
+        store.replaceCatalog(a, catalog(a, live = 1))
+        store.setCategoriesHidden(a, ContentKind.LIVE, listOf("c1"), hidden = true)
+        store.deleteSource(a)
+        // Assert on the deleted id: a fresh autoincrement id would be empty whether or not the cascade ran.
+        assertTrue(store.observeHiddenCategories(a).first().isEmpty())
+        val again = store.insertSource(record("A"))
+        store.replaceCatalog(again, catalog(again, live = 1))
+        assertEquals(1, store.observeCategories(ContentKind.LIVE).first().size)
+    }
+
+    @Test
+    fun setCategoriesHiddenFalseRemovesRows() = runBlocking {
+        val a = store.insertSource(record("A"))
+        store.replaceCatalog(a, catalog(a, live = 1))
+        store.setCategoriesHidden(a, ContentKind.LIVE, listOf("c1"), hidden = true)
+        store.setCategoriesHidden(a, ContentKind.LIVE, listOf("c1"), hidden = false)
+        assertTrue(store.observeHiddenCategories(a).first().isEmpty())
+        assertEquals(0, store.observeSummaries().first().single().hiddenCount)
+    }
 }

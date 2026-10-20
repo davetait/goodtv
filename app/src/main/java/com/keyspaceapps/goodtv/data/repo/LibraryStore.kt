@@ -1,6 +1,7 @@
 package com.keyspaceapps.goodtv.data.repo
 
 import com.keyspaceapps.goodtv.domain.Catalog
+import com.keyspaceapps.goodtv.domain.Category
 import com.keyspaceapps.goodtv.domain.CategoryWithSource
 import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.domain.LiveChannel
@@ -41,6 +42,13 @@ interface LibraryStore {
      */
     fun observeMoviesByCategory(limitPerCategory: Int): Flow<Map<CategoryKey, List<Movie>>>
     fun observeSeriesByCategory(limitPerCategory: Int): Flow<Map<CategoryKey, List<Series>>>
+
+    /** Every category of one source and kind, hidden or not, in name order (for the Categories screen). */
+    fun observeAllCategories(sourceId: Long, kind: ContentKind): Flow<List<Category>>
+    fun observeHiddenCategories(sourceId: Long): Flow<Set<Pair<ContentKind, String>>>
+    /** Hidden categories of [kind] that still exist, across enabled sources. */
+    fun observeHiddenCount(kind: ContentKind): Flow<Int>
+    suspend fun setCategoriesHidden(sourceId: Long, kind: ContentKind, ids: Collection<String>, hidden: Boolean)
 
     suspend fun getMovie(sourceId: Long, id: String): Movie?
     suspend fun getSeries(sourceId: Long, id: String): Series?

@@ -102,4 +102,15 @@ class MoviesScreenTest {
         composeRule.waitForIdle()
         assertEquals(PlayerKey(sourceA, PlayerKey.KIND_MOVIE, "act-01", "mkv", "Act 01"), played)
     }
+
+    @Test
+    fun allHiddenShowsEverythingHiddenMessageNotNoSources() {
+        runBlocking {
+            ApplicationProvider.getApplicationContext<android.content.Context>().appGraph().store
+                .setCategoriesHidden(sourceA, ContentKind.MOVIE, listOf("act", "dra"), true)
+        }
+        composeRule.setContent { GoodTvTheme { MoviesScreen(onMovie = {}, onSeeAll = {}) } }
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasText("Everything is hidden", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(0, composeRule.onAllNodes(hasText("No sources yet", substring = true)).fetchSemanticsNodes().size)
+    }
 }
