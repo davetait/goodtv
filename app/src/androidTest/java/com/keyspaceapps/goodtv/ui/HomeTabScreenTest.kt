@@ -34,11 +34,14 @@ import com.keyspaceapps.goodtv.domain.Category
 import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.domain.LiveChannel
 import com.keyspaceapps.goodtv.domain.Movie
+import com.keyspaceapps.goodtv.domain.Series
+import com.keyspaceapps.goodtv.data.tmdb.PopularMoviesQuery
+import com.keyspaceapps.goodtv.data.tmdb.PopularShowsQuery
 import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 
-/** The Home tab's layout skeleton: search bar on top, the rails, focus on the first tile, search the D-pad can pass through. */
+/** The Home tab's layout skeleton: search bar on top, the rails (popular rows from stored rankings), focus on the first tile, search the D-pad can pass through. */
 @OptIn(ExperimentalTestApi::class)
 class HomeTabScreenTest {
     @get:Rule
@@ -49,7 +52,7 @@ class HomeTabScreenTest {
     fun tearDown() { scenario?.close() }
 
     /** Seed before launching so HomeViewModel resolves the initial tab against real data. An unknown tab name means "none saved". */
-    private fun seedAndLaunch(lastTab: String) {
+    private fun seedAndLaunch(lastTab: String, ranked: Boolean = true) {
         runBlocking {
             val graph = ApplicationProvider.getApplicationContext<android.content.Context>().appGraph()
             graph.db.clearAllTables()
@@ -60,17 +63,22 @@ class HomeTabScreenTest {
                 Catalog(
                     categories = listOf(Category(id, ContentKind.LIVE, "c1", "News"), Category(id, ContentKind.MOVIE, "m1", "Action")),
                     live = listOf(LiveChannel(id, "l1", "c1", "Matrix News", null, 1)),
-                    movies = listOf(Movie(id, "mv1", "m1", "The Matrix", null, "mp4", null, null)),
-                    series = emptyList(),
+                    movies = listOf(Movie(id, "mv1", "m1", "The Matrix", null, "mp4", null, null), Movie(id, "mv2", "m1", "Heat", null, "mp4", null, null, tmdbId = 949)),
+                    series = listOf(Series(id, "sr1", null, "Dark", null, null, null, tmdbId = 70523)),
                 ),
             )
+            // Rankings stored "now", so nothing is fetched (TMDB is off in tests anyway).
+            if (ranked) {
+                graph.db.popular().replace(PopularMoviesQuery.listKey, listOf(949), System.currentTimeMillis())
+                graph.db.popular().replace(PopularShowsQuery.listKey, listOf(70523), System.currentTimeMillis())
+            }
         }
         scenario = ActivityScenario.launch(MainActivity::class.java)
     }
 
-    private fun waitFor(text: String) {
+    private fun waitFor(text: String, substring: Boolean = false) {
         try {
-            composeRule.waitUntil(10_000) { composeRule.onAllNodes(hasText(text)).fetchSemanticsNodes().isNotEmpty() }
+            composeRule.waitUntil(10_000) { composeRule.onAllNodes(hasText(text, substring = substring)).fetchSemanticsNodes().isNotEmpty() }
         } catch (e: Throwable) {
             composeRule.onRoot(useUnmergedTree = true).printToLog("GoodTvTree"); throw e
         }
@@ -79,22 +87,30 @@ class HomeTabScreenTest {
     @Test
     fun showsSearchAndRowsWithFocusOnFirstTile() {
         seedAndLaunch("HOME")
-        waitFor("Popular Movies")
+        waitFor("Popular Shows")
         composeRule.onNodeWithText("Search movies, shows and channels").assertIsDisplayed()
-        // Nothing watched yet, so no Continue Watching row.
+        // Nothing watched yet, so no Continue Watching row; the popular rows show their ranked titles.
         composeRule.onAllNodes(hasText("Continue Watching")).assertCountEquals(0)
-        composeRule.waitUntil(5_000) { runCatching { composeRule.onNodeWithText("Movie 1").assertIsFocused() }.isSuccess }
-
+        composeRule.onNodeWithText("Popular Movies").assertIsDisplayed()
+        composeRule.waitUntil(5_000) { runCatching { composeRule.onNodeWithText("Heat").assertIsFocused() }.isSuccess }
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionDown) }
-        composeRule.onNodeWithText("Show 1").assertIsFocused()
-        composeRule.onNodeWithText("Popular Shows").assertIsDisplayed()
+        composeRule.onNodeWithText("Dark").assertIsFocused()
+    }
+
+    /** No rankings and nothing watched (e.g. TMDB not set up): a hint, and the scope dropdown takes focus. */
+    @Test
+    fun withNoRowsAHintShowsAndScopeTakesFocus() {
+        seedAndLaunch("HOME", ranked = false)
+        waitFor("Popular movies and shows appear here", substring = true)
+        composeRule.onAllNodes(hasText("Popular Movies")).assertCountEquals(0)
+        composeRule.waitUntil(5_000) { runCatching { composeRule.onNodeWithText("All").assertIsFocused() }.isSuccess }
     }
 
     @Test
     fun upFromFirstTileFocusesScopeThenRightFocusesSearch() {
         seedAndLaunch("HOME")
-        waitFor("Movie 1")
-        composeRule.waitUntil(5_000) { runCatching { composeRule.onNodeWithText("Movie 1").assertIsFocused() }.isSuccess }
+        waitFor("Heat")
+        composeRule.waitUntil(5_000) { runCatching { composeRule.onNodeWithText("Heat").assertIsFocused() }.isSuccess }
 
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionUp) }
         composeRule.onNodeWithText("All").assertIsFocused()
@@ -108,8 +124,8 @@ class HomeTabScreenTest {
     @Test
     fun selectOnSearchFocusesTheFieldAndDownLeavesIt() {
         seedAndLaunch("HOME")
-        waitFor("Movie 1")
-        composeRule.waitUntil(5_000) { runCatching { composeRule.onNodeWithText("Movie 1").assertIsFocused() }.isSuccess }
+        waitFor("Heat")
+        composeRule.waitUntil(5_000) { runCatching { composeRule.onNodeWithText("Heat").assertIsFocused() }.isSuccess }
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionUp) }
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionRight) }
         composeRule.onNode(hasSetTextAction()).assertIsNotFocused()
@@ -126,26 +142,26 @@ class HomeTabScreenTest {
     @Test
     fun homeIsTheDefaultTabWhenNoneIsSaved() {
         seedAndLaunch("")
-        waitFor("Popular Movies")
+        waitFor("Popular Shows")
         composeRule.onNodeWithText("Home").assertIsSelected()
     }
 
     @Test
     fun searchShowsMatchesOfEveryKindLabelledByKind() {
         seedAndLaunch("HOME")
-        waitFor("Movie 1")
+        waitFor("Heat")
         composeRule.onNode(hasSetTextAction()).performTextInput("matrix")
         waitFor("The Matrix")
         composeRule.onNodeWithText("Matrix News").assertIsDisplayed()
         composeRule.onNodeWithText("Channel").assertIsDisplayed()
         composeRule.onNodeWithText("Movie").assertIsDisplayed()
-        composeRule.onAllNodes(hasText("Popular Movies")).assertCountEquals(0)
+        composeRule.onAllNodes(hasText("Popular Shows")).assertCountEquals(0)
     }
 
     @Test
     fun noMatchesSaysSo() {
         seedAndLaunch("HOME")
-        waitFor("Movie 1")
+        waitFor("Heat")
         composeRule.onNode(hasSetTextAction()).performTextInput("zzz")
         waitFor("Nothing matches “zzz”")
     }
@@ -154,7 +170,7 @@ class HomeTabScreenTest {
     @Test
     fun scopeDropdownNarrowsToOneKindAndReturnsFocus() {
         seedAndLaunch("HOME")
-        waitFor("Movie 1")
+        waitFor("Heat")
         composeRule.onNode(hasSetTextAction()).performTextInput("matrix")
         waitFor("Matrix News")
 

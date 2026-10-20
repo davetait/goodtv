@@ -76,6 +76,67 @@ class TmdbApi(
             TmdbSearchPage.serializer(TmdbTvResult.serializer()),
         )?.results.orEmpty()
 
+    /**
+     * Discover movies on subscription ([flatrate]) streaming in [region] on any of [providers]
+     * (TMDB watch-provider ids, which differ by region), released between [releasedFrom] and
+     * [releasedTo] (ISO dates), with at least [minVotes] votes, most popular first. One page is 20.
+     */
+    suspend fun discoverStreamingMovies(
+        region: String,
+        providers: List<Int>,
+        releasedFrom: String,
+        releasedTo: String,
+        minVotes: Int,
+        page: Int,
+        language: String,
+    ): TmdbSearchPage<TmdbMovieResult> =
+        get(
+            url("discover/movie", language) {
+                addQueryParameter("watch_region", region)
+                addQueryParameter("with_watch_providers", providers.joinToString("|"))
+                addQueryParameter("with_watch_monetization_types", "flatrate")
+                addQueryParameter("primary_release_date.gte", releasedFrom)
+                addQueryParameter("primary_release_date.lte", releasedTo)
+                addQueryParameter("vote_count.gte", minVotes.toString())
+                addQueryParameter("sort_by", "popularity.desc")
+                addQueryParameter("page", page.toString())
+            },
+            TmdbSearchPage.serializer(TmdbMovieResult.serializer()),
+        ) ?: TmdbSearchPage()
+
+    /**
+     * Discover TV shows on subscription streaming in [region] on any of [providers] that aired an
+     * episode between [airedFrom] and [airedTo] and premiered on or after [premieredFrom] (ISO
+     * dates), with at least [minVotes] votes and none of [withoutGenres] (TMDB TV genre ids), most
+     * popular first. One page is 20.
+     */
+    suspend fun discoverStreamingTv(
+        region: String,
+        providers: List<Int>,
+        airedFrom: String,
+        airedTo: String,
+        premieredFrom: String,
+        minVotes: Int,
+        withoutGenres: List<Int>,
+        page: Int,
+        language: String,
+    ): TmdbSearchPage<TmdbTvResult> =
+        get(
+            url("discover/tv", language) {
+                addQueryParameter("watch_region", region)
+                addQueryParameter("with_watch_providers", providers.joinToString("|"))
+                addQueryParameter("with_watch_monetization_types", "flatrate")
+                addQueryParameter("air_date.gte", airedFrom)
+                addQueryParameter("air_date.lte", airedTo)
+                addQueryParameter("first_air_date.gte", premieredFrom)
+                addQueryParameter("vote_count.gte", minVotes.toString())
+                if (withoutGenres.isNotEmpty()) addQueryParameter("without_genres", withoutGenres.joinToString(","))
+                addQueryParameter("sort_by", "popularity.desc")
+                addQueryParameter("page", page.toString())
+            },
+            TmdbSearchPage.serializer(TmdbTvResult.serializer()),
+        ) ?: TmdbSearchPage()
+
     private fun url(path: String, language: String, extra: HttpUrl.Builder.() -> Unit = {}): HttpUrl =
         baseUrl.newBuilder().addPathSegments(path).apply {
             addQueryParameter("language", language)

@@ -158,6 +158,18 @@ data class TmdbGenreEntity(val kind: String, val tmdbId: Long, val genre: String
 @Entity(tableName = "tmdb_genre_status", primaryKeys = ["kind", "tmdbId"])
 data class TmdbGenreStatusEntity(val kind: String, val tmdbId: Long, val fetchedAt: Long)
 
+/** A ranked TMDB list (Home's Popular Movies) and when it was fetched; [listKey] names the query. */
+@Entity(tableName = "tmdb_lists")
+data class TmdbListEntity(@PrimaryKey val listKey: String, val fetchedAt: Long)
+
+/** One entry of a [TmdbListEntity], [rank] 0 = most popular. */
+@Entity(
+    tableName = "tmdb_list_items",
+    primaryKeys = ["listKey", "rank"],
+    foreignKeys = [ForeignKey(entity = TmdbListEntity::class, parentColumns = ["listKey"], childColumns = ["listKey"], onDelete = ForeignKey.CASCADE)],
+)
+data class TmdbListItemEntity(val listKey: String, val rank: Int, val tmdbId: Long)
+
 /** Where the user stopped in a movie or episode ([kind] "MOVIE"/"EPISODE"); kept across re-syncs. */
 @Entity(
     tableName = "watch_progress",

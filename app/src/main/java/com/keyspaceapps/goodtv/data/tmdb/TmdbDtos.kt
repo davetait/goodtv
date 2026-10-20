@@ -43,7 +43,7 @@ data class TmdbTvDetails(
 )
 
 @Serializable
-data class TmdbSearchPage<T>(val page: Int = 1, val results: List<T> = emptyList(), val total_results: Int = 0)
+data class TmdbSearchPage<T>(val page: Int = 1, val results: List<T> = emptyList(), val total_results: Int = 0, val total_pages: Int = 1)
 
 @Serializable
 data class TmdbMovieResult(
