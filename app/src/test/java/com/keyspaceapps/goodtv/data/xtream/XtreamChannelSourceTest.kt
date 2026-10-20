@@ -10,6 +10,7 @@ import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
+import okio.Buffer
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -152,5 +153,31 @@ class XtreamChannelSourceTest {
     @Test
     fun streamUrlDelegatesToXtreamUrls() {
         assertEquals(XtreamUrls.stream(cfg, PlayableRef.Live("5")), source.streamUrl(cfg, PlayableRef.Live("5")))
+    }
+
+    /** Real providers answer with tens of MB per list; the client must stream-parse, not buffer the body. */
+    @Test
+    fun fetchCatalogStreamsLargeLists() = runTest {
+        val count = 60_000
+        val big = Buffer()
+        big.writeUtf8("[")
+        for (i in 1..count) {
+            if (i > 1) big.writeUtf8(",")
+            big.writeUtf8("""{"num":$i,"name":"Channel $i with a reasonably long descriptive name to add bulk","stream_type":"live","stream_id":${if (i % 2 == 0) "\"$i\"" else "$i"},"stream_icon":"http://x/$i.png","category_id":"${i % 50}","epg_channel_id":"c$i","tv_archive":0}""")
+        }
+        big.writeUtf8("]")
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when (request.url.queryParameter("action")) {
+                "get_live_streams" -> MockResponse.Builder().code(200).body(big.clone()).build()
+                "get_live_categories", "get_vod_categories", "get_series_categories", "get_vod_streams", "get_series" -> json("[]")
+                else -> json(fixture("auth_ok.json"))
+            }
+        }
+
+        val catalog = source.fetchCatalog(7, cfg).getOrThrow()
+
+        assertEquals(count, catalog.live.size)
+        assertEquals("60000", catalog.live.last().id)
+        assertEquals("1", catalog.live.first().categoryId)
     }
 }

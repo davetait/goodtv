@@ -11,9 +11,14 @@ import com.keyspaceapps.goodtv.domain.SeriesDetail
 import com.keyspaceapps.goodtv.domain.SourceInfo
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 class XtreamChannelSource(private val api: XtreamApi) : ChannelSource {
     override val type = SourceType.XTREAM
+
+    /** At most two list downloads in flight: bounds memory on huge catalogs and is gentler on panels that throttle. */
+    private val concurrentCalls = Semaphore(2)
 
     private fun xtream(config: SourceConfig): SourceConfig.Xtream =
         config as? SourceConfig.Xtream ?: throw IllegalArgumentException("Not an Xtream config")
@@ -27,12 +32,12 @@ class XtreamChannelSource(private val api: XtreamApi) : ChannelSource {
     override suspend fun fetchCatalog(sourceId: Long, config: SourceConfig): Result<Catalog> = runCatchingSource {
         val cfg = xtream(config)
         coroutineScope {
-            val liveCats = async { api.liveCategories(cfg) }
-            val vodCats = async { api.vodCategories(cfg) }
-            val seriesCats = async { api.seriesCategories(cfg) }
-            val live = async { api.liveStreams(cfg) }
-            val vod = async { api.vodStreams(cfg) }
-            val series = async { api.series(cfg) }
+            val liveCats = async { concurrentCalls.withPermit { api.liveCategories(cfg) } }
+            val vodCats = async { concurrentCalls.withPermit { api.vodCategories(cfg) } }
+            val seriesCats = async { concurrentCalls.withPermit { api.seriesCategories(cfg) } }
+            val live = async { concurrentCalls.withPermit { api.liveStreams(cfg) } }
+            val vod = async { concurrentCalls.withPermit { api.vodStreams(cfg) } }
+            val series = async { concurrentCalls.withPermit { api.series(cfg) } }
             XtreamMappers.toCatalog(
                 sourceId,
                 liveCats.await(), vodCats.await(), seriesCats.await(),

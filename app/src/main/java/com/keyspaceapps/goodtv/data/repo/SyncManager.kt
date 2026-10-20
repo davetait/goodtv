@@ -94,8 +94,12 @@ class SyncManager(
             )
         } catch (e: CancellationException) {
             throw e
-        } catch (e: Exception) {
-            val message = e.message ?: e.javaClass.simpleName
+        } catch (e: Throwable) {
+            // Errors too (OutOfMemoryError on a huge catalog): the user must see why nothing synced.
+            val message = when (e) {
+                is OutOfMemoryError -> "Out of memory while loading the catalog; the provider's list is too large"
+                else -> e.message ?: e.javaClass.simpleName
+            }
             runCatching { store.markSync(sourceId, null, message) }
             return Result.failure(SourceException(message, e))
         }
