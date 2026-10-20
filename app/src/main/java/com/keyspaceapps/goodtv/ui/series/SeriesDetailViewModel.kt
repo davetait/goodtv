@@ -9,7 +9,13 @@ import com.keyspaceapps.goodtv.data.tmdb.TmdbRepository
 import com.keyspaceapps.goodtv.domain.Episode
 import com.keyspaceapps.goodtv.domain.SeriesDetail
 import com.keyspaceapps.goodtv.ui.nav.SeriesDetailKey
+import com.keyspaceapps.goodtv.data.progress.WatchProgress
+import com.keyspaceapps.goodtv.data.progress.WatchProgressRepository
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -19,6 +25,7 @@ class SeriesDetailViewModel(
     private val repo: LibraryRepository,
     val key: SeriesDetailKey,
     private val tmdbRepo: TmdbRepository? = null,
+    progressRepo: WatchProgressRepository? = null,
 ) : ViewModel() {
     sealed interface State {
         data object Loading : State
@@ -37,12 +44,19 @@ class SeriesDetailViewModel(
     private val _tmdb = MutableStateFlow<TmdbMeta?>(null)
     val tmdb: StateFlow<TmdbMeta?> = _tmdb
 
+    /** Progress of this series' episodes, newest first; null until loaded. */
+    val progress: StateFlow<List<WatchProgress>?> = (progressRepo?.observeSeries(key.sourceId, key.seriesId) ?: flowOf(emptyList()))
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
     init {
         viewModelScope.launch {
             _state.value = repo.seriesDetail(key.sourceId, key.seriesId).fold(
                 onSuccess = { d ->
                     val first = (d.seasons.map { it.number }.ifEmpty { d.episodes.map { it.season } }).minOrNull() ?: 1
-                    State.Ready(d, first)
+                    // Open on the season the user is part-way through.
+                    val resumeSeason = progressRepo?.observeSeries(key.sourceId, key.seriesId)?.first()
+                        ?.let { SeriesResumes.of(d.episodes, it)?.episode?.season }
+                    State.Ready(d, resumeSeason ?: first)
                 },
                 onFailure = { State.Error(it.message ?: "Could not load series") },
             )

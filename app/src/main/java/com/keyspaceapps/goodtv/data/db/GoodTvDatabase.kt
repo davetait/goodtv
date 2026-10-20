@@ -76,14 +76,28 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
     }
 }
 
+/** v5 → v6: watch progress for resume. DDL matches schemas/6.json. */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `watch_progress` (`sourceId` INTEGER NOT NULL, `kind` TEXT NOT NULL, `itemId` TEXT NOT NULL, " +
+                "`seriesId` TEXT, `positionMs` INTEGER NOT NULL, `durationMs` INTEGER NOT NULL, `finished` INTEGER NOT NULL, " +
+                "`updatedAt` INTEGER NOT NULL, PRIMARY KEY(`sourceId`, `kind`, `itemId`), " +
+                "FOREIGN KEY(`sourceId`) REFERENCES `sources`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_watch_progress_sourceId_seriesId` ON `watch_progress` (`sourceId`, `seriesId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_watch_progress_updatedAt` ON `watch_progress` (`updatedAt`)")
+    }
+}
+
 @Database(
     entities = [
         SourceEntity::class, CategoryEntity::class, LiveChannelEntity::class, MovieEntity::class, SeriesEntity::class,
         MovieDetailEntity::class, SeriesInfoEntity::class, SeasonEntity::class, EpisodeEntity::class,
         HiddenCategoryEntity::class, TmdbMetaEntity::class, TmdbTitleMatchEntity::class,
-        SeriesGenreEntity::class, TmdbGenreEntity::class, TmdbGenreStatusEntity::class,
+        SeriesGenreEntity::class, TmdbGenreEntity::class, TmdbGenreStatusEntity::class, WatchProgressEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true, // schemas/ holds the baseline every future migration is written against
 )
 abstract class GoodTvDatabase : RoomDatabase() {
@@ -92,11 +106,12 @@ abstract class GoodTvDatabase : RoomDatabase() {
     abstract fun hidden(): HiddenCategoryDao
     abstract fun tmdb(): TmdbDao
     abstract fun genres(): GenreDao
+    abstract fun watchProgress(): WatchProgressDao
 
     companion object {
         fun create(context: Context): GoodTvDatabase =
             Room.databaseBuilder(context, GoodTvDatabase::class.java, "goodtv.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .fallbackToDestructiveMigration(dropAllTables = true) // last resort for an unknown version only
                 .build()
     }

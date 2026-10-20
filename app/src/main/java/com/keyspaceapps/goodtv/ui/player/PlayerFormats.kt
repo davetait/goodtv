@@ -7,7 +7,8 @@ object PlayerFormats {
         return if (durationMs > 0) "$pos / ${clock(durationMs)}" else pos
     }
 
-    private fun clock(ms: Long): String {
+    /** "12:40", or "1:05:09" past an hour. */
+    fun clock(ms: Long): String {
         val total = ms / 1000
         val h = total / 3600
         val m = (total % 3600) / 60

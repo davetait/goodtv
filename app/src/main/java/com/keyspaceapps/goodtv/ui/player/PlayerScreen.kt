@@ -23,6 +23,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.nativeKeyCode
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.onPlaced
@@ -45,10 +46,17 @@ import com.keyspaceapps.goodtv.domain.PlayableItem
 import kotlinx.coroutines.delay
 
 private const val OVERLAY_HIDE_MS = 3_000L
+/** How often on-demand playback reports its position while playing. */
+const val PROGRESS_REPORT_MS = 10_000L
 
 /**
  * Full-screen player. Live: title overlay only. On demand: Select toggles play/pause, left/right
  * seek, and a position overlay appears on any key press and hides after a few seconds.
+ *
+ * On demand, playback starts at [startPositionMs] and [onProgress] (position, duration) is called
+ * every [PROGRESS_REPORT_MS] while playing, on pause, when the app goes to the background and when
+ * the screen closes; never before playback has actually started, so a resume can't be wiped by
+ * the 0 the player reports before its first seek.
  */
 @OptIn(UnstableApi::class)
 @Composable
@@ -56,6 +64,8 @@ fun PlayerScreen(
     item: PlayableItem,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    startPositionMs: Long = 0,
+    onProgress: ((positionMs: Long, durationMs: Long) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     var isBuffering by remember { mutableStateOf(true) }
@@ -69,9 +79,20 @@ fun PlayerScreen(
 
     val player = remember(item.url) {
         PlayerFactory.create(context).apply {
-            setMediaItem(MediaItem.fromUri(item.url))
+            setMediaItem(MediaItem.fromUri(item.url), if (item.isLive) 0L else startPositionMs)
             playWhenReady = true
             prepare()
+        }
+    }
+
+    val report = remember(player) {
+        var started = false
+        object {
+            fun markStarted() { started = true }
+            fun now() {
+                if (item.isLive || !started || onProgress == null) return
+                onProgress(player.currentPosition, player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L)
+            }
         }
     }
 
@@ -79,12 +100,17 @@ fun PlayerScreen(
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 isBuffering = playbackState == Player.STATE_BUFFERING || playbackState == Player.STATE_IDLE
+                if (playbackState == Player.STATE_ENDED) report.now()
             }
-            override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
+            override fun onIsPlayingChanged(playing: Boolean) {
+                isPlaying = playing
+                if (playing) report.markStarted() else report.now()
+            }
             override fun onPlayerError(e: PlaybackException) { error = e.errorCodeName.removePrefix("ERROR_CODE_").replace('_', ' ').lowercase() }
         }
         player.addListener(listener)
         onDispose {
+            report.now() // leaving the player: save where we got to before releasing it
             player.removeListener(listener)
             player.release()
         }
@@ -96,6 +122,12 @@ fun PlayerScreen(
                 val duration = player.duration.takeIf { it != C.TIME_UNSET } ?: 0L
                 positionText = PlayerFormats.position(player.currentPosition, duration)
                 delay(500)
+            }
+        }
+        LaunchedEffect(player) {
+            while (true) {
+                delay(PROGRESS_REPORT_MS)
+                if (player.isPlaying) report.now()
             }
         }
     }
@@ -111,7 +143,7 @@ fun PlayerScreen(
         var resumeOnStart = false
         val observer = LifecycleEventObserver { _, event ->
             when (PlayerLifecycle.actionFor(event)) {
-                PlayerLifecycleAction.PAUSE -> { resumeOnStart = player.playWhenReady; player.pause() }
+                PlayerLifecycleAction.PAUSE -> { resumeOnStart = player.playWhenReady; player.pause(); report.now() }
                 PlayerLifecycleAction.RESUME -> if (resumeOnStart) player.play()
                 null -> Unit
             }
@@ -133,8 +165,8 @@ fun PlayerScreen(
                 if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
                 lastInteraction = System.currentTimeMillis()
                 overlayVisible = true
-                // On Android, Key.keyCode is the android.view.KeyEvent keycode.
-                when (PlayerKeys.actionFor(event.key.keyCode.toInt(), item.isLive)) {
+                // nativeKeyCode is the android.view.KeyEvent code; Key.keyCode packs it into the upper 32 bits.
+                when (PlayerKeys.actionFor(event.key.nativeKeyCode, item.isLive)) {
                     PlayerAction.TOGGLE_PLAY -> if (player.isPlaying) player.pause() else player.play()
                     PlayerAction.SEEK_FORWARD -> player.seekForward()
                     PlayerAction.SEEK_BACK -> player.seekBack()

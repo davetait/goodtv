@@ -61,6 +61,11 @@
     <string name="tab_sources">Sources</string>
     <string name="see_all">See all</string>
     <string name="play">Play</string>
+    <string name="resume_from">Resume from %1$s</string>
+    <string name="start_over">Start over</string>
+    <string name="watched">Watched</string>
+    <string name="resume_episode">Resume S%1$d E%2$d · %3$s</string>
+    <string name="play_episode">Play S%1$d E%2$d</string>
     <string name="no_sources_yet">No sources yet. Add one to start watching.</string>
 
     <string name="add_source">Add source</string>

@@ -8,7 +8,16 @@ import com.keyspaceapps.goodtv.data.tmdb.TmdbMeta
 import com.keyspaceapps.goodtv.data.tmdb.TmdbRepository
 import com.keyspaceapps.goodtv.domain.MovieDetail
 import com.keyspaceapps.goodtv.ui.nav.MovieDetailKey
+import com.keyspaceapps.goodtv.data.progress.Loaded
+import com.keyspaceapps.goodtv.data.progress.WatchKind
+import com.keyspaceapps.goodtv.data.progress.WatchProgress
+import com.keyspaceapps.goodtv.data.progress.WatchProgressRepository
+import com.keyspaceapps.goodtv.data.progress.WatchRef
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
@@ -17,6 +26,7 @@ class MovieDetailViewModel(
     private val repo: LibraryRepository,
     val key: MovieDetailKey,
     private val tmdbRepo: TmdbRepository? = null,
+    progressRepo: WatchProgressRepository? = null,
 ) : ViewModel() {
     sealed interface State {
         data object Loading : State
@@ -29,6 +39,11 @@ class MovieDetailViewModel(
 
     private val _tmdb = MutableStateFlow<TmdbMeta?>(null)
     val tmdb: StateFlow<TmdbMeta?> = _tmdb
+
+    /** Where the user stopped last time (null until loaded); updates live as the player saves. */
+    val progress: StateFlow<Loaded<WatchProgress?>?> = (progressRepo?.observe(WatchRef(key.sourceId, WatchKind.MOVIE, key.movieId)) ?: flowOf(null))
+        .map { Loaded(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     init {
         viewModelScope.launch {

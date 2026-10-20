@@ -31,6 +31,11 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import com.keyspaceapps.goodtv.data.progress.WatchKind
+import com.keyspaceapps.goodtv.data.progress.WatchProgressRepository
+import com.keyspaceapps.goodtv.data.progress.WatchRef
+import com.keyspaceapps.goodtv.testing.InMemoryWatchProgressStore
+import kotlinx.coroutines.launch
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -122,5 +127,28 @@ class DetailTmdbTest {
         assertNull(off.tmdb.value)
         assertNull(unknown.tmdb.value)
         assertEquals(emptyList<String>(), paths)
+    }
+
+    @Test
+    fun movieDetailReportsLoadedProgressSoTheButtonsDontJump() = runTest(dispatcher) {
+        source.movieDetail = MovieDetail(Movie(sid, "m1", null, "Matrix", null, "mkv", 7.0, null), null, null, null, null, null, null, null)
+        val progress = WatchProgressRepository(InMemoryWatchProgressStore()) { 1L }
+        progress.record(WatchRef(sid, WatchKind.MOVIE, "m1"), 600_000, 8_000_000)
+        val vm = MovieDetailViewModel(repo, MovieDetailKey(sid, "m1"), progressRepo = progress)
+        assertNull("not loaded yet", vm.progress.value)
+        backgroundScope.launch { vm.progress.collect {} }
+        advanceUntilIdle()
+        assertEquals(600_000L, vm.progress.value!!.value!!.positionMs)
+    }
+
+    @Test
+    fun seriesDetailOpensOnTheSeasonBeingWatched() = runTest(dispatcher) {
+        val e = { id: String, season: Int, n: Int -> com.keyspaceapps.goodtv.domain.Episode(sid, "s1", id, season, n, "E$n", "mp4", null, null, null) }
+        source.seriesDetail = SeriesDetail(Series(sid, "s1", null, "GoT", null, null, null), null, null, null, null, null, emptyList(), listOf(e("a", 1, 1), e("b", 2, 1)))
+        val progress = WatchProgressRepository(InMemoryWatchProgressStore()) { 1L }
+        progress.record(WatchRef(sid, WatchKind.EPISODE, "b", "s1"), 600_000, 3_000_000)
+        val vm = SeriesDetailViewModel(repo, SeriesDetailKey(sid, "s1"), progressRepo = progress)
+        advanceUntilIdle()
+        assertEquals(2, (vm.state.value as SeriesDetailViewModel.State.Ready).selectedSeason)
     }
 }

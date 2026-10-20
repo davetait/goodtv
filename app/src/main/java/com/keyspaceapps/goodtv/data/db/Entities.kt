@@ -157,3 +157,15 @@ data class TmdbGenreEntity(val kind: String, val tmdbId: Long, val genre: String
 /** When genres for a TMDB id were last fetched (also for ids TMDB had none for, so they aren't re-asked). */
 @Entity(tableName = "tmdb_genre_status", primaryKeys = ["kind", "tmdbId"])
 data class TmdbGenreStatusEntity(val kind: String, val tmdbId: Long, val fetchedAt: Long)
+
+/** Where the user stopped in a movie or episode ([kind] "MOVIE"/"EPISODE"); kept across re-syncs. */
+@Entity(
+    tableName = "watch_progress",
+    primaryKeys = ["sourceId", "kind", "itemId"],
+    foreignKeys = [ForeignKey(entity = SourceEntity::class, parentColumns = ["id"], childColumns = ["sourceId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("sourceId", "seriesId"), Index("updatedAt")],
+)
+data class WatchProgressEntity(
+    val sourceId: Long, val kind: String, val itemId: String, val seriesId: String?,
+    val positionMs: Long, val durationMs: Long, val finished: Boolean, val updatedAt: Long,
+)

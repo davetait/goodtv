@@ -233,3 +233,17 @@ interface GenreDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertTmdbGenres(rows: List<TmdbGenreEntity>)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertTmdbGenreStatus(rows: List<TmdbGenreStatusEntity>)
 }
+
+@Dao
+interface WatchProgressDao {
+    @Query("SELECT * FROM watch_progress WHERE sourceId = :sourceId AND kind = :kind AND itemId = :itemId")
+    fun observe(sourceId: Long, kind: String, itemId: String): Flow<WatchProgressEntity?>
+
+    @Query("SELECT * FROM watch_progress WHERE sourceId = :sourceId AND kind = 'EPISODE' AND seriesId = :seriesId ORDER BY updatedAt DESC")
+    fun observeSeries(sourceId: Long, seriesId: String): Flow<List<WatchProgressEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(row: WatchProgressEntity)
+
+    @Query("DELETE FROM watch_progress WHERE sourceId = :sourceId AND kind = :kind AND itemId = :itemId")
+    suspend fun delete(sourceId: Long, kind: String, itemId: String)
+}

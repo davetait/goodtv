@@ -9,6 +9,8 @@ import com.keyspaceapps.goodtv.data.db.GoodTvDatabase
 import com.keyspaceapps.goodtv.data.db.RoomLibraryStore
 import com.keyspaceapps.goodtv.data.db.RoomTmdbCache
 import com.keyspaceapps.goodtv.data.db.RoomTmdbGenreStore
+import com.keyspaceapps.goodtv.data.db.RoomWatchProgressStore
+import com.keyspaceapps.goodtv.data.progress.WatchProgressRepository
 import com.keyspaceapps.goodtv.data.repo.LibraryRepository
 import com.keyspaceapps.goodtv.data.repo.LibraryStore
 import com.keyspaceapps.goodtv.data.repo.SyncManager
@@ -83,6 +85,8 @@ class AppGraph(val context: Context) {
     private val tmdbLanguage: () -> String = { Locale.getDefault().toLanguageTag() }
 
     private val defaultTmdb: TmdbRepository by lazy { TmdbRepository(api = tmdbApi, cache = tmdbCache, language = tmdbLanguage) }
+
+    val watchProgress: WatchProgressRepository by lazy { WatchProgressRepository(RoomWatchProgressStore(db.watchProgress())) }
 
     /** Background TMDB genre fill for movies; started on launch after stale sources refresh. */
     val genreFetcher: TmdbGenreFetcher by lazy {

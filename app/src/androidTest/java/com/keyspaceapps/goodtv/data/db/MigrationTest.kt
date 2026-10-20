@@ -84,4 +84,17 @@ class MigrationTest {
         db.query("SELECT lastSyncAt FROM sources").use { c -> c.moveToFirst(); assertTrue(c.isNull(0)) }
         db.close()
     }
+
+    /** v5 → v6 adds watch progress; deleting a source removes its progress. */
+    @Test
+    fun migrate5To6AddsWatchProgress() {
+        helper.createDatabase(dbName, 5).apply {
+            execSQL("INSERT INTO sources (id, type, nickname, configJson, enabled, lastSyncAt, lastError, createdAt) VALUES (1, 'XTREAM', 'Home', '{\"type\":\"xtream\",\"server\":\"http://s\",\"username\":\"u\",\"password\":\"p\"}', 1, 1, NULL, 0)")
+            close()
+        }
+        val db = helper.runMigrationsAndValidate(dbName, 6, true, MIGRATION_5_6)
+        db.execSQL("INSERT INTO watch_progress (sourceId, kind, itemId, seriesId, positionMs, durationMs, finished, updatedAt) VALUES (1, 'MOVIE', 'm1', NULL, 60000, 0, 0, 1)")
+        db.query("SELECT positionMs FROM watch_progress").use { c -> c.moveToFirst(); assertEquals(60000L, c.getLong(0)) }
+        db.close()
+    }
 }
