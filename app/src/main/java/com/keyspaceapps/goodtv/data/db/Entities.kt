@@ -45,7 +45,7 @@ data class LiveChannelEntity(
 )
 data class MovieEntity(
     val sourceId: Long, val id: String, val categoryId: String?, val name: String, val posterUrl: String?,
-    val containerExtension: String, val rating: Double?, val addedAt: Long?,
+    val containerExtension: String, val rating: Double?, val addedAt: Long?, val tmdbId: Long? = null,
 )
 
 @Entity(
@@ -56,6 +56,7 @@ data class MovieEntity(
 )
 data class SeriesEntity(
     val sourceId: Long, val id: String, val categoryId: String?, val name: String, val coverUrl: String?, val plot: String?, val rating: Double?,
+    val tmdbId: Long? = null,
 )
 
 /** Full movie detail snapshot (includes the movie fields so the detail survives a catalog refresh). */
@@ -119,3 +120,18 @@ data class SummaryRow(
 )
 
 data class CategoryRow(val sourceId: Long, val kind: String, val id: String, val name: String, val sourceNickname: String)
+
+/**
+ * Cached TMDB details for one movie or TV series ([kind] is "MOVIE" or "TV"). Kept at most
+ * [com.keyspaceapps.goodtv.data.tmdb.TmdbRepository.META_TTL_MS]; TMDB's terms cap caching at 6 months.
+ */
+@Entity(tableName = "tmdb_meta", primaryKeys = ["kind", "tmdbId"])
+data class TmdbMetaEntity(
+    val kind: String, val tmdbId: Long, val language: String, val title: String, val overview: String?,
+    val rating: Double?, val voteCount: Int, val year: Int?, val genres: String, val runtimeMinutes: Int?,
+    val posterUrl: String?, val backdropUrl: String?, val fetchedAt: Long,
+)
+
+/** Result of a title search for an item without a TMDB id. [tmdbId] null records "no confident match". */
+@Entity(tableName = "tmdb_title_match", primaryKeys = ["kind", "queryKey"])
+data class TmdbTitleMatchEntity(val kind: String, val queryKey: String, val tmdbId: Long?, val fetchedAt: Long)

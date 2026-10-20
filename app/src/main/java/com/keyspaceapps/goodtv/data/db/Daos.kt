@@ -157,3 +157,20 @@ interface HiddenCategoryDao {
     )
     suspend fun pruneMissing(sourceId: Long, kind: String)
 }
+
+@Dao
+interface TmdbDao {
+    @Query("SELECT * FROM tmdb_meta WHERE kind = :kind AND tmdbId = :tmdbId")
+    suspend fun meta(kind: String, tmdbId: Long): TmdbMetaEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertMeta(row: TmdbMetaEntity)
+
+    @Query("SELECT * FROM tmdb_title_match WHERE kind = :kind AND queryKey = :queryKey")
+    suspend fun titleMatch(kind: String, queryKey: String): TmdbTitleMatchEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertTitleMatch(row: TmdbTitleMatchEntity)
+
+    /** Drops cache rows fetched before [before], keeping the cache inside TMDB's 6-month limit. */
+    @Query("DELETE FROM tmdb_meta WHERE fetchedAt < :before") suspend fun pruneMeta(before: Long)
+    @Query("DELETE FROM tmdb_title_match WHERE fetchedAt < :before") suspend fun pruneTitleMatches(before: Long)
+}

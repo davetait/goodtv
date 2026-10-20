@@ -25,6 +25,8 @@ data class Movie(
     val containerExtension: String,
     val rating: Double?,
     val addedAt: Long?,
+    /** themoviedb.org movie id when the provider supplies one. */
+    val tmdbId: Long? = null,
 )
 
 data class Series(
@@ -35,6 +37,8 @@ data class Series(
     val coverUrl: String?,
     val plot: String?,
     val rating: Double?,
+    /** themoviedb.org TV series id when the provider supplies one. */
+    val tmdbId: Long? = null,
 )
 
 data class Catalog(

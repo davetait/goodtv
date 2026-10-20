@@ -21,9 +21,11 @@ class XtreamDtosTest {
     @Test
     fun vodRatingParsesStringOrNumber() {
         val list = json.decodeFromString(ListSerializer(XtVodStream.serializer()), fixture("vod_streams_mixed.json"))
-        assertEquals(listOf(8.5, 8.5), list.map { it.rating })
-        assertEquals(listOf("456", "457"), list.map { it.stream_id })
-        assertEquals(listOf(1609459200L, 1609459201L), list.map { it.added })
+        assertEquals(listOf(8.5, 8.5, null, null, null, null), list.map { it.rating })
+        assertEquals(listOf("456", "457", "458", "459", "460", "461"), list.map { it.stream_id })
+        assertEquals(listOf(1609459200L, 1609459201L, null, null, null, null), list.map { it.added })
+        // Real panel values: "603", 0 (unknown), 155, "", "43332-" (stray dash), an IMDb id (not TMDB).
+        assertEquals(listOf(603L, null, 155L, null, 43332L, null), XtreamMappers.movies(1, list).map { it.tmdbId })
     }
 
     @Test
@@ -80,6 +82,7 @@ class XtreamDtosTest {
     fun seriesListParsesMixed() {
         val list = json.decodeFromString(ListSerializer(XtSeries.serializer()), fixture("series.json"))
         assertEquals(listOf("789", "790"), list.map { it.series_id })
+        assertEquals(listOf(1399L, null), XtreamMappers.series(1, list).map { it.tmdbId })
         assertEquals(7.0, list[1].rating!!, 0.0)
         assertNull(list[1].cover)
     }

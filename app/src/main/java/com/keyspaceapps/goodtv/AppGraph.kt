@@ -6,10 +6,14 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.keyspaceapps.goodtv.data.settings.AppSettings
 import com.keyspaceapps.goodtv.data.db.GoodTvDatabase
 import com.keyspaceapps.goodtv.data.db.RoomLibraryStore
+import com.keyspaceapps.goodtv.data.db.RoomTmdbCache
 import com.keyspaceapps.goodtv.data.repo.LibraryRepository
 import com.keyspaceapps.goodtv.data.repo.LibraryStore
 import com.keyspaceapps.goodtv.data.repo.SyncManager
 import com.keyspaceapps.goodtv.data.source.SourceRegistry
+import com.keyspaceapps.goodtv.data.tmdb.TmdbApi
+import com.keyspaceapps.goodtv.data.tmdb.TmdbCredential
+import com.keyspaceapps.goodtv.data.tmdb.TmdbRepository
 import com.keyspaceapps.goodtv.data.xtream.XtreamApi
 import com.keyspaceapps.goodtv.data.xtream.XtreamChannelSource
 import com.keyspaceapps.goodtv.data.xtream.XtreamJson
@@ -19,6 +23,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 const val USER_AGENT = "GoodTV/0.2"
@@ -57,4 +62,13 @@ class AppGraph(val context: Context) {
     )
     val syncManager: SyncManager by lazy { SyncManager(store, sourceRegistry, appScope) }
     val repository: LibraryRepository by lazy { LibraryRepository(store, sourceRegistry, syncManager, settings) }
+
+    /** TMDB ratings and summaries; a no-op when no TMDB key is configured. Language follows the device. */
+    val tmdb: TmdbRepository by lazy {
+        TmdbRepository(
+            api = TmdbCredential.from(BuildConfig.TMDB_API_KEY)?.let { TmdbApi(okHttp, it) },
+            cache = RoomTmdbCache(db.tmdb()),
+            language = { Locale.getDefault().toLanguageTag() },
+        )
+    }
 }

@@ -34,10 +34,10 @@ internal fun CategoryEntity.toDomain() = Category(sourceId, ContentKind.valueOf(
 internal fun Category.toEntity() = CategoryEntity(sourceId, kind.name, id, name)
 internal fun LiveChannel.toEntity() = LiveChannelEntity(sourceId, id, categoryId, name, logoUrl, number)
 internal fun LiveChannelEntity.toDomain() = LiveChannel(sourceId, id, categoryId, name, logoUrl, number)
-internal fun Movie.toEntity() = MovieEntity(sourceId, id, categoryId, name, posterUrl, containerExtension, rating, addedAt)
-internal fun MovieEntity.toDomain() = Movie(sourceId, id, categoryId, name, posterUrl, containerExtension, rating, addedAt)
-internal fun Series.toEntity() = SeriesEntity(sourceId, id, categoryId, name, coverUrl, plot, rating)
-internal fun SeriesEntity.toDomain() = Series(sourceId, id, categoryId, name, coverUrl, plot, rating)
+internal fun Movie.toEntity() = MovieEntity(sourceId, id, categoryId, name, posterUrl, containerExtension, rating, addedAt, tmdbId)
+internal fun MovieEntity.toDomain() = Movie(sourceId, id, categoryId, name, posterUrl, containerExtension, rating, addedAt, tmdbId)
+internal fun Series.toEntity() = SeriesEntity(sourceId, id, categoryId, name, coverUrl, plot, rating, tmdbId)
+internal fun SeriesEntity.toDomain() = Series(sourceId, id, categoryId, name, coverUrl, plot, rating, tmdbId)
 
 internal fun MovieDetail.toEntity() = MovieDetailEntity(
     movie.sourceId, movie.id, movie.categoryId, movie.name, movie.posterUrl, movie.containerExtension, movie.rating, movie.addedAt,

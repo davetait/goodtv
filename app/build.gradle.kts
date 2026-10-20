@@ -30,6 +30,8 @@ android {
         buildConfigField("String", "XTREAM_SERVER", "\"${localProp("GOODTV_XTREAM_SERVER")}\"")
         buildConfigField("String", "XTREAM_USERNAME", "\"${localProp("GOODTV_XTREAM_USERNAME")}\"")
         buildConfigField("String", "XTREAM_PASSWORD", "\"${localProp("GOODTV_XTREAM_PASSWORD")}\"")
+        // TMDB credential (v3 API key or read access token), all build types; blank turns TMDB off.
+        buildConfigField("String", "TMDB_API_KEY", "\"${localProp("GOODTV_TMDB_API_KEY")}\"")
     }
 
     buildTypes {
