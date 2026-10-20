@@ -3,8 +3,6 @@
     <string name="app_name">GoodTV</string>
     <string name="player_loading">Loading…</string>
     <string name="live_badge">LIVE</string>
-    <string name="paused">Paused</string>
-    <string name="playback_error">Playback failed: %1$s</string>
 
     <string name="tab_home">Home</string>
     <string name="home_search_hint">Search movies, shows and channels</string>
@@ -100,4 +98,20 @@
     <string name="everything_hidden">Everything is hidden. Sources → Categories to show some.</string>
     <string name="nothing_yet">Nothing here yet. A source may still be syncing; check the Sources tab.</string>
     <string name="home_empty">Popular movies and shows appear here once your library has synced. Watch something and it shows up in Continue Watching.</string>
+    <string name="player_play">Play</string>
+    <string name="player_pause">Pause</string>
+    <string name="player_seek">Seek</string>
+    <string name="player_subtitles">Subtitles</string>
+    <string name="player_subtitles_off">Off</string>
+    <string name="player_no_subtitles">This video has no subtitles.</string>
+    <string name="player_audio">Audio</string>
+    <string name="player_track_number">Track %1$d</string>
+    <string name="player_ends_at">Ends at %1$s</string>
+    <string name="player_error_title">Can’t play this</string>
+    <string name="player_error_network">The server didn’t respond. Check your connection, then try again.</string>
+    <string name="player_error_format">This stream is damaged or in a format GoodTV can’t read.</string>
+    <string name="player_error_decoding">This device can’t decode this video. Another copy (a different language or quality) may work.</string>
+    <string name="player_error_generic">Something went wrong while playing this video.</string>
+    <string name="player_try_again">Try again</string>
+    <string name="player_back">Back</string>
 </resources>
