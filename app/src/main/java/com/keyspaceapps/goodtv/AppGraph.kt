@@ -19,6 +19,12 @@ import com.keyspaceapps.goodtv.data.repo.SyncState
 import com.keyspaceapps.goodtv.data.source.SourceRegistry
 import com.keyspaceapps.goodtv.data.tmdb.TmdbApi
 import com.keyspaceapps.goodtv.data.tmdb.TmdbCredential
+import com.keyspaceapps.goodtv.data.sports.EspnScoreboard
+import com.keyspaceapps.goodtv.data.sports.League
+import com.keyspaceapps.goodtv.data.sports.LiveRefresher
+import com.keyspaceapps.goodtv.data.sports.PwhlScorebar
+import com.keyspaceapps.goodtv.data.sports.ScheduleSource
+import com.keyspaceapps.goodtv.data.sports.SportsRepository
 import com.keyspaceapps.goodtv.data.subtitles.OnlineSubtitles
 import com.keyspaceapps.goodtv.data.subtitles.OpenSubtitlesApi
 import com.keyspaceapps.goodtv.data.subtitles.OpenSubtitlesLogin
@@ -112,6 +118,13 @@ class AppGraph(val context: Context) {
                 .takeIf { it.username.isNotBlank() && it.password.isNotBlank() }
             OnlineSubtitles(OpenSubtitlesApi(okHttp, key, login), File(context.filesDir, "subtitles"))
         }
+    }
+
+    /** The Sports tab: today's NHL/NBA/MLB/NFL/WNBA games from ESPN, PWHL from HockeyTech, matched to live channels. */
+    val sports: SportsRepository by lazy {
+        val espn = EspnScoreboard(okHttp)
+        val sources: Map<League, ScheduleSource> = League.entries.associateWith { if (it == League.PWHL) PwhlScorebar(okHttp) else espn }
+        SportsRepository(sources, store, LiveRefresher(store, sourceRegistry, { syncManager.state.value is SyncState.Syncing }))
     }
 
     /** Background TMDB genre fill for movies; started on launch after stale sources refresh. */
