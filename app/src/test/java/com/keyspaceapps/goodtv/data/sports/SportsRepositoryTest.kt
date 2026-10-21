@@ -14,7 +14,14 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import java.util.concurrent.Executors
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import com.keyspaceapps.goodtv.data.source.LiveCatalog
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -37,8 +44,14 @@ class SportsRepositoryTest {
     /** Per league: what each day returns, or throws. */
     private val schedule = mutableMapOf<League, (LocalDate) -> List<SportsGame>>()
     private val reads = mutableListOf<League>()
+    /** Leagues whose source never answers. */
+    private val stalled = mutableSetOf<League>()
     private val fake = object : ScheduleSource {
-        override suspend fun games(league: League, day: LocalDate): List<SportsGame> { reads += league; return schedule.getValue(league)(day) }
+        override suspend fun games(league: League, day: LocalDate): List<SportsGame> {
+            reads += league
+            if (league in stalled) awaitCancellation()
+            return schedule.getValue(league)(day)
+        }
     }
 
     private fun TestScope.repo() = SportsRepository(
@@ -134,5 +147,68 @@ class SportsRepositoryTest {
         assertEquals(listOf("5"), g.channels.map { it.channel.id })
         assertEquals("US| PEACOCK PPV", g.channels.single().categoryName)
         assertTrue(reads.isNotEmpty())
+    }
+
+    @Test fun yesterdaysChannelForTheSameMatchupStaysOffTodaysGame() = runTest {
+        init()
+        val sid = store.insertSource(SourceRecord(0, SourceType.XTREAM, "A", SourceConfig.Xtream("http://s", "u", "p"), true, now.toEpochMilli(), null))
+        store.replaceCatalog(sid, Catalog(listOf(Category(sid, ContentKind.LIVE, "n", "US| NBA PASS PPV")), listOf(
+            LiveChannel(sid, "old", "n", "LIVE | NYK - KNICKS VS PHI - 76ERS | Mon 19 Oct 19:00 EDT (US)", null, 1),
+        ), emptyList(), emptyList()))
+        val knicks = Team("New York Knicks", "Knicks", "New York", "NY", null)
+        val sixers = Team("Philadelphia 76ers", "76ers", "Philadelphia", "PHI", null)
+        schedule[League.NBA] = { d ->
+            if (d == LocalDate.of(2026, 10, 19)) listOf(game(League.NBA, "y", "2026-10-19T23:00:00Z", GameState.FINAL, knicks, sixers))
+            else listOf(game(League.NBA, "t", "2026-10-20T23:00:00Z", GameState.LIVE, knicks, sixers))
+        }
+        val g = collect(repo()).last().leagues.single().games.single()
+        assertEquals("t", g.game.id)
+        assertEquals(emptyList<String>(), g.channels.map { it.channel.id })
+    }
+
+    @Test fun aStalledLeagueTimesOutAndTheOthersShow() = runTest {
+        init()
+        stalled += League.NHL
+        schedule[League.NBA] = { listOf(game(League.NBA, "b1", "2026-10-21T00:30:00Z", GameState.SCHEDULED)) }
+        val boards = collect(repo())
+        advanceTimeBy(SportsRepository.LEAGUE_TIMEOUT_MS + 1); runCurrent()
+        val board = boards.first()
+        assertEquals(LeagueGames(League.NHL, emptyList(), failed = true), board.leagues[0])
+        assertEquals(League.NBA, board.leagues[1].league)
+    }
+
+    @Test fun aLongOutageIsFlaggedNotHidden() = runTest {
+        init()
+        var up = true
+        schedule[League.NHL] = { if (up) listOf(game(League.NHL, "h1", "2026-10-21T00:00:00Z", GameState.SCHEDULED)) else throw SportsException("down") }
+        val boards = collect(repo())
+        up = false
+        now = now.plusMillis(SportsRepository.KEEP_LAST_GOOD_MS + 60_000)
+        advanceTimeBy(60_001); runCurrent()
+        assertEquals(LeagueGames(League.NHL, emptyList(), failed = true), boards.last().leagues.single())
+    }
+
+    @Test fun todayStillShowsWhenOnlyYesterdayFails() = runTest {
+        init()
+        schedule[League.NHL] = { d -> if (d == LocalDate.of(2026, 10, 19)) throw SportsException("down") else listOf(game(League.NHL, "h1", "2026-10-21T00:00:00Z", GameState.SCHEDULED)) }
+        val row = collect(repo()).last().leagues.single()
+        assertEquals(false, row.failed)
+        assertEquals(listOf("h1"), row.games.map { it.game.id })
+    }
+
+    /** The live-list refresh maps ~57,000 channels; it must not run on the collector's (main) thread. */
+    @Test fun refreshRunsOnTheComputeDispatcher() = runBlocking {
+        init()
+        val compute = Executors.newSingleThreadExecutor { Thread(it, "sports-compute") }.asCoroutineDispatcher()
+        val channels = FakeChannelSource()
+        val sid = store.insertSource(SourceRecord(0, SourceType.XTREAM, "A", SourceConfig.Xtream("http://s", "u", "p"), true, 0L, null))
+        var thread: String? = null
+        channels.liveResults[sid] = { thread = Thread.currentThread().name.substringBefore(" @"); Result.success(LiveCatalog(emptyList(), emptyList())) }
+        val repo = SportsRepository(League.entries.associateWith { fake }, store, LiveRefresher(store, SourceRegistry(listOf(channels)), { false }),
+            clock = { now }, zone = { zone }, compute = compute)
+        val job = launch { repo.observe().collect { } }
+        withTimeout(5_000) { while (thread == null) delay(10) }
+        job.cancel(); compute.close()
+        assertEquals("sports-compute", thread)
     }
 }

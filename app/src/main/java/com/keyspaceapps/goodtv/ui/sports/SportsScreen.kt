@@ -90,7 +90,10 @@ fun SportsScreen(onPlay: (PlayerKey) -> Unit, board: Flow<SportsBoard>? = null) 
         picking = null
     }
 
-    val loaded = current ?: return
+    val loaded = current ?: run {
+        Text(stringResource(R.string.sports_loading), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 48.dp, top = 24.dp))
+        return
+    }
     Box(Modifier.fillMaxSize()) {
         if (loaded.leagues.isEmpty()) {
             Text(stringResource(R.string.sports_none_today), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 48.dp, top = 24.dp))

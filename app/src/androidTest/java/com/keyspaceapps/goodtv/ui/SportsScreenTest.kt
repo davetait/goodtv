@@ -30,6 +30,8 @@ import com.keyspaceapps.goodtv.ui.sports.SportsScreen
 import com.keyspaceapps.goodtv.ui.sports.SportsFormats
 import com.keyspaceapps.goodtv.ui.theme.GoodTvTheme
 import java.time.Instant
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -141,6 +143,11 @@ class SportsScreenTest {
         show(SportsBoard(listOf(LeagueGames(League.NHL, emptyList(), failed = true), board.leagues[1])))
         waitFor("Couldn’t load NHL schedule")
         composeRule.onNodeWithText("NBA").assertIsDisplayed()
+    }
+
+    @Test fun waitingForSchedulesSaysLoading() {
+        composeRule.setContent { GoodTvTheme { SportsScreen(onPlay = { played = it }, board = flow { awaitCancellation() }) } }
+        waitFor("Loading today’s games")
     }
 
     @Test fun nothingTodaySaysSo() {

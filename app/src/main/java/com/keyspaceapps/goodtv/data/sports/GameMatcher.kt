@@ -16,8 +16,8 @@ data class ChannelCandidate(val channel: LiveChannel, val categoryName: String)
  *
  * A team is recognised by its display name, location, nickname or abbreviation (2–4 letters, whole
  * word only), never by a league word. The two teams must match different words of the name. A
- * channel that is over ("ENDED", "End", "Final"), an empty slot ("No event streaming") or a replay
- * never matches. A date in the name must be within [WINDOW_HOURS] of the start. When a name fits
+ * channel that is over ("ENDED", "End", "Final"), an empty slot ("No event streaming"), a replay
+ * or another league's ("CFL", "MLS", "AHL", …) never matches. A date in the name must be within [WINDOW_HOURS] of the start. When a name fits
  * several games, a league word in the name or category decides; if it still fits several, it matches
  * none (better "On 2 channels" than starting the wrong game).
  */
@@ -26,6 +26,8 @@ object GameMatcher {
 
     private val LEAGUE_WORDS = League.entries.map { it.label.lowercase() }.toSet()
     private val CLOSED = listOf("ended ", "end ", "final ", "no event streaming")
+    /** Leagues outside the six whose teams share cities with them (Toronto, Montreal, …): a channel naming one is theirs. */
+    private val OTHER_LEAGUES = setOf("cfl", "mls", "fc", "cf", "ahl", "echl", "ohl", "whl", "qmjhl", "chl", "ncaa", "ncaaf", "ncaab", "nwsl", "ufl", "xfl", "nll", "khl")
 
     private data class Form(val words: List<String>, val game: SportsGame, val home: Boolean)
     private data class Hit(val game: SportsGame, val home: Boolean, val from: Int, val to: Int)
@@ -48,6 +50,7 @@ object GameMatcher {
         val name = normalize(c.channel.name)
         if (CLOSED.any { name.startsWith(it) } || " replay " in " $name ") return null
         val words = name.split(' ').filter { it.isNotEmpty() }
+        if ((words + normalize(c.categoryName).split(' ')).any { it in OTHER_LEAGUES }) return null
         val hits = mutableListOf<Hit>()
         for (i in words.indices) {
             for (f in index[words[i]].orEmpty()) {

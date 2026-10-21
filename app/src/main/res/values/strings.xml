@@ -132,6 +132,7 @@
         <item quantity="other">On %d channels</item>
     </plurals>
     <string name="sports_channel_unknown">Channel not known</string>
+    <string name="sports_loading">Loading today’s games…</string>
     <string name="sports_none_today">No games on today</string>
     <string name="sports_failed">Couldn’t load %1$s schedule</string>
 </resources>

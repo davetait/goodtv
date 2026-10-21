@@ -93,6 +93,27 @@ class GameMatcherTest {
         assertEquals(emptyList<String>(), matchOf("LIVE | NHL MONTREAL - SAN JOSE | Sun 18 Oct 19:05 EDT (US)"))
     }
 
+    @Test fun yesterdaysSameMatchupGoesToYesterdaysGame() {
+        // A series: the same teams yesterday (finished) and today. Yesterday's channel, 24 h before
+        // today's start and inside the window, belongs to yesterday's game, not today's.
+        val yesterday = game(League.NHL, "y", sharks, habs, at = "2026-10-19T23:05:00Z", state = GameState.FINAL)
+        val today = game(League.NHL, "t", sharks, habs, at = "2026-10-20T23:05:00Z")
+        val stale = ch("LIVE | NHL MONTREAL - SAN JOSE | Mon 19 Oct 19:05 EDT (US)")
+        val fresh = ch("LIVE | NHL MONTREAL - SAN JOSE | Tue 20 Oct 19:05 EDT (US)")
+        val m = GameMatcher.match(listOf(yesterday, today), listOf(stale, fresh), now)
+        assertEquals(listOf(fresh), m.getValue(today.key))
+        assertEquals(listOf(stale), m.getValue(yesterday.key))
+    }
+
+    @Test fun otherLeaguesSharingCitiesDoNotMatch() {
+        val leafs = team("Toronto Maple Leafs", "Maple Leafs", "Toronto", "TOR")
+        val g = game(League.NHL, "12", leafs, habs)
+        assertEquals(emptyList<String>(), matchOf("CFL: Toronto Argonauts vs Montreal Alouettes | Tue 20 Oct 19:00 EDT", listOf(g)))
+        assertEquals(emptyList<String>(), matchOf("Toronto FC vs CF Montréal", listOf(g)))
+        assertEquals(emptyList<String>(), matchOf("Toronto vs Montreal", listOf(g), category = "CA| MLS PPV"))
+        assertEquals("the NHL game itself still matches", listOf(g.key), matchOf("NHL: Toronto vs Montreal", listOf(g)))
+    }
+
     @Test fun abbreviationsOnlyAsWholeWords() {
         assertEquals(emptyList<String>(), matchOf("SJÖBERG vs MONTREAL"))
         assertEquals(emptyList<String>(), matchOf("SJÄLLAND MTL"))
