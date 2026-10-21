@@ -14,6 +14,8 @@ import com.keyspaceapps.goodtv.domain.Series
 import com.keyspaceapps.goodtv.domain.SeriesDetail
 import com.keyspaceapps.goodtv.domain.SourceRecord
 import com.keyspaceapps.goodtv.domain.SourceSummary
+import com.keyspaceapps.goodtv.data.source.LiveCatalog
+import com.keyspaceapps.goodtv.data.sports.ChannelCandidate
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -55,6 +57,23 @@ class FakeLibraryStore : LibraryStore {
     override suspend fun replaceCatalog(sourceId: Long, catalog: Catalog) {
         replaceCatalogError?.let { throw it }
         catalogs.value = catalogs.value + (sourceId to catalog)
+    }
+
+    override suspend fun replaceLive(sourceId: Long, live: LiveCatalog) {
+        val old = catalogs.value[sourceId] ?: Catalog(emptyList(), emptyList(), emptyList(), emptyList())
+        catalogs.value = catalogs.value + (sourceId to old.copy(categories = old.categories.filter { it.kind != ContentKind.LIVE } + live.categories, live = live.live))
+    }
+
+    override fun observeSportsCandidates(): Flow<List<ChannelCandidate>> = combine(sources, catalogs, hidden) { s, c, h ->
+        s.filter { it.enabled }.flatMap { r ->
+            val cat = c[r.id] ?: return@flatMap emptyList()
+            val names = cat.categories.filter { it.kind == ContentKind.LIVE }.associate { it.id to it.name }
+            cat.live.mapNotNull { ch ->
+                val id = ch.categoryId ?: return@mapNotNull null
+                val name = names[id] ?: return@mapNotNull null
+                if (Triple(r.id, ContentKind.LIVE, id) in h) null else ChannelCandidate(ch, name)
+            }
+        }
     }
 
     override suspend fun markSync(sourceId: Long, syncedAt: Long?, error: String?) {

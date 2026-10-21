@@ -40,6 +40,15 @@ interface LibraryDao {
 
     @Query("DELETE FROM categories WHERE sourceId = :sourceId") suspend fun deleteCategories(sourceId: Long)
     @Query("DELETE FROM live_channels WHERE sourceId = :sourceId") suspend fun deleteLive(sourceId: Long)
+    @Query("DELETE FROM categories WHERE sourceId = :sourceId AND kind = :kind") suspend fun deleteCategoriesOfKind(sourceId: Long, kind: String)
+
+    @Query(
+        """SELECT l.*, c.name AS categoryName FROM live_channels l
+           JOIN sources s ON s.id = l.sourceId AND s.enabled = 1
+           JOIN categories c ON c.sourceId = l.sourceId AND c.kind = 'LIVE' AND c.id = l.categoryId
+           WHERE NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = l.sourceId AND h.kind = 'LIVE' AND h.categoryId = l.categoryId)""",
+    )
+    fun observeSportsCandidates(): Flow<List<SportsCandidateRow>>
     @Query("DELETE FROM movies WHERE sourceId = :sourceId") suspend fun deleteMovies(sourceId: Long)
     @Query("DELETE FROM series WHERE sourceId = :sourceId") suspend fun deleteSeries(sourceId: Long)
     @Query("DELETE FROM movie_details WHERE sourceId = :sourceId") suspend fun deleteMovieDetails(sourceId: Long)
@@ -351,3 +360,5 @@ interface PopularDao {
     fun observeSeries(listKey: String, limit: Int): Flow<List<SeriesEntity>>
 }
 
+/** A live channel with its category's name, for the Sports screen's matching. */
+data class SportsCandidateRow(@androidx.room.Embedded val live: LiveChannelEntity, val categoryName: String)

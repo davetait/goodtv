@@ -5,6 +5,8 @@ import com.keyspaceapps.goodtv.domain.Category
 import com.keyspaceapps.goodtv.domain.CategoryWithSource
 import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.domain.Genre
+import com.keyspaceapps.goodtv.data.source.LiveCatalog
+import com.keyspaceapps.goodtv.data.sports.ChannelCandidate
 import com.keyspaceapps.goodtv.domain.LiveChannel
 import com.keyspaceapps.goodtv.domain.Movie
 import com.keyspaceapps.goodtv.domain.MovieDetail
@@ -29,6 +31,11 @@ interface LibraryStore {
     suspend fun replaceCatalog(sourceId: Long, catalog: Catalog)
 
     /** [syncedAt] null keeps the existing timestamp (used when recording a failure). */
+    /** Replaces only this source's live categories and channels; movies, series, hidden choices and the sync time stay. */
+    suspend fun replaceLive(sourceId: Long, live: LiveCatalog)
+    /** Every live channel of enabled sources in visible categories, with its category's name (for the Sports screen). */
+    fun observeSportsCandidates(): Flow<List<ChannelCandidate>>
+
     suspend fun markSync(sourceId: Long, syncedAt: Long?, error: String?)
 
     fun observeSummaries(): Flow<List<SourceSummary>>
