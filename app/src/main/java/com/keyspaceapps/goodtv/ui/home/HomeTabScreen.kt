@@ -188,6 +188,23 @@ private fun HomeRows(
         }
     }
 
+    // Saving from a popular card adds the Watch list row above it, pushing the focused card down,
+    // possibly off screen: bring its row back into view.
+    val watchShown = watchItems.isNotEmpty()
+    val lastWatchShown = remember { mutableStateOf(watchShown) }
+    LaunchedEffect(watchShown) {
+        val before = lastWatchShown.value
+        lastWatchShown.value = watchShown
+        if (!watchShown || before) return@LaunchedEffect
+        val rowsAbove = (if (continueItems.isNotEmpty()) 1 else 0) + 1
+        val index = when (focus.key) {
+            in popularMovies.map { it.key } -> rowsAbove
+            in popularShows.map { it.key } -> rowsAbove + (if (popularMovies.isNotEmpty()) 1 else 0)
+            else -> return@LaunchedEffect
+        }
+        listState.animateScrollToItem(index)
+    }
+
     val nothingToShow = continueItems.isEmpty() && watchItems.isEmpty() && popularMovies.isEmpty() && popularShows.isEmpty()
     LaunchedEffect(nothingToShow) {
         if (nothingToShow && (!requested.value || handOff.value)) {

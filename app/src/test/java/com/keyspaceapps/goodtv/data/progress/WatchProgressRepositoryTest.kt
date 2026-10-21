@@ -163,4 +163,12 @@ class WatchProgressRepositoryTest {
         progress.record(movie, 118 * 60_000L, twoHours)
         assertEquals(emptySet<WatchListRef>(), watchList.saved().first())
     }
+
+    /** A provider's 30-second "stream unavailable" clip played to its end isn't the film being watched. */
+    @Test
+    fun shortClipToTheEndDoesNotCallBack() = runTest {
+        notifying.record(movie, 30_000L, 30_000L)
+        notifying.record(movie, 5 * 60_000L, 5 * 60_000L)
+        assertEquals(emptyList<WatchRef>(), finishedMovies)
+    }
 }
