@@ -18,6 +18,8 @@ import com.keyspaceapps.goodtv.data.repo.LibraryStore
 import com.keyspaceapps.goodtv.data.repo.SyncManager
 import com.keyspaceapps.goodtv.data.repo.SyncState
 import com.keyspaceapps.goodtv.data.source.SourceRegistry
+import com.keyspaceapps.goodtv.data.watchlist.WatchListKind
+import com.keyspaceapps.goodtv.data.watchlist.WatchListRef
 import com.keyspaceapps.goodtv.data.watchlist.WatchListRepository
 import com.keyspaceapps.goodtv.data.tmdb.TmdbApi
 import com.keyspaceapps.goodtv.data.tmdb.TmdbCredential
@@ -103,7 +105,13 @@ class AppGraph(val context: Context) {
 
     private val defaultTmdb: TmdbRepository by lazy { TmdbRepository(api = tmdbApi, cache = tmdbCache, language = tmdbLanguage) }
 
-    val watchProgress: WatchProgressRepository by lazy { WatchProgressRepository(RoomWatchProgressStore(db.watchProgress())) }
+    /** A saved movie watched to the credits leaves the watch list (that copy only). */
+    val watchProgress: WatchProgressRepository by lazy {
+        WatchProgressRepository(
+            RoomWatchProgressStore(db.watchProgress()),
+            onMovieFinished = { ref -> watchList.remove(WatchListRef(ref.sourceId, WatchListKind.MOVIE, ref.itemId)) },
+        )
+    }
 
     /** Titles saved to watch later, for the Watch list row, poster bookmarks and detail pages. */
     val watchList: WatchListRepository by lazy { WatchListRepository(RoomWatchListStore(db.watchList())) }

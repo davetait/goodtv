@@ -1,5 +1,9 @@
 package com.keyspaceapps.goodtv.data.progress
 
+import com.keyspaceapps.goodtv.data.watchlist.WatchListKind
+import com.keyspaceapps.goodtv.data.watchlist.WatchListRef
+import com.keyspaceapps.goodtv.data.watchlist.WatchListRepository
+import com.keyspaceapps.goodtv.testing.InMemoryWatchListStore
 import com.keyspaceapps.goodtv.testing.InMemoryWatchProgressStore
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -123,5 +127,40 @@ class WatchProgressRepositoryTest {
         repo.remove(repo.observeContinueWatching().first().single { it.title == "Show" })
         assertTrue(repo.observeSeries(1, "s").first().isEmpty())
         assertEquals(listOf("x1"), repo.observeSeries(1, "other").first().map { it.ref.itemId })
+    }
+
+    private val finishedMovies = mutableListOf<WatchRef>()
+    private val notifying = WatchProgressRepository(store, onMovieFinished = { finishedMovies += it }) { now }
+
+    @Test
+    fun finishedMovieCallsBack() = runTest {
+        notifying.record(movie, 118 * 60_000L, twoHours)
+        assertEquals(listOf(movie), finishedMovies)
+    }
+
+    @Test
+    fun partwayKeepsIt() = runTest {
+        notifying.record(movie, 10_000L, twoHours)
+        notifying.record(movie, 60 * 60_000L, twoHours)
+        assertEquals(emptyList<WatchRef>(), finishedMovies)
+    }
+
+    @Test
+    fun finishedEpisodeDoesNotCallBack() = runTest {
+        notifying.record(WatchRef(1, WatchKind.EPISODE, "e1", "s1"), 44 * 60_000L, 45 * 60_000L)
+        assertEquals(emptyList<WatchRef>(), finishedMovies)
+    }
+
+    /** Only the exact copy that was saved leaves the watch list. */
+    @Test
+    fun finishingAnotherCopyKeepsTheSavedOne() = runTest {
+        val watchList = WatchListRepository(InMemoryWatchListStore()) { now }
+        val progress = WatchProgressRepository(store, onMovieFinished = { watchList.remove(WatchListRef(it.sourceId, WatchListKind.MOVIE, it.itemId)) }) { now }
+        val saved = WatchListRef(1, WatchListKind.MOVIE, "m1")
+        watchList.add(saved)
+        progress.record(WatchRef(1, WatchKind.MOVIE, "m2"), 118 * 60_000L, twoHours)
+        assertEquals(setOf(saved), watchList.saved().first())
+        progress.record(movie, 118 * 60_000L, twoHours)
+        assertEquals(emptySet<WatchListRef>(), watchList.saved().first())
     }
 }

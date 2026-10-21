@@ -79,13 +79,19 @@ interface WatchProgressStore {
  * Remembers how far into a movie or episode the user got. The player reports positions as it plays;
  * detail pages read them to offer Resume. A report under [WatchRules.MIN_RESUME_MS] clears the
  * saved spot, so "Start over" followed by leaving straight away forgets the old position.
+ * [onMovieFinished] hears of each movie watched to the credits (the watch list drops it).
  */
-class WatchProgressRepository(private val store: WatchProgressStore, private val clock: () -> Long = System::currentTimeMillis) {
+class WatchProgressRepository(
+    private val store: WatchProgressStore,
+    private val onMovieFinished: suspend (WatchRef) -> Unit = {},
+    private val clock: () -> Long = System::currentTimeMillis,
+) {
     suspend fun record(ref: WatchRef, positionMs: Long, durationMs: Long, info: PlaybackInfo? = null) {
         val duration = durationMs.coerceAtLeast(0)
         val finished = WatchRules.isFinished(positionMs, duration)
         if (positionMs < WatchRules.MIN_RESUME_MS && !finished) store.delete(ref)
         else store.upsert(WatchProgress(ref, positionMs.coerceAtLeast(0), duration, finished, clock(), info))
+        if (finished && ref.kind == WatchKind.MOVIE) onMovieFinished(ref)
     }
 
     /** Home's Continue Watching: movies and series merged, newest first, at most [limit]. */
