@@ -109,4 +109,16 @@ class OpenSubtitlesApiTest {
     }
 
     @Test fun credentialsNeverPrinted() = assertEquals("OpenSubtitlesLogin(***)", OpenSubtitlesLogin("u", "p").toString())
+
+    @Test fun downloadLinksMustBeHttps() = runTest {
+        expectFailure(OpenSubtitlesException.Reason.BAD_RESPONSE) { api().fetchText("http://192.168.1.1/admin") }
+        assertEquals("nothing was requested", 0, server.requestCount)
+    }
+
+    @Test fun oversizedResponsesAreRefused() = runTest {
+        server.enqueue(ok("x".repeat(OpenSubtitlesApi.MAX_BYTES + 1)))
+        val insecureOk = OpenSubtitlesApi(OkHttpClient(), "k3y", baseUrl = server.url("/api/v1/"), allowInsecureLinks = true)
+        expectFailure(OpenSubtitlesException.Reason.BAD_RESPONSE) { insecureOk.fetchText(server.url("/big.srt").toString()) }
+    }
 }
+

@@ -11,10 +11,12 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.ResponseBody
 
 /** What to look subtitles up by: a movie's TMDB id, or a series' TMDB id with season and episode. */
 data class SubtitleQuery(val tmdbId: Long, val season: Int? = null, val episode: Int? = null) {
@@ -50,7 +52,9 @@ class OpenSubtitlesException(message: String, val reason: Reason, val resetUtc: 
  * Thin client for the OpenSubtitles REST API: search by TMDB id, then a download link (which costs
  * one of the day's downloads) and the file itself. With [credentials] it logs in once and sends the
  * token to the host the login names; without, the key alone (a smaller allowance).
- * [loginScheme] is the scheme for that host (https; tests use http).
+ * [loginScheme] is the scheme for that host (https; tests use http). Download links come from the
+ * API's response, so only https links are followed (unless [allowInsecureLinks], for tests) and no
+ * response is read past [MAX_BYTES].
  */
 class OpenSubtitlesApi(
     private val client: OkHttpClient,
@@ -59,6 +63,7 @@ class OpenSubtitlesApi(
     private val baseUrl: HttpUrl = DEFAULT_BASE_URL.toHttpUrl(),
     private val io: CoroutineDispatcher = Dispatchers.IO,
     private val loginScheme: String = "https",
+    private val allowInsecureLinks: Boolean = false,
 ) {
     private val loginLock = Mutex()
     @Volatile private var session: Pair<String, HttpUrl>? = null // token, base url
@@ -97,10 +102,12 @@ class OpenSubtitlesApi(
 
     /** The subtitle file behind a download link. */
     suspend fun fetchText(link: String): String = withContext(io) {
+        val url = link.toHttpUrlOrNull()?.takeIf { it.isHttps || allowInsecureLinks }
+            ?: throw OpenSubtitlesException("OpenSubtitles returned an unusable download link", OpenSubtitlesException.Reason.BAD_RESPONSE)
         try {
-            client.newCall(Request.Builder().url(link).header("User-Agent", USER_AGENT).build()).execute().use { r ->
+            client.newCall(Request.Builder().url(url).header("User-Agent", USER_AGENT).build()).execute().use { r ->
                 if (!r.isSuccessful) throw OpenSubtitlesException("Subtitle download failed (HTTP ${r.code})", reasonFor(r.code))
-                r.body.string()
+                readCapped(r.body)
             }
         } catch (e: IOException) {
             throw OpenSubtitlesException("Could not reach OpenSubtitles", OpenSubtitlesException.Reason.NETWORK)
@@ -126,7 +133,7 @@ class OpenSubtitlesApi(
             .apply { token?.let { header("Authorization", "Bearer $it") } }.build()
         try {
             client.newCall(request).execute().use { r ->
-                val text = r.body.string()
+                val text = readCapped(r.body)
                 if (!r.isSuccessful) {
                     val err = runCatching { json.decodeFromString(OsError.serializer(), text) }.getOrNull()
                     throw OpenSubtitlesException(err?.message ?: "OpenSubtitles returned HTTP ${r.code}", reasonFor(r.code), err?.reset_time_utc)
@@ -142,6 +149,15 @@ class OpenSubtitlesApi(
         }
     }
 
+    /** The body as UTF-8, refusing anything over [MAX_BYTES] (a subtitle file is well under 1 MB). */
+    private fun readCapped(body: ResponseBody): String {
+        val tooBig = OpenSubtitlesException("OpenSubtitles sent more than expected", OpenSubtitlesException.Reason.BAD_RESPONSE)
+        if (body.contentLength() > MAX_BYTES) throw tooBig
+        val source = body.source()
+        if (source.request(MAX_BYTES + 1L)) throw tooBig
+        return source.buffer.readUtf8()
+    }
+
     private fun reasonFor(code: Int) = when {
         code == 401 || code == 403 -> OpenSubtitlesException.Reason.AUTH
         code == 406 -> OpenSubtitlesException.Reason.QUOTA
@@ -153,6 +169,7 @@ class OpenSubtitlesApi(
     companion object {
         const val DEFAULT_BASE_URL = "https://api.opensubtitles.com/api/v1/"
         const val USER_AGENT = "GoodTV v0.1"
+        const val MAX_BYTES = 2 * 1024 * 1024
         private val JSON = "application/json".toMediaType()
         private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true; explicitNulls = false; encodeDefaults = true }
     }

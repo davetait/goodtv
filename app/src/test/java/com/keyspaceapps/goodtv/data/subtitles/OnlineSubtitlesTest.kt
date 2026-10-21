@@ -26,7 +26,7 @@ class OnlineSubtitlesTest {
     @Before fun setUp() {
         server.start()
         dir = Files.createTempDirectory("subs").toFile()
-        online = OnlineSubtitles(OpenSubtitlesApi(OkHttpClient(), "k", baseUrl = server.url("/api/v1/")), dir)
+        online = OnlineSubtitles(OpenSubtitlesApi(OkHttpClient(), "k", baseUrl = server.url("/api/v1/"), allowInsecureLinks = true), dir)
     }
 
     @After fun tearDown() { server.close(); dir.deleteRecursively() }
