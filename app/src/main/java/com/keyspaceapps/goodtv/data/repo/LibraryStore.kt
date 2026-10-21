@@ -49,8 +49,9 @@ interface LibraryStore {
      * start with it first, then by name. Items in hidden categories are left out. At most [limit].
      */
     fun searchLive(query: String, limit: Int): Flow<List<LiveChannel>>
-    fun searchMovies(query: String, limit: Int): Flow<List<Movie>>
-    fun searchSeries(query: String, limit: Int): Flow<List<Series>>
+    /** With [genre], only titles in it (movies: TMDB genres; series: the provider's). */
+    fun searchMovies(query: String, limit: Int, genre: Genre? = null): Flow<List<Movie>>
+    fun searchSeries(query: String, limit: Int, genre: Genre? = null): Flow<List<Series>>
 
     /** Enabled, non-hidden movies TMDB lists under [genre], newest first, at most [limit]. */
     fun observeMoviesByGenre(genre: Genre, limit: Int): Flow<List<Movie>>

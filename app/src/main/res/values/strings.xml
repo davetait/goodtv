@@ -122,4 +122,7 @@
     <string name="player_subtitles_downloading">Downloading…</string>
     <string name="player_subtitles_quota">Daily OpenSubtitles limit reached. Try again after %1$s UTC</string>
     <string name="player_subtitles_online_failed">Couldn’t get subtitles from OpenSubtitles.</string>
+    <string name="browse_search_movies">Search movies</string>
+    <string name="browse_search_series">Search series</string>
+    <string name="genre_search_no_results">Nothing in this genre matches “%1$s”</string>
 </resources>

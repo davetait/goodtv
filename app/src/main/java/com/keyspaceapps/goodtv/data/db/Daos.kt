@@ -201,6 +201,27 @@ interface GenreDao {
     )
     fun observeSeries(genre: String, limit: Int): Flow<List<SeriesEntity>>
 
+    // Search within a genre: the same matching and order as LibraryDao.searchMovies/searchSeries.
+    @Query(
+        """SELECT m.* FROM movies m JOIN sources s ON s.id = m.sourceId
+           WHERE s.enabled = 1 AND COALESCE(m.title, m.name) LIKE '%' || :pattern || '%' ESCAPE '\'
+             AND m.tmdbId IN (SELECT tmdbId FROM tmdb_genres WHERE kind = 'MOVIE' AND genre = :genre)
+             AND NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = m.sourceId AND h.kind = 'MOVIE' AND h.categoryId = m.categoryId)
+           ORDER BY CASE WHEN COALESCE(m.title, m.name) LIKE :pattern || '%' ESCAPE '\' THEN 0 ELSE 1 END, COALESCE(m.title, m.name), m.language
+           LIMIT :limit""",
+    )
+    fun searchMovies(pattern: String, genre: String, limit: Int): Flow<List<MovieEntity>>
+
+    @Query(
+        """SELECT x.* FROM series x JOIN sources s ON s.id = x.sourceId
+           WHERE s.enabled = 1 AND COALESCE(x.title, x.name) LIKE '%' || :pattern || '%' ESCAPE '\'
+             AND EXISTS (SELECT 1 FROM series_genres g WHERE g.sourceId = x.sourceId AND g.seriesId = x.id AND g.genre = :genre)
+             AND NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = x.sourceId AND h.kind = 'SERIES' AND h.categoryId = x.categoryId)
+           ORDER BY CASE WHEN COALESCE(x.title, x.name) LIKE :pattern || '%' ESCAPE '\' THEN 0 ELSE 1 END, COALESCE(x.title, x.name), x.language
+           LIMIT :limit""",
+    )
+    fun searchSeries(pattern: String, genre: String, limit: Int): Flow<List<SeriesEntity>>
+
     @Query(
         """SELECT g.genre AS genre, COUNT(*) AS count FROM movies m JOIN sources s ON s.id = m.sourceId
            JOIN tmdb_genres g ON g.kind = 'MOVIE' AND g.tmdbId = m.tmdbId

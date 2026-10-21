@@ -85,4 +85,26 @@ class GenreQueriesTest {
         assertEquals(emptyList<Series>(), store.observeSeriesByGenre(Genre.DRAMA, 10).first())
         assertEquals(mapOf(Genre.SCIFI to 1), store.observeGenreCounts(ContentKind.SERIES).first())
     }
+
+    @Test
+    fun searchWithinAGenreSkipsOtherGenresAndHiddenCategories() = runBlocking {
+        val a = store.insertSource(record("A"))
+        val movies = listOf(
+            Movie(a, "1", "m", "EN - Heat", null, "mkv", null, 1, tmdbId = 949),
+            Movie(a, "2", "h", "Heat (hidden category)", null, "mkv", null, 2, tmdbId = 949),
+            Movie(a, "3", "m", "Heathers", null, "mkv", null, 3, tmdbId = 2640),
+        )
+        store.replaceCatalog(a, catalog(a, movies, listOf(
+            Series(a, "x", "s", "Dark", null, null, null, genres = setOf(Genre.MYSTERY)),
+            Series(a, "y", "s", "Dark Matter", null, null, null, genres = setOf(Genre.SCIFI)),
+        )))
+        store.setCategoriesHidden(a, ContentKind.MOVIE, listOf("h"), hidden = true)
+        genres.saveMovieGenres(mapOf(949L to setOf(Genre.CRIME), 2640L to setOf(Genre.COMEDY)), fetchedAt = 1)
+
+        assertEquals(listOf("EN - Heat", "Heathers"), store.searchMovies("heat", 10).first().map { it.name }.sorted())
+        assertEquals(listOf("EN - Heat"), store.searchMovies("heat", 10, Genre.CRIME).first().map { it.name })
+        assertEquals(listOf("Dark"), store.searchSeries("dark", 10, Genre.MYSTERY).first().map { it.name })
+        assertEquals(emptyList<Series>(), store.searchSeries("dark", 10, Genre.KIDS).first())
+    }
 }
+

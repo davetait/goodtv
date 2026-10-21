@@ -107,10 +107,13 @@ class FakeLibraryStore : LibraryStore {
 
     override fun searchLive(query: String, limit: Int): Flow<List<LiveChannel>> =
         search(query, limit, ContentKind.LIVE, { it.live }, { it.name }, { it.sourceId }, { it.categoryId })
-    override fun searchMovies(query: String, limit: Int): Flow<List<Movie>> =
-        search(query, limit, ContentKind.MOVIE, { it.movies }, { it.name }, { it.sourceId }, { it.categoryId })
-    override fun searchSeries(query: String, limit: Int): Flow<List<Series>> =
-        search(query, limit, ContentKind.SERIES, { it.series }, { it.name }, { it.sourceId }, { it.categoryId })
+    override fun searchMovies(query: String, limit: Int, genre: Genre?): Flow<List<Movie>> =
+        combine(search(query, Int.MAX_VALUE, ContentKind.MOVIE, { it.movies }, { it.name }, { it.sourceId }, { it.categoryId }), movieGenres) { list, g ->
+            list.filter { m -> genre == null || (m.tmdbId?.let { genre in g[it].orEmpty() } ?: false) }.take(limit)
+        }
+    override fun searchSeries(query: String, limit: Int, genre: Genre?): Flow<List<Series>> =
+        search(query, Int.MAX_VALUE, ContentKind.SERIES, { it.series }, { it.name }, { it.sourceId }, { it.categoryId })
+            .map { list -> list.filter { genre == null || genre in it.genres }.take(limit) }
 
     private fun <T> visible(kind: ContentKind, pick: (Catalog) -> List<T>, sid: (T) -> Long, cat: (T) -> String?): Flow<List<T>> =
         combine(sources, catalogs, hidden) { s, c, h ->

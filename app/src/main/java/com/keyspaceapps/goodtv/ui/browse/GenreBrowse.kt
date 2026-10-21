@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -22,12 +23,15 @@ import androidx.tv.material3.Text
 import com.keyspaceapps.goodtv.R
 import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.domain.Genre
+import com.keyspaceapps.goodtv.ui.home.HomeSearchBar
 import java.text.NumberFormat
 
 /**
- * A genre dropdown over a browse screen. "All genres" shows [rows] (the category rails); a genre
- * shows its titles in a grid below. [status] is an optional note beside the dropdown (the movie
- * genre fill's progress). The bar is hidden while no genre has any titles and there's no status.
+ * A genre dropdown and a search bar over a browse screen. "All genres" shows [rows] (the category
+ * rails); a genre shows its titles in a grid below. Typing in the search bar shows matches within
+ * the chosen genre instead, and clearing it brings the rows (or genre grid) back. [status] is an
+ * optional note under the bar (the movie genre fill's progress). The dropdown is hidden while no
+ * genre has any titles; the search bar always shows.
  */
 @Composable
 fun GenreBrowse(
@@ -40,12 +44,15 @@ fun GenreBrowse(
     val selected by filter.selected.collectAsState()
     val counts by filter.counts.collectAsState()
     val items by filter.items.collectAsState()
+    val query by filter.query.collectAsState()
+    val found by filter.searchResults.collectAsState()
     val requested = remember { mutableStateOf(false) }
+    val searchRequested = remember { mutableStateOf(false) }
     val numbers = remember { NumberFormat.getIntegerInstance() }
 
     Column(Modifier.fillMaxSize()) {
-        if (counts.isNotEmpty() || status != null || selected != null) {
-            Row(Modifier.fillMaxWidth().padding(start = 48.dp, end = 48.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(start = 48.dp, end = 48.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (counts.isNotEmpty() || selected != null) {
                 val labels = Genre.entries.associateWith { stringResource(it.labelRes) }
                 val options = listOf<Genre?>(null) + Genre.entries.filter { (counts[it] ?: 0) > 0 }.sortedBy { labels[it] }
                 TvDropdown(
@@ -59,13 +66,35 @@ fun GenreBrowse(
                     modifier = Modifier.width(320.dp),
                     listWidth = 320.dp,
                 )
-                status?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 24.dp)) }
+                Spacer(Modifier.width(16.dp))
             }
+            HomeSearchBar(
+                query = query,
+                onQueryChange = filter::setQuery,
+                hint = stringResource(if (kind == ContentKind.SERIES) R.string.browse_search_series else R.string.browse_search_movies),
+                modifier = Modifier.weight(1f),
+            )
+        }
+        status?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 48.dp, top = 6.dp))
         }
         Box(Modifier.weight(1f)) {
             val genre = selected
             val list = items
+            val matches = found
             when {
+                matches != null && matches.isEmpty() -> Text(
+                    stringResource(if (genre != null) R.string.genre_search_no_results else R.string.search_no_results, query.trim()),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 48.dp, top = 24.dp),
+                )
+                // New results never pull focus from the search field; Back from a result returns to it.
+                matches != null -> PosterGrid(
+                    matches, kind, filter.searchFocus, searchRequested, onItem,
+                    modifier = Modifier.fillMaxSize(),
+                    focusFirst = false,
+                    contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 16.dp, bottom = 48.dp),
+                )
                 genre == null -> rows()
                 list == null -> Unit
                 list.isEmpty() -> Text(
