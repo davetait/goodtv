@@ -182,3 +182,12 @@ data class WatchProgressEntity(
     val positionMs: Long, val durationMs: Long, val finished: Boolean, val updatedAt: Long,
     val title: String? = null, val ext: String? = null, val season: Int? = null, val episode: Int? = null,
 )
+
+/** A title saved to watch later ([kind] "MOVIE"/"SERIES"): the exact copy, kept across re-syncs, gone with its source. */
+@Entity(
+    tableName = "watch_list",
+    primaryKeys = ["sourceId", "kind", "itemId"],
+    foreignKeys = [ForeignKey(entity = SourceEntity::class, parentColumns = ["id"], childColumns = ["sourceId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("sourceId"), Index("savedAt")],
+)
+data class WatchListEntity(val sourceId: Long, val kind: String, val itemId: String, val savedAt: Long)

@@ -10,6 +10,7 @@ import com.keyspaceapps.goodtv.data.db.RoomLibraryStore
 import com.keyspaceapps.goodtv.data.db.RoomPopularStore
 import com.keyspaceapps.goodtv.data.db.RoomTmdbCache
 import com.keyspaceapps.goodtv.data.db.RoomTmdbGenreStore
+import com.keyspaceapps.goodtv.data.db.RoomWatchListStore
 import com.keyspaceapps.goodtv.data.db.RoomWatchProgressStore
 import com.keyspaceapps.goodtv.data.progress.WatchProgressRepository
 import com.keyspaceapps.goodtv.data.repo.LibraryRepository
@@ -17,6 +18,7 @@ import com.keyspaceapps.goodtv.data.repo.LibraryStore
 import com.keyspaceapps.goodtv.data.repo.SyncManager
 import com.keyspaceapps.goodtv.data.repo.SyncState
 import com.keyspaceapps.goodtv.data.source.SourceRegistry
+import com.keyspaceapps.goodtv.data.watchlist.WatchListRepository
 import com.keyspaceapps.goodtv.data.tmdb.TmdbApi
 import com.keyspaceapps.goodtv.data.tmdb.TmdbCredential
 import com.keyspaceapps.goodtv.data.sports.EspnScoreboard
@@ -102,6 +104,9 @@ class AppGraph(val context: Context) {
     private val defaultTmdb: TmdbRepository by lazy { TmdbRepository(api = tmdbApi, cache = tmdbCache, language = tmdbLanguage) }
 
     val watchProgress: WatchProgressRepository by lazy { WatchProgressRepository(RoomWatchProgressStore(db.watchProgress())) }
+
+    /** Titles saved to watch later, for the Watch list row, poster bookmarks and detail pages. */
+    val watchList: WatchListRepository by lazy { WatchListRepository(RoomWatchListStore(db.watchList())) }
 
     /** Home's popular rows: TMDB's popular streaming titles the library has, rankings refreshed daily. */
     val popularStore: PopularStore by lazy { RoomPopularStore(db.popular()) }

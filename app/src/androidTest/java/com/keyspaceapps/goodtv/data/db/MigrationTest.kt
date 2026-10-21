@@ -129,5 +129,22 @@ class MigrationTest {
         db.query("SELECT COUNT(*) FROM sources").use { c -> c.moveToFirst(); assertEquals(1, c.getInt(0)) }
         db.close()
     }
-}
 
+    /** v8 → v9 adds the watch list; sources and watch progress survive, and the list goes with its source. */
+    @Test
+    fun migrate8To9AddsWatchList() {
+        helper.createDatabase(dbName, 8).apply {
+            execSQL("INSERT INTO sources (id, type, nickname, configJson, enabled, lastSyncAt, lastError, createdAt) VALUES (1, 'XTREAM', 'Home', '{\"type\":\"xtream\",\"server\":\"http://s\",\"username\":\"u\",\"password\":\"p\"}', 1, 1, NULL, 0)")
+            execSQL("INSERT INTO watch_progress (sourceId, kind, itemId, seriesId, positionMs, durationMs, finished, updatedAt) VALUES (1, 'MOVIE', 'm1', NULL, 60000, 0, 0, 1)")
+            close()
+        }
+        val db = helper.runMigrationsAndValidate(dbName, 9, true, MIGRATION_8_9)
+        db.query("SELECT positionMs FROM watch_progress").use { c -> c.moveToFirst(); assertEquals(60000L, c.getLong(0)) }
+        db.query("SELECT COUNT(*) FROM watch_list").use { c -> c.moveToFirst(); assertEquals(0, c.getInt(0)) }
+        db.execSQL("INSERT INTO watch_list (sourceId, kind, itemId, savedAt) VALUES (1, 'MOVIE', 'm1', 5)")
+        db.execSQL("PRAGMA foreign_keys = ON")
+        db.execSQL("DELETE FROM sources WHERE id = 1")
+        db.query("SELECT COUNT(*) FROM watch_list").use { c -> c.moveToFirst(); assertEquals(0, c.getInt(0)) }
+        db.close()
+    }
+}

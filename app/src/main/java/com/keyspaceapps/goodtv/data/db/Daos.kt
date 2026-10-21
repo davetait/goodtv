@@ -362,3 +362,45 @@ interface PopularDao {
 
 /** A live channel with its category's name, for the Sports screen's matching. */
 data class SportsCandidateRow(@androidx.room.Embedded val live: LiveChannelEntity, val categoryName: String)
+
+@Dao
+interface WatchListDao {
+    @Query("SELECT * FROM watch_list") fun observeAll(): Flow<List<WatchListEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(row: WatchListEntity)
+
+    @Query("DELETE FROM watch_list WHERE sourceId = :sourceId AND kind = :kind AND itemId = :itemId")
+    suspend fun delete(sourceId: Long, kind: String, itemId: String)
+
+    /** Saved titles still in the catalog, of enabled sources and visible categories, newest first. */
+    @Query(
+        """SELECT w.*, COALESCE(m.title, m.name) AS itemTitle, m.language AS itemLanguage, m.quality AS itemQuality,
+                  m.posterUrl AS imageUrl, m.tmdbId AS itemTmdbId, m.name AS rawName
+           FROM watch_list w
+           JOIN movies m ON m.sourceId = w.sourceId AND m.id = w.itemId
+           JOIN sources s ON s.id = w.sourceId
+           WHERE w.kind = 'MOVIE' AND s.enabled = 1
+             AND NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = m.sourceId AND h.kind = 'MOVIE' AND h.categoryId = m.categoryId)
+           UNION ALL
+           SELECT w.*, COALESCE(x.title, x.name) AS itemTitle, x.language AS itemLanguage, x.quality AS itemQuality,
+                  x.coverUrl AS imageUrl, x.tmdbId AS itemTmdbId, x.name AS rawName
+           FROM watch_list w
+           JOIN series x ON x.sourceId = w.sourceId AND x.id = w.itemId
+           JOIN sources s ON s.id = w.sourceId
+           WHERE w.kind = 'SERIES' AND s.enabled = 1
+             AND NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = x.sourceId AND h.kind = 'SERIES' AND h.categoryId = x.categoryId)
+           ORDER BY savedAt DESC""",
+    )
+    fun observeRow(): Flow<List<WatchListRow>>
+}
+
+/** A watch list row joined with its catalog title, for Home's Watch list row. */
+data class WatchListRow(
+    @androidx.room.Embedded val saved: WatchListEntity,
+    val itemTitle: String,
+    val itemLanguage: String?,
+    val itemQuality: String?,
+    val imageUrl: String?,
+    val itemTmdbId: Long?,
+    val rawName: String,
+)
