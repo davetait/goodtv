@@ -158,10 +158,7 @@ fun ContinueWatchingRow(
                                 index == 0 && claimInitialFocus && !initialFocus.value -> { initialFocus.value = true; requester.requestFocus() }
                             }
                         }
-                        .onFocusChanged { if (it.isFocused) focus?.key = "continue:${item.key}" }
-                        .onKeyEvent { e ->
-                            if (e.type == KeyEventType.KeyUp && e.key == Key.Menu) { menuFor = item; true } else false
-                        },
+                        .onFocusChanged { if (it.isFocused) focus?.key = "continue:${item.key}" },
                 )
             }
         }

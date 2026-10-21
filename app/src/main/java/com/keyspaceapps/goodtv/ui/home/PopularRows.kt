@@ -24,6 +24,8 @@ import androidx.tv.material3.Text
 import com.keyspaceapps.goodtv.data.tmdb.PopularRepository
 import com.keyspaceapps.goodtv.data.tmdb.PopularStore
 import com.keyspaceapps.goodtv.data.tmdb.TmdbKind
+import com.keyspaceapps.goodtv.data.watchlist.WatchListKind
+import com.keyspaceapps.goodtv.data.watchlist.WatchListRef
 import com.keyspaceapps.goodtv.domain.Movie
 import com.keyspaceapps.goodtv.domain.Series
 import com.keyspaceapps.goodtv.domain.label
@@ -34,6 +36,8 @@ import com.keyspaceapps.goodtv.ui.nav.MovieDetailKey
 import com.keyspaceapps.goodtv.ui.nav.SeriesDetailKey
 import com.keyspaceapps.goodtv.ui.tmdb.POSTER_SETTLE_MS
 import com.keyspaceapps.goodtv.ui.tmdb.rememberTmdbMeta
+import com.keyspaceapps.goodtv.ui.watchlist.LocalWatchList
+import com.keyspaceapps.goodtv.ui.watchlist.WatchTarget
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -108,15 +112,19 @@ fun PopularRow(
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(start = 48.dp, bottom = 8.dp),
         )
+        val watchList = LocalWatchList.current
         LazyRow(contentPadding = PaddingValues(horizontal = 48.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             items(cards, key = { it.key }) { card ->
                 val requester = remember { FocusRequester() }
                 val tmdb = rememberTmdbMeta(card.kind, card.tmdbId, card.lookupName, POSTER_SETTLE_MS)
+                val watchTarget = remember(card) { card.watchTarget() }
                 PosterCard(
                     title = card.title,
                     imageUrl = card.imageUrl,
                     rating = tmdb?.reliableRating,
                     onClick = { onOpen(card.destination) },
+                    saved = watchTarget != null && watchTarget.ref in watchList.saved,
+                    onLongClick = watchTarget?.let { t -> { watchList.openMenu(t) } },
                     modifier = Modifier
                         .focusRequester(requester)
                         .onFocusChanged { if (it.isFocused) focus.key = card.key }
@@ -132,4 +140,11 @@ fun PopularRow(
             }
         }
     }
+}
+
+/** The exact copy this card opens, for the watch list. */
+private fun PopularCard.watchTarget(): WatchTarget? = when (val d = destination) {
+    is MovieDetailKey -> WatchTarget(WatchListRef(d.sourceId, WatchListKind.MOVIE, d.movieId), title)
+    is SeriesDetailKey -> WatchTarget(WatchListRef(d.sourceId, WatchListKind.SERIES, d.seriesId), title)
+    else -> null
 }

@@ -21,6 +21,8 @@ import com.keyspaceapps.goodtv.domain.CategoryWithSource
 import com.keyspaceapps.goodtv.ui.tmdb.POSTER_SETTLE_MS
 import com.keyspaceapps.goodtv.ui.tmdb.rememberTmdbMeta
 import com.keyspaceapps.goodtv.ui.tmdb.tmdbKind
+import com.keyspaceapps.goodtv.ui.watchlist.LocalWatchList
+import com.keyspaceapps.goodtv.ui.watchlist.rememberWatchTarget
 
 const val ROW_LIMIT = 30
 
@@ -45,6 +47,7 @@ fun CategoryRows(
     modifier: Modifier = Modifier,
 ) {
     val requested = remember { mutableStateOf(false) }
+    val watchList = LocalWatchList.current
     val present = rows.flatMap { r -> r.items.map { "${rowKey(r)}:${it.id}" } + (if (r.hasMore) listOf("${rowKey(r)}:see-all") else emptyList()) }
     val default = rows.firstOrNull { it.items.isNotEmpty() }?.let { "${rowKey(it)}:${it.items.first().id}" }
     val target = focus.targetIn(present, default)
@@ -64,8 +67,10 @@ fun CategoryRows(
                     itemsIndexed(row.items, key = { _, it -> it.id }) { _, item ->
                         val key = "${rowKey(row)}:${item.id}"
                         val tmdb = rememberTmdbMeta(row.category.category.kind.tmdbKind(), item.tmdbId, item.lookupName, POSTER_SETTLE_MS)
+                        val watchTarget = rememberWatchTarget(row.category.category.kind, item.sourceId, item.id, item.title)
                         PosterCard(
                             title = item.title, imageUrl = item.imageUrl, onClick = { onItem(row, item) }, rating = tmdb?.reliableRating,
+                            saved = watchTarget != null && watchTarget.ref in watchList.saved, onLongClick = watchTarget?.let { t -> { watchList.openMenu(t) } },
                             modifier = Modifier.rememberedFocus(focus, key, isTarget = key == target, requested = requested),
                         )
                     }

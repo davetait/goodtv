@@ -46,6 +46,8 @@ import com.keyspaceapps.goodtv.ui.nav.SeriesDetailKey
 import com.keyspaceapps.goodtv.ui.tmdb.POSTER_SETTLE_MS
 import com.keyspaceapps.goodtv.ui.tmdb.rememberTmdbMeta
 import com.keyspaceapps.goodtv.ui.tmdb.tmdbKind
+import com.keyspaceapps.goodtv.ui.watchlist.LocalWatchList
+import com.keyspaceapps.goodtv.ui.watchlist.rememberWatchTarget
 
 /**
  * The Home tab: a scope dropdown and search bar over Continue Watching, Popular Movies and Popular
@@ -116,6 +118,7 @@ private fun SearchResultsGrid(
     onResult: (SearchResult) -> Unit,
 ) {
     val target = focus.targetIn(results.map { it.key }, default = null)
+    val watchList = LocalWatchList.current
     LazyVerticalGrid(
         columns = GridCells.Fixed(6),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -125,10 +128,13 @@ private fun SearchResultsGrid(
     ) {
         items(results, key = { it.key }) { r ->
             val tmdb = rememberTmdbMeta(r.kind.tmdbKind(), r.tmdbId, r.lookupName, POSTER_SETTLE_MS)
+            val watchTarget = rememberWatchTarget(r.kind, r.sourceId, r.id, r.title)
             PosterCard(
                 title = r.title,
                 imageUrl = r.imageUrl,
                 onClick = { onResult(r) },
+                saved = watchTarget != null && watchTarget.ref in watchList.saved,
+                onLongClick = watchTarget?.let { t -> { watchList.openMenu(t) } },
                 subtitle = if (showKind) stringResource(r.kind.labelRes) else null,
                 fitImage = r.kind == ContentKind.LIVE,
                 rating = tmdb?.reliableRating,

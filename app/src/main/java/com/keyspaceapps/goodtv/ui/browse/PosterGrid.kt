@@ -13,6 +13,8 @@ import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.ui.tmdb.POSTER_SETTLE_MS
 import com.keyspaceapps.goodtv.ui.tmdb.rememberTmdbMeta
 import com.keyspaceapps.goodtv.ui.tmdb.tmdbKind
+import com.keyspaceapps.goodtv.ui.watchlist.LocalWatchList
+import com.keyspaceapps.goodtv.ui.watchlist.rememberWatchTarget
 
 /**
  * Posters six per row with TMDB rating badges. Focus goes to the item remembered in [focus]; when
@@ -32,6 +34,7 @@ fun PosterGrid(
 ) {
     val keys = items.map { "${it.sourceId}:${it.id}" }
     val target = focus.targetIn(keys, if (focusFirst) keys.firstOrNull() else null)
+    val watchList = LocalWatchList.current
     LazyVerticalGrid(
         columns = GridCells.Fixed(6),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -41,8 +44,10 @@ fun PosterGrid(
     ) {
         itemsIndexed(items, key = { i, _ -> keys[i] }) { i, item ->
             val tmdb = rememberTmdbMeta(kind.tmdbKind(), item.tmdbId, item.lookupName, POSTER_SETTLE_MS)
+            val watchTarget = rememberWatchTarget(kind, item.sourceId, item.id, item.title)
             PosterCard(
                 title = item.title, imageUrl = item.imageUrl, onClick = { onItem(item) }, rating = tmdb?.reliableRating,
+                saved = watchTarget != null && watchTarget.ref in watchList.saved, onLongClick = watchTarget?.let { t -> { watchList.openMenu(t) } },
                 modifier = Modifier.rememberedFocus(focus, keys[i], isTarget = keys[i] == target, requested = requested),
             )
         }
