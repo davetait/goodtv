@@ -39,6 +39,8 @@ import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.keyspaceapps.goodtv.R
 import com.keyspaceapps.goodtv.data.tmdb.TmdbMeta
+import com.keyspaceapps.goodtv.data.watchlist.WatchListKind
+import com.keyspaceapps.goodtv.data.watchlist.WatchListRef
 import com.keyspaceapps.goodtv.domain.Episode
 import com.keyspaceapps.goodtv.ui.tmdb.TmdbCredit
 import com.keyspaceapps.goodtv.ui.tmdb.detailRating
@@ -50,6 +52,7 @@ import com.keyspaceapps.goodtv.ui.nav.SeriesDetailKey
 import com.keyspaceapps.goodtv.domain.DisplayTitle
 import com.keyspaceapps.goodtv.ui.player.PlayerFormats
 import com.keyspaceapps.goodtv.data.progress.WatchProgress
+import com.keyspaceapps.goodtv.ui.watchlist.WatchListButton
 
 @Composable
 fun SeriesDetailScreen(key: SeriesDetailKey, onPlay: (PlayerKey) -> Unit) {
@@ -127,6 +130,7 @@ private fun SeriesDetailContent(
                     Text(it, maxLines = 4, overflow = TextOverflow.Ellipsis)
                 }
                 TmdbCredit(tmdb)
+                val watchRef = WatchListRef(detail.series.sourceId, WatchListKind.SERIES, detail.series.id)
                 if (resume != null) {
                     Spacer(Modifier.height(20.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -144,7 +148,11 @@ private fun SeriesDetailContent(
                             )
                         }
                         if (resume.resume) Button(onClick = { onPlay(episodePlayerKey(detail, e, 0)) }) { Text(stringResource(R.string.start_over)) }
+                        WatchListButton(watchRef)
                     }
+                } else {
+                    Spacer(Modifier.height(20.dp))
+                    WatchListButton(watchRef)
                 }
                 Spacer(Modifier.height(20.dp))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

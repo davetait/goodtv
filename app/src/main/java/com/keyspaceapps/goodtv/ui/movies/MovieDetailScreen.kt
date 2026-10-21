@@ -32,6 +32,8 @@ import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.keyspaceapps.goodtv.R
 import com.keyspaceapps.goodtv.data.tmdb.TmdbMeta
+import com.keyspaceapps.goodtv.data.watchlist.WatchListKind
+import com.keyspaceapps.goodtv.data.watchlist.WatchListRef
 import com.keyspaceapps.goodtv.domain.MovieDetail
 import com.keyspaceapps.goodtv.ui.tmdb.TmdbCredit
 import com.keyspaceapps.goodtv.ui.tmdb.detailRating
@@ -44,6 +46,7 @@ import com.keyspaceapps.goodtv.ui.player.PlayerFormats
 import com.keyspaceapps.goodtv.data.progress.WatchProgress
 import com.keyspaceapps.goodtv.data.progress.Loaded
 import androidx.compose.foundation.layout.Arrangement
+import com.keyspaceapps.goodtv.ui.watchlist.WatchListButton
 
 @Composable
 fun MovieDetailScreen(key: MovieDetailKey, onPlay: (PlayerKey) -> Unit) {
@@ -109,6 +112,7 @@ private fun MovieDetailContent(detail: MovieDetail, tmdb: TmdbMeta?, progress: L
                         } else {
                             Button(onClick = { onPlay(key(0)) }, modifier = first) { Text(stringResource(R.string.play)) }
                         }
+                        WatchListButton(WatchListRef(movie.sourceId, WatchListKind.MOVIE, movie.id))
                     }
                 }
                 Spacer(Modifier.height(20.dp))

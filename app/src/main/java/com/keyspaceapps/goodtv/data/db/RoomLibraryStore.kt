@@ -15,6 +15,8 @@ import com.keyspaceapps.goodtv.domain.Series
 import com.keyspaceapps.goodtv.domain.SeriesDetail
 import com.keyspaceapps.goodtv.domain.SourceRecord
 import com.keyspaceapps.goodtv.domain.SourceSummary
+import com.keyspaceapps.goodtv.data.source.LiveCatalog
+import com.keyspaceapps.goodtv.data.sports.ChannelCandidate
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOf
@@ -66,6 +68,17 @@ class RoomLibraryStore(
             .filter { kind -> catalog.categories.any { it.kind == kind } }
             .forEach { kind -> hidden.pruneMissing(sourceId, kind.name) }
     }
+
+    override suspend fun replaceLive(sourceId: Long, live: LiveCatalog) = db.withTransaction {
+        library.deleteCategoriesOfKind(sourceId, ContentKind.LIVE.name)
+        library.deleteLive(sourceId)
+        library.insertCategories(live.categories.map { it.toEntity() })
+        library.insertLive(live.live.map { it.toEntity() })
+        if (live.categories.isNotEmpty()) hidden.pruneMissing(sourceId, ContentKind.LIVE.name)
+    }
+
+    override fun observeSportsCandidates(): Flow<List<ChannelCandidate>> =
+        library.observeSportsCandidates().map { rows -> rows.map { ChannelCandidate(it.live.toDomain(), it.categoryName) } }
 
     override suspend fun markSync(sourceId: Long, syncedAt: Long?, error: String?) = sources.markSync(sourceId, syncedAt, error)
 

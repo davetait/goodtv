@@ -1,6 +1,7 @@
 package com.keyspaceapps.goodtv.testing
 
 import com.keyspaceapps.goodtv.data.source.ChannelSource
+import com.keyspaceapps.goodtv.data.source.LiveCatalog
 import com.keyspaceapps.goodtv.data.source.SourceConfig
 import com.keyspaceapps.goodtv.data.source.SourceException
 import com.keyspaceapps.goodtv.data.source.SourceType
@@ -31,6 +32,14 @@ class FakeChannelSource : ChannelSource {
     override suspend fun fetchCatalog(sourceId: Long, config: SourceConfig): Result<Catalog> {
         fetchCatalogCalls += sourceId
         return catalogResults[sourceId]?.invoke() ?: Result.failure(SourceException("No script for $sourceId"))
+    }
+
+    val liveResults = mutableMapOf<Long, suspend () -> Result<LiveCatalog>>()
+    val fetchLiveCalls = mutableListOf<Long>()
+
+    override suspend fun fetchLive(sourceId: Long, config: SourceConfig): Result<LiveCatalog> {
+        fetchLiveCalls += sourceId
+        return liveResults[sourceId]?.invoke() ?: Result.failure(SourceException("No live script for $sourceId"))
     }
 
     override suspend fun fetchMovieDetail(sourceId: Long, config: SourceConfig, movieId: String): Result<MovieDetail> {

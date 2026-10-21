@@ -1,5 +1,8 @@
 package com.keyspaceapps.goodtv.ui
 
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
@@ -92,12 +95,14 @@ class HomeTabsTest {
     }
 
     @Test
-    fun rightFromLiveTabFocusesMoviesAndSelectOpensIt() {
+    fun rightFromLiveTabWalksPastSportsToMoviesAndSelectOpensIt() {
         seedAndLaunch()
         waitFor("Channel One")
         composeRule.onNodeWithText("Live").requestFocus()
         composeRule.onNodeWithText("Live").assertIsFocused()
 
+        composeRule.onRoot().performKeyInput { pressKey(Key.DirectionRight) }
+        composeRule.onNode(hasText("Sports") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab)).assertIsFocused()
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionRight) }
         composeRule.onNodeWithText("Movies").assertIsFocused()
 

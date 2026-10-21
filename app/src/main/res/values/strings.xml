@@ -125,4 +125,19 @@
     <string name="browse_search_movies">Search movies</string>
     <string name="browse_search_series">Search series</string>
     <string name="genre_search_no_results">Nothing in this genre matches “%1$s”</string>
+    <string name="tab_sports">Sports</string>
+    <string name="watch_list_button">＋ Watch list</string>
+    <string name="watch_list_on">✓ On watch list</string>
+    <string name="home_watch_list">Watch list</string>
+    <string name="watch_list_add">Add to watch list</string>
+    <string name="watch_list_remove">Remove from watch list</string>
+    <string name="sports_live">LIVE</string>
+    <plurals name="sports_on_channels">
+        <item quantity="one">On %d channel</item>
+        <item quantity="other">On %d channels</item>
+    </plurals>
+    <string name="sports_channel_unknown">Channel not known</string>
+    <string name="sports_loading">Loading today’s games…</string>
+    <string name="sports_none_today">No games on today</string>
+    <string name="sports_failed">Couldn’t load %1$s schedule</string>
 </resources>

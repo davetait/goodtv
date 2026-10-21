@@ -111,15 +111,27 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
     }
 }
 
+/** v8 → v9: the watch list. */
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `watch_list` (`sourceId` INTEGER NOT NULL, `kind` TEXT NOT NULL, `itemId` TEXT NOT NULL, `savedAt` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`sourceId`, `kind`, `itemId`), FOREIGN KEY(`sourceId`) REFERENCES `sources`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_watch_list_sourceId` ON `watch_list` (`sourceId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_watch_list_savedAt` ON `watch_list` (`savedAt`)")
+    }
+}
+
 @Database(
     entities = [
         SourceEntity::class, CategoryEntity::class, LiveChannelEntity::class, MovieEntity::class, SeriesEntity::class,
         MovieDetailEntity::class, SeriesInfoEntity::class, SeasonEntity::class, EpisodeEntity::class,
         HiddenCategoryEntity::class, TmdbMetaEntity::class, TmdbTitleMatchEntity::class,
         SeriesGenreEntity::class, TmdbGenreEntity::class, TmdbGenreStatusEntity::class, WatchProgressEntity::class,
-        TmdbListEntity::class, TmdbListItemEntity::class,
+        TmdbListEntity::class, TmdbListItemEntity::class, WatchListEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true, // schemas/ holds the baseline every future migration is written against
 )
 abstract class GoodTvDatabase : RoomDatabase() {
@@ -130,11 +142,12 @@ abstract class GoodTvDatabase : RoomDatabase() {
     abstract fun genres(): GenreDao
     abstract fun watchProgress(): WatchProgressDao
     abstract fun popular(): PopularDao
+    abstract fun watchList(): WatchListDao
 
     companion object {
         fun create(context: Context): GoodTvDatabase =
             Room.databaseBuilder(context, GoodTvDatabase::class.java, "goodtv.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                 .fallbackToDestructiveMigration(dropAllTables = true) // last resort for an unknown version only
                 .build()
     }

@@ -65,4 +65,4 @@ data class EditSourceKey(val sourceId: Long?) : GoodTvKey
 @Serializable
 data class CategoriesKey(val sourceId: Long) : GoodTvKey
 
-enum class HomeTab { HOME, LIVE, MOVIES, SERIES, SOURCES }
+enum class HomeTab { HOME, LIVE, SPORTS, MOVIES, SERIES, SOURCES }

@@ -24,6 +24,7 @@ import com.keyspaceapps.goodtv.ui.goodTvViewModel
 import com.keyspaceapps.goodtv.ui.live.LiveScreen
 import com.keyspaceapps.goodtv.ui.movies.MoviesScreen
 import com.keyspaceapps.goodtv.ui.series.SeriesScreen
+import com.keyspaceapps.goodtv.ui.sports.SportsScreen
 import com.keyspaceapps.goodtv.ui.nav.GoodTvKey
 import com.keyspaceapps.goodtv.ui.nav.HomeTab
 import com.keyspaceapps.goodtv.ui.sources.SourcesScreen
@@ -84,6 +85,7 @@ fun HomeScreen(onNavigate: (GoodTvKey) -> Unit) {
             when (current) {
                 HomeTab.HOME -> HomeTabScreen(onNavigate = onNavigate)
                 HomeTab.LIVE -> LiveScreen(onPlay = onNavigate)
+                HomeTab.SPORTS -> SportsScreen(onPlay = onNavigate)
                 HomeTab.MOVIES -> MoviesScreen(onMovie = onNavigate, onSeeAll = onNavigate)
                 HomeTab.SERIES -> SeriesScreen(onSeries = onNavigate, onSeeAll = onNavigate)
                 HomeTab.SOURCES -> SourcesScreen(onNavigate = onNavigate)
@@ -96,6 +98,7 @@ private val HomeTab.labelRes: Int
     get() = when (this) {
         HomeTab.HOME -> R.string.tab_home
         HomeTab.LIVE -> R.string.tab_live
+        HomeTab.SPORTS -> R.string.tab_sports
         HomeTab.MOVIES -> R.string.tab_movies
         HomeTab.SERIES -> R.string.tab_series
         HomeTab.SOURCES -> R.string.tab_sources

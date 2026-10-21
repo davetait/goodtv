@@ -22,11 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -107,8 +103,8 @@ private fun ContinueItem.status(): String {
  * The Continue Watching rail. Holding Select (or the remote's Menu key) on a card offers to remove
  * it. Focus goes to [initialFocus]'s first card when it is still unclaimed (unless [claimInitialFocus]
  * is false: another row's remembered card is coming back); after a removal it moves to the
- * neighbouring card, or is handed back ([onEmptied]) when the row empties. Focused cards are noted
- * in [focus].
+ * neighbouring card, or is handed back ([onEmptied]) when the row empties. A [handOff] (a row below
+ * emptied) lands on the first card. Focused cards are noted in [focus].
  */
 @Composable
 fun ContinueWatchingRow(
@@ -119,11 +115,14 @@ fun ContinueWatchingRow(
     onEmptied: () -> Unit,
     focus: FocusMemory? = null,
     claimInitialFocus: Boolean = true,
+    handOff: MutableState<Boolean>? = null,
 ) {
     var menuFor by remember { mutableStateOf<ContinueItem?>(null) }
     // After a removal: (removed card's key, neighbour's key). The neighbour takes focus once the
     // removed card is really gone, so the card on its way out can't claim it.
     var refocus by remember { mutableStateOf<Pair<String, String>?>(null) }
+    // Set when the last card is removed: the hand-off is for the next row, not the card on its way out.
+    var emptying by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxWidth().padding(top = 16.dp)) {
         Row(Modifier.padding(start = 48.dp, end = 48.dp, bottom = 8.dp), verticalAlignment = Alignment.Bottom) {
@@ -155,13 +154,11 @@ fun ContinueWatchingRow(
                             val r = refocus
                             when {
                                 r != null && r.second == item.key && items.none { it.key == r.first } -> { refocus = null; requester.requestFocus() }
+                                index == 0 && !emptying && handOff?.value == true -> { handOff.value = false; initialFocus.value = true; requester.requestFocus() }
                                 index == 0 && claimInitialFocus && !initialFocus.value -> { initialFocus.value = true; requester.requestFocus() }
                             }
                         }
-                        .onFocusChanged { if (it.isFocused) focus?.key = "continue:${item.key}" }
-                        .onKeyEvent { e ->
-                            if (e.type == KeyEventType.KeyUp && e.key == Key.Menu) { menuFor = item; true } else false
-                        },
+                        .onFocusChanged { if (it.isFocused) focus?.key = "continue:${item.key}" },
                 )
             }
         }
@@ -173,7 +170,7 @@ fun ContinueWatchingRow(
             onRemove = {
                 val index = items.indexOf(item)
                 menuFor = null
-                if (items.size == 1) onEmptied() else refocus = item.key to items[if (index < items.lastIndex) index + 1 else index - 1].key
+                if (items.size == 1) { emptying = true; onEmptied() } else refocus = item.key to items[if (index < items.lastIndex) index + 1 else index - 1].key
                 onRemove(item)
             },
             onDismiss = { menuFor = null },

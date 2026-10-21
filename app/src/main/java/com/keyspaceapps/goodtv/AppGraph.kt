@@ -10,6 +10,7 @@ import com.keyspaceapps.goodtv.data.db.RoomLibraryStore
 import com.keyspaceapps.goodtv.data.db.RoomPopularStore
 import com.keyspaceapps.goodtv.data.db.RoomTmdbCache
 import com.keyspaceapps.goodtv.data.db.RoomTmdbGenreStore
+import com.keyspaceapps.goodtv.data.db.RoomWatchListStore
 import com.keyspaceapps.goodtv.data.db.RoomWatchProgressStore
 import com.keyspaceapps.goodtv.data.progress.WatchProgressRepository
 import com.keyspaceapps.goodtv.data.repo.LibraryRepository
@@ -17,8 +18,17 @@ import com.keyspaceapps.goodtv.data.repo.LibraryStore
 import com.keyspaceapps.goodtv.data.repo.SyncManager
 import com.keyspaceapps.goodtv.data.repo.SyncState
 import com.keyspaceapps.goodtv.data.source.SourceRegistry
+import com.keyspaceapps.goodtv.data.watchlist.WatchListKind
+import com.keyspaceapps.goodtv.data.watchlist.WatchListRef
+import com.keyspaceapps.goodtv.data.watchlist.WatchListRepository
 import com.keyspaceapps.goodtv.data.tmdb.TmdbApi
 import com.keyspaceapps.goodtv.data.tmdb.TmdbCredential
+import com.keyspaceapps.goodtv.data.sports.EspnScoreboard
+import com.keyspaceapps.goodtv.data.sports.League
+import com.keyspaceapps.goodtv.data.sports.LiveRefresher
+import com.keyspaceapps.goodtv.data.sports.PwhlScorebar
+import com.keyspaceapps.goodtv.data.sports.ScheduleSource
+import com.keyspaceapps.goodtv.data.sports.SportsRepository
 import com.keyspaceapps.goodtv.data.subtitles.OnlineSubtitles
 import com.keyspaceapps.goodtv.data.subtitles.OpenSubtitlesApi
 import com.keyspaceapps.goodtv.data.subtitles.OpenSubtitlesLogin
@@ -95,7 +105,16 @@ class AppGraph(val context: Context) {
 
     private val defaultTmdb: TmdbRepository by lazy { TmdbRepository(api = tmdbApi, cache = tmdbCache, language = tmdbLanguage) }
 
-    val watchProgress: WatchProgressRepository by lazy { WatchProgressRepository(RoomWatchProgressStore(db.watchProgress())) }
+    /** A saved movie watched to the credits leaves the watch list (that copy only). */
+    val watchProgress: WatchProgressRepository by lazy {
+        WatchProgressRepository(
+            RoomWatchProgressStore(db.watchProgress()),
+            onMovieFinished = { ref -> watchList.remove(WatchListRef(ref.sourceId, WatchListKind.MOVIE, ref.itemId)) },
+        )
+    }
+
+    /** Titles saved to watch later, for the Watch list row, poster bookmarks and detail pages. */
+    val watchList: WatchListRepository by lazy { WatchListRepository(RoomWatchListStore(db.watchList())) }
 
     /** Home's popular rows: TMDB's popular streaming titles the library has, rankings refreshed daily. */
     val popularStore: PopularStore by lazy { RoomPopularStore(db.popular()) }
@@ -112,6 +131,13 @@ class AppGraph(val context: Context) {
                 .takeIf { it.username.isNotBlank() && it.password.isNotBlank() }
             OnlineSubtitles(OpenSubtitlesApi(okHttp, key, login), File(context.filesDir, "subtitles"))
         }
+    }
+
+    /** The Sports tab: today's NHL/NBA/MLB/NFL/WNBA games from ESPN, PWHL from HockeyTech, matched to live channels. */
+    val sports: SportsRepository by lazy {
+        val espn = EspnScoreboard(okHttp)
+        val sources: Map<League, ScheduleSource> = League.entries.associateWith { if (it == League.PWHL) PwhlScorebar(okHttp) else espn }
+        SportsRepository(sources, store, LiveRefresher(store, sourceRegistry, { syncManager.state.value is SyncState.Syncing }))
     }
 
     /** Background TMDB genre fill for movies; started on launch after stale sources refresh. */

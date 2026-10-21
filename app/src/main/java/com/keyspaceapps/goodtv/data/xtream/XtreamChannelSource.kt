@@ -1,10 +1,12 @@
 package com.keyspaceapps.goodtv.data.xtream
 
 import com.keyspaceapps.goodtv.data.source.ChannelSource
+import com.keyspaceapps.goodtv.data.source.LiveCatalog
 import com.keyspaceapps.goodtv.data.source.SourceConfig
 import com.keyspaceapps.goodtv.data.source.SourceException
 import com.keyspaceapps.goodtv.data.source.SourceType
 import com.keyspaceapps.goodtv.domain.Catalog
+import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.domain.MovieDetail
 import com.keyspaceapps.goodtv.domain.PlayableRef
 import com.keyspaceapps.goodtv.domain.SeriesDetail
@@ -43,6 +45,15 @@ class XtreamChannelSource(private val api: XtreamApi) : ChannelSource {
                 liveCats.await(), vodCats.await(), seriesCats.await(),
                 live.await(), vod.await(), series.await(),
             )
+        }
+    }
+
+    override suspend fun fetchLive(sourceId: Long, config: SourceConfig): Result<LiveCatalog> = runCatchingSource {
+        val cfg = xtream(config)
+        coroutineScope {
+            val cats = async { concurrentCalls.withPermit { api.liveCategories(cfg) } }
+            val live = async { concurrentCalls.withPermit { api.liveStreams(cfg) } }
+            LiveCatalog(XtreamMappers.categories(sourceId, ContentKind.LIVE, cats.await()), XtreamMappers.live(sourceId, live.await()))
         }
     }
 
