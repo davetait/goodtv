@@ -11,7 +11,7 @@ class SrtTest {
     }
 
     @Test fun parsesMessyRealWorldSrt() {
-        val text = "﻿1\r\n00:00:01,000 --> 00:00:02,000\r\n<i>Hi</i>\r\n\r\n2\r\n00:00:03,000 --> 00:00:04,000\r\n{\\an8}Top\r\n\r\n3\r\n00:00:05.000 --> 00:00:06.000\r\n<font color=\"#ffffff\">Dot</font>"
+        val text = "\uFEFF1\r\n00:00:01,000 --> 00:00:02,000\r\n<i>Hi</i>\r\n\r\n2\r\n00:00:03,000 --> 00:00:04,000\r\n{\\an8}Top\r\n\r\n3\r\n00:00:05.000 --> 00:00:06.000\r\n<font color=\"#ffffff\">Dot</font>"
         assertEquals(listOf("Hi", "Top", "Dot"), Srt.parse(text).map { it.text })
         assertEquals(5_000L, Srt.parse(text).last().startMs)
     }

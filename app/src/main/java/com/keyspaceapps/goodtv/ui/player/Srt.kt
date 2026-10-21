@@ -13,7 +13,7 @@ object Srt {
     private val TAGS = Regex("""<[^>]+>|\{\\[^}]*\}""")
 
     fun parse(text: String): List<TimedCue> =
-        text.removePrefix("﻿").replace("\r\n", "\n").replace('\r', '\n')
+        text.removePrefix("\uFEFF").replace("\r\n", "\n").replace('\r', '\n')
             .split(Regex("""\n\s*\n"""))
             .mapNotNull { block ->
                 val lines = block.trim().lines()

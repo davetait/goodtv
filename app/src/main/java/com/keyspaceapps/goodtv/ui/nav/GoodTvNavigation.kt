@@ -18,6 +18,7 @@ import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import androidx.tv.material3.Text
 import com.keyspaceapps.goodtv.appGraph
+import com.keyspaceapps.goodtv.data.subtitles.OnlineSubtitleSource
 import com.keyspaceapps.goodtv.domain.PlayableItem
 import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.ui.browse.CategoryGridScreen
@@ -53,6 +54,10 @@ fun GoodTvNavigation() {
                 var next by remember(key) { mutableStateOf<NextEpisode?>(null) }
                 LaunchedEffect(key) { item = graph.repository.playable(key.sourceId, key.toRef(), key.title) }
                 LaunchedEffect(key) { next = NextEpisodes.after(key, graph.repository, graph.watchProgress) }
+                var online by remember(key) { mutableStateOf<OnlineSubtitleSource?>(null) }
+                LaunchedEffect(key) {
+                    online = graph.onlineSubtitles?.let { subtitles -> SubtitleQueries.forKey(key, graph.repository)?.let(subtitles::forQuery) }
+                }
                 val current = item
                 if (current == null) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Loading…") }
@@ -67,6 +72,7 @@ fun GoodTvNavigation() {
                         upNext = next?.prompt,
                         // The next episode replaces this one, so Back still goes where this one came from.
                         onPlayNext = { next?.key?.let { k -> backStack.removeLastOrNull(); backStack.add(k) } },
+                        onlineSubtitles = online,
                     )
                 }
             }
