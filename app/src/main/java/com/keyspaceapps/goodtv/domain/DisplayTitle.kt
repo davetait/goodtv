@@ -84,9 +84,10 @@ object DisplayTitle {
 
     // ---- tag ----
 
-    // Movies/series: any caps tag before " - " or " | " (the panel convention), "[MULTI] ", "|EN| ", or a
-    // two-letter code with a colon ("UK: "); longer colon prefixes are real titles ("FBI: Most Wanted").
-    private val VOD_TAG = Regex("""^(?:\[([^\]]{1,15})]\s*|\|([^|]{1,10})\|\s*|([A-Z0-9][A-Z0-9+\-]{0,13})\s+[-|]\s+|([A-Z]{2}):\s+)""")
+    // Movies/series: any caps tag before " - " or " | " (the panel convention) or " -" with no space
+    // after it ("AR-DUB -We Bare Bears"), "[MULTI] ", "|EN| ", or a two-letter code with a colon
+    // ("UK: "); longer colon prefixes are real titles ("FBI: Most Wanted").
+    private val VOD_TAG = Regex("""^(?:\[([^\]]{1,15})]\s*|\|([^|]{1,10})\|\s*|([A-Z0-9][A-Z0-9+\-]{0,13})\s+[-|]\s+|([A-Z]{2}):\s+|([A-Z0-9][A-Z0-9+\-]{0,13})\s+-(?=\S))""")
     private val KNOWN_ONLY_TAG = Regex("""^([A-Z0-9][A-Z0-9+\-]{0,13}?)\s*(?:-|:)\s+""")
     private val REPEAT_TAG = Regex("""^([A-Z0-9][A-Z0-9+\-]{0,13}?)\s*-\s+""")
     // Channels: a short caps tag before ":" or " | ".
@@ -153,7 +154,8 @@ object DisplayTitle {
     /** Superscript/small-capital decorations ("ᴿᴬᵂ", "³⁸⁴⁰ᴾ", "◉") removed, spaces collapsed. */
     private fun stripDecorations(raw: String): String = raw
         .replace(Regex("""[ᴀ-ᶿ⁰-₟²³¹◉●]"""), "")
-        .replace(Regex("""\s+"""), " ")
+        // Non-breaking spaces (some panels put them after the tag) count as spaces; plain \s misses them.
+        .replace(Regex("""[\s\u00A0\u2007\u202F]+"""), " ")
         .trim()
 
     private fun latestYear() = java.time.Year.now().value + 1
