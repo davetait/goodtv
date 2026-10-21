@@ -12,10 +12,12 @@ import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import okhttp3.ResponseBody
 
 /** What to look subtitles up by: a movie's TMDB id, or a series' TMDB id with season and episode. */
@@ -43,6 +45,18 @@ data class OpenSubtitlesLogin(val username: String, val password: String) {
     override fun toString() = "OpenSubtitlesLogin(***)"
 }
 
+/** A download hop that isn't https (the link itself, or a redirect it leads to). */
+class InsecureLinkException(url: HttpUrl) : IOException("Refused a non-https download hop to ${url.host}")
+
+/** Refuses any request that isn't https. As a network interceptor it sees every redirect hop. */
+object HttpsOnly : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val url = chain.request().url
+        if (!url.isHttps) throw InsecureLinkException(url)
+        return chain.proceed(chain.request())
+    }
+}
+
 /** [resetUtc] is when the daily allowance renews, for [Reason.QUOTA]. */
 class OpenSubtitlesException(message: String, val reason: Reason, val resetUtc: String? = null) : Exception(message) {
     enum class Reason { AUTH, QUOTA, RATE_LIMITED, NETWORK, SERVER, BAD_RESPONSE }
@@ -66,6 +80,8 @@ class OpenSubtitlesApi(
     private val allowInsecureLinks: Boolean = false,
 ) {
     private val loginLock = Mutex()
+    // Downloads follow links from the API's response: every hop, redirects included, must be https.
+    private val downloadClient = if (allowInsecureLinks) client else client.newBuilder().addNetworkInterceptor(HttpsOnly).build()
     @Volatile private var session: Pair<String, HttpUrl>? = null // token, base url
 
     suspend fun search(query: SubtitleQuery): List<OsSubtitle> {
@@ -105,10 +121,12 @@ class OpenSubtitlesApi(
         val url = link.toHttpUrlOrNull()?.takeIf { it.isHttps || allowInsecureLinks }
             ?: throw OpenSubtitlesException("OpenSubtitles returned an unusable download link", OpenSubtitlesException.Reason.BAD_RESPONSE)
         try {
-            client.newCall(Request.Builder().url(url).header("User-Agent", USER_AGENT).build()).execute().use { r ->
+            downloadClient.newCall(Request.Builder().url(url).header("User-Agent", USER_AGENT).build()).execute().use { r ->
                 if (!r.isSuccessful) throw OpenSubtitlesException("Subtitle download failed (HTTP ${r.code})", reasonFor(r.code))
                 readCapped(r.body)
             }
+        } catch (e: InsecureLinkException) {
+            throw OpenSubtitlesException("OpenSubtitles returned an unusable download link", OpenSubtitlesException.Reason.BAD_RESPONSE)
         } catch (e: IOException) {
             throw OpenSubtitlesException("Could not reach OpenSubtitles", OpenSubtitlesException.Reason.NETWORK)
         }

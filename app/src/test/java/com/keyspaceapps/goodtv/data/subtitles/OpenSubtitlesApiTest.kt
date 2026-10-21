@@ -120,5 +120,17 @@ class OpenSubtitlesApiTest {
         val insecureOk = OpenSubtitlesApi(OkHttpClient(), "k3y", baseUrl = server.url("/api/v1/"), allowInsecureLinks = true)
         expectFailure(OpenSubtitlesException.Reason.BAD_RESPONSE) { insecureOk.fetchText(server.url("/big.srt").toString()) }
     }
+
+    /** OkHttp runs network interceptors on every hop, so an https link that redirects to http is refused too. */
+    @Test fun everyHopOfADownloadMustBeHttps() {
+        server.enqueue(ok("secret"))
+        val client = OkHttpClient.Builder().addNetworkInterceptor(HttpsOnly).build()
+        try {
+            client.newCall(okhttp3.Request.Builder().url(server.url("/lan")).build()).execute().close()
+            fail("expected the plain-http hop to be refused")
+        } catch (e: InsecureLinkException) {
+            assertEquals(0, server.requestCount)
+        }
+    }
 }
 
