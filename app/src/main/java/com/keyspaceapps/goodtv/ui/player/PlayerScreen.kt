@@ -37,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -78,9 +79,13 @@ import androidx.tv.material3.OutlinedButton
 import androidx.tv.material3.Text
 import com.keyspaceapps.goodtv.R
 import com.keyspaceapps.goodtv.data.progress.WatchRules
+import com.keyspaceapps.goodtv.data.subtitles.OnlineSubtitleSource
+import com.keyspaceapps.goodtv.data.subtitles.OpenSubtitlesException
+import com.keyspaceapps.goodtv.data.subtitles.OsSubtitle
 import com.keyspaceapps.goodtv.domain.PlayableItem
 import java.util.Date
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** Controls fade out after this long without a key press, while playing. */
 const val CONTROLS_HIDE_MS = 4_000L
@@ -99,6 +104,10 @@ const val PROGRESS_REPORT_MS = 10_000L
  * [UP_NEXT_COUNTDOWN_MS] countdown (which only runs while playing) calls [onPlayNext]. Back or "Back
  * to credits" dismisses it for good; if the episode then ends, the player leaves ([onBack]).
  *
+ * [onlineSubtitles] (OpenSubtitles) is searched only once the file's tracks are known and it has no
+ * English subtitles of its own (the file's own always win); then "English · OpenSubtitles" is
+ * offered, downloaded only when chosen, drawn here with its Timing offset ([SubtitleTiming]).
+ *
  * On demand, playback starts at [startPositionMs] and [onProgress] (position, duration) is called
  * every [PROGRESS_REPORT_MS] while playing, on pause, when the app goes to the background and when
  * the screen closes; never before playback has actually started, so a resume can't be wiped by
@@ -114,6 +123,7 @@ fun PlayerScreen(
     onProgress: ((positionMs: Long, durationMs: Long) -> Unit)? = null,
     upNext: UpNext? = null,
     onPlayNext: () -> Unit = {},
+    onlineSubtitles: OnlineSubtitleSource? = null,
 ) {
     val context = LocalContext.current
     var isBuffering by remember { mutableStateOf(true) }
@@ -281,6 +291,47 @@ fun PlayerScreen(
         scrubMs = Scrub.next(scrubMs ?: player.currentPosition, forward, repeatCount, durationMs)
     }
 
+    // OpenSubtitles: searched once the file's tracks are known and only if it has no English of its own.
+    val scope = rememberCoroutineScope()
+    var onlineFound by remember { mutableStateOf<OsSubtitle?>(null) }
+    var onlineAll by remember { mutableStateOf<List<TimedCue>?>(null) } // non-null while those subtitles are on
+    var onlineOffsetMs by remember { mutableLongStateOf(0L) }
+    var onlineCues by remember { mutableStateOf<List<Cue>>(emptyList()) }
+    var subtitleBusy by remember { mutableStateOf(false) }
+    var subtitleNotice by remember { mutableStateOf<String?>(null) }
+    val needsOnline = onlineSubtitles != null && tracks.groups.isNotEmpty() && !remember(tracks) { hasEnglishTrack(tracks) }
+    LaunchedEffect(onlineSubtitles, needsOnline) {
+        if (needsOnline && onlineFound == null) onlineFound = onlineSubtitles?.find()
+    }
+    LaunchedEffect(onlineAll) {
+        val all = onlineAll ?: run { onlineCues = emptyList(); return@LaunchedEffect }
+        while (true) {
+            onlineCues = all.at(player.currentPosition, onlineOffsetMs).map { Cue.Builder().setText(it.text).build() }
+            delay(100)
+        }
+    }
+    val quotaNotice = stringResource(R.string.player_subtitles_quota, "%s")
+    val failedNotice = stringResource(R.string.player_subtitles_online_failed)
+    fun chooseOnline(choice: OsSubtitle) {
+        val source = onlineSubtitles ?: return
+        scope.launch {
+            subtitleBusy = true
+            subtitleNotice = null
+            val result = source.fetch(choice)
+            subtitleBusy = false
+            result.onSuccess { text ->
+                onlineAll = Srt.parse(text)
+                onlineOffsetMs = source.offsetMs()
+                player.selectTrack(C.TRACK_TYPE_TEXT, null) // the file has no English; its other subtitles go off
+                panel = null
+            }.onFailure { e ->
+                val reset = (e as? OpenSubtitlesException)?.takeIf { it.reason == OpenSubtitlesException.Reason.QUOTA }?.resetUtc?.let(PlaybackErrors::utcClock)
+                subtitleNotice = if (reset != null) quotaNotice.format(reset) else failedNotice
+            }
+        }
+    }
+    val onlineLabel = stringResource(R.string.player_subtitles_online)
+
     val offLabel = stringResource(R.string.player_subtitles_off)
     val trackFallback = stringResource(R.string.player_track_number)
     val ui = PlayerUi(
@@ -290,7 +341,13 @@ fun PlayerScreen(
         positionMs = positionMs,
         bufferedMs = bufferedMs,
         durationMs = durationMs,
-        subtitles = remember(tracks, offLabel) { trackChoices(tracks, C.TRACK_TYPE_TEXT, offLabel) { trackFallback.format(it) } },
+        subtitles = remember(tracks, offLabel, onlineFound, needsOnline, onlineAll != null) {
+            val own = trackChoices(tracks, C.TRACK_TYPE_TEXT, offLabel) { trackFallback.format(it) }
+                // While OpenSubtitles is on, the file's tracks are off but "Off" isn't the choice.
+                .map { if (onlineAll != null && it.ref == null) it.copy(selected = false) else it }
+            val found = onlineFound
+            if (needsOnline && found != null) own + TrackChoice(onlineLabel, selected = onlineAll != null, ref = null, online = true) else own
+        },
         audio = remember(tracks) { trackChoices(tracks, C.TRACK_TYPE_AUDIO, null) { trackFallback.format(it) } },
         clock = DateFormat.getTimeFormat(context).format(Date(now)),
         endsAt = if (!item.isLive && durationMs > 0) {
@@ -298,6 +355,9 @@ fun PlayerScreen(
         } else {
             null
         },
+        onlineSubtitleOffsetMs = if (onlineAll != null) onlineOffsetMs else null,
+        subtitleNotice = subtitleNotice,
+        subtitleBusy = subtitleBusy,
     )
 
     Box(
@@ -363,7 +423,7 @@ fun PlayerScreen(
 
         val showControls = controlsVisible && error == null && !showUpNext
         val captionInset by animateDpAsState(if (showControls) (if (item.isLive) 150.dp else 210.dp) else 64.dp, label = "captions")
-        if (!showUpNext) SubtitleLayer(cues, bottomInset = captionInset)
+        if (!showUpNext) SubtitleLayer(if (onlineAll != null) onlineCues else cues, bottomInset = captionInset)
 
         if (isBuffering && error == null) Spinner(Modifier.align(Alignment.Center))
 
@@ -379,8 +439,18 @@ fun PlayerScreen(
                     val target = scrubMs
                     if (target != null) { player.seekTo(target); positionMs = target; scrubMs = null } else togglePlay()
                 },
-                onOpenPanel = { panel = it },
+                onOpenPanel = { panel = it; subtitleNotice = null },
+                onSubtitleTiming = { delta ->
+                    onlineOffsetMs = (onlineOffsetMs + delta).coerceIn(-SubtitleTiming.LIMIT_MS, SubtitleTiming.LIMIT_MS)
+                    val saved = onlineOffsetMs
+                    scope.launch { onlineSubtitles?.setOffsetMs(saved) }
+                },
                 onSelectTrack = { p, choice ->
+                    if (choice.online) {
+                        onlineFound?.let(::chooseOnline) // the panel closes once the download is in
+                        return@PlayerControls
+                    }
+                    if (p == PlayerPanel.SUBTITLES) onlineAll = null
                     player.selectTrack(if (p == PlayerPanel.AUDIO) C.TRACK_TYPE_AUDIO else C.TRACK_TYPE_TEXT, choice.ref)
                     panel = null
                 },
@@ -441,6 +511,11 @@ object PlaybackErrors {
         in 4000..4999 -> R.string.player_error_decoding
         else -> R.string.player_error_generic
     }
+
+    /** "2026-10-22T00:00:00.000Z" → "00:00" (UTC), for the OpenSubtitles limit notice; null if unreadable. */
+    fun utcClock(iso: String): String? = runCatching {
+        java.time.Instant.parse(iso).atOffset(java.time.ZoneOffset.UTC).format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+    }.getOrNull()
 
     /** "ERROR_CODE_DECODING_FAILED" → "decoding failed": small print for support. */
     fun detail(codeName: String): String = codeName.removePrefix("ERROR_CODE_").replace('_', ' ').lowercase()

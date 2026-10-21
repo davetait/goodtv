@@ -19,6 +19,9 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.keyspaceapps.goodtv.domain.PlayableItem
 import com.keyspaceapps.goodtv.ui.player.PlayerScreen
 import com.keyspaceapps.goodtv.ui.player.UpNext
+import com.keyspaceapps.goodtv.data.subtitles.OnlineSubtitleSource
+import com.keyspaceapps.goodtv.data.subtitles.OpenSubtitlesException
+import com.keyspaceapps.goodtv.data.subtitles.OsSubtitle
 import com.keyspaceapps.goodtv.ui.theme.GoodTvTheme
 import java.io.File
 import org.junit.Assert.assertEquals
@@ -38,16 +41,51 @@ class PlayerScreenTest {
     private var backs = 0
     private var nexts = 0
 
-    @Before
-    fun copyMedia() {
+    private fun asset(name: String): String {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
-        val file = File(instrumentation.targetContext.cacheDir, "player_tracks.mkv")
-        instrumentation.context.assets.open("player_tracks.mkv").use { input -> file.outputStream().use { input.copyTo(it) } }
-        url = file.toURI().toString()
+        val file = File(instrumentation.targetContext.cacheDir, name)
+        instrumentation.context.assets.open(name).use { input -> file.outputStream().use { input.copyTo(it) } }
+        return file.toURI().toString()
     }
 
-    private fun launch(upNext: UpNext? = null) = composeRule.setContent {
-        GoodTvTheme { PlayerScreen(PlayableItem("Test pattern", url, isLive = false), onBack = { backs++ }, upNext = upNext, onPlayNext = { nexts++ }) }
+    @Before
+    fun copyMedia() { url = asset("player_tracks.mkv") }
+
+    private fun launch(upNext: UpNext? = null, online: OnlineSubtitleSource? = null) = composeRule.setContent {
+        GoodTvTheme {
+            PlayerScreen(PlayableItem("Test pattern", url, isLive = false), onBack = { backs++ }, upNext = upNext, onPlayNext = { nexts++ }, onlineSubtitles = online)
+        }
+    }
+
+    /** Stands in for OpenSubtitles: [result] is what a download gives; counts every call. */
+    private class FakeOnline(var found: OsSubtitle?, var result: Result<String>) : OnlineSubtitleSource {
+        var finds = 0
+        var fetches = 0
+        var offset = 0L
+        override suspend fun find(): OsSubtitle? { finds++; return found }
+        override suspend fun fetch(choice: OsSubtitle): Result<String> { fetches++; return result }
+        override suspend fun offsetMs() = offset
+        override suspend fun setOffsetMs(ms: Long) { offset = ms }
+    }
+
+    private val result = OsSubtitle(1, "Test.Pattern", "t.srt", "en", false, false, false, false, 10)
+    private val onlineSrt = (0 until 10).joinToString("\n") { i -> "${i + 1}\n00:00:${"%02d".format(i * 2)},000 --> 00:00:${"%02d".format(i * 2 + 2)},000\nOnline line ${i + 1}\n" }
+
+    /** The file without any subtitles, paused once loaded (it has one audio track, so no Audio button to wait for). */
+    private fun launchNoSubsPaused(online: OnlineSubtitleSource) {
+        url = asset("player_nosubs.mkv")
+        launch(online = online)
+        waitFocused { composeRule.onNodeWithContentDescription("Seek") }
+        keys(Key.MediaPause)
+        waitFor(15_000) { composeRule.onNode(hasText("−00:", substring = true)) }
+        waitFor { composeRule.onNodeWithContentDescription("Play") }
+    }
+
+    private fun openSubtitles() {
+        keys(listOf(Key.DirectionDown, Key.DirectionRight))
+        composeRule.onNodeWithContentDescription("Subtitles").assertIsFocused()
+        keys(Key.DirectionCenter)
+        waitFor { composeRule.onNodeWithText("Off") }
     }
 
     // A 20-second file is "in its credits" from the start (the last 2 minutes count), so Up next shows at once.
@@ -188,6 +226,80 @@ class PlayerScreenTest {
         composeRule.waitUntil(30_000) { backs == 1 }
         assertEquals(0, nexts)
         composeRule.onAllNodes(hasText("UP NEXT")).assertCountEquals(0)
+    }
+
+    @Test
+    fun onlineChoiceOfferedWhenTheFileHasNoEnglish() {
+        val online = FakeOnline(result, Result.success(onlineSrt))
+        launchNoSubsPaused(online)
+        openSubtitles()
+        waitFor { composeRule.onNodeWithText("English · OpenSubtitles") }
+        assertEquals("nothing downloaded until it's chosen", 0, online.fetches)
+    }
+
+    @Test
+    fun choosingItDownloadsAndDrawsCaptions() {
+        val online = FakeOnline(result, Result.success(onlineSrt))
+        launchNoSubsPaused(online)
+        openSubtitles()
+        waitFor { composeRule.onNodeWithText("English · OpenSubtitles") }
+        keys(listOf(Key.DirectionDown, Key.DirectionCenter))
+        waitFocused { composeRule.onNodeWithContentDescription("Subtitles") }
+        keys(listOf(Key.DirectionLeft, Key.DirectionCenter))
+        composeRule.waitUntil(10_000) { captionsShown("Online line") }
+        assertEquals(1, online.fetches)
+    }
+
+    @Test
+    fun timingMovesCaptionsLater() {
+        val online = FakeOnline(result, Result.success(onlineSrt))
+        launchNoSubsPaused(online)
+        openSubtitles()
+        waitFor { composeRule.onNodeWithText("English · OpenSubtitles") }
+        keys(listOf(Key.DirectionDown, Key.DirectionCenter))
+        waitFocused { composeRule.onNodeWithContentDescription("Subtitles") }
+        keys(Key.DirectionCenter)
+        waitFocused { composeRule.onNodeWithText("English · OpenSubtitles") }
+        keys(Key.DirectionDown)
+        waitFocused { composeRule.onNodeWithText("Timing", substring = true) }
+        keys(listOf(Key.DirectionRight, Key.DirectionRight, Key.DirectionRight, Key.DirectionRight))
+        waitFor { composeRule.onNodeWithText("+2.0 s") }
+        composeRule.waitUntil(5_000) { online.offset == 2_000L }
+    }
+
+    @Test
+    fun quotaFailureShowsNoticeAndKeepsOff() {
+        val online = FakeOnline(result, Result.failure(OpenSubtitlesException("quota", OpenSubtitlesException.Reason.QUOTA, "2026-10-22T00:00:00.000Z")))
+        launchNoSubsPaused(online)
+        openSubtitles()
+        waitFor { composeRule.onNodeWithText("English · OpenSubtitles") }
+        keys(listOf(Key.DirectionDown, Key.DirectionCenter))
+        waitFor { composeRule.onNodeWithText("Daily OpenSubtitles limit reached. Try again after 00:00 UTC") }
+        composeRule.onNodeWithText("Off").assertIsSelected()
+        composeRule.onNodeWithText("English · OpenSubtitles").assertIsNotSelected()
+    }
+
+    @Test
+    fun fileWithEnglishNeverSearchesOrDownloads() {
+        val online = FakeOnline(result, Result.success(onlineSrt))
+        launch(online = online)
+        waitFocused { composeRule.onNodeWithContentDescription("Seek") }
+        keys(Key.MediaPause)
+        waitFor(15_000) { composeRule.onNodeWithContentDescription("Audio") }
+        Thread.sleep(3_000)
+        assertEquals(0, online.finds)
+        assertEquals(0, online.fetches)
+        openSubtitles()
+        composeRule.onAllNodes(hasText("English · OpenSubtitles")).assertCountEquals(0)
+    }
+
+    @Test
+    fun searchWaitsForTheFilesTracks() {
+        val online = FakeOnline(result, Result.success(onlineSrt))
+        launchNoSubsPaused(online)
+        openSubtitles()
+        waitFor { composeRule.onNodeWithText("English · OpenSubtitles") }
+        assertEquals("searched once, after the tracks were known", 1, online.finds)
     }
 }
 
