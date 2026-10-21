@@ -14,6 +14,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
 import androidx.test.core.app.ApplicationProvider
 import com.keyspaceapps.goodtv.AppGraph
 import com.keyspaceapps.goodtv.appGraph
@@ -24,11 +25,19 @@ import com.keyspaceapps.goodtv.data.watchlist.WatchListRef
 import com.keyspaceapps.goodtv.domain.Catalog
 import com.keyspaceapps.goodtv.domain.Category
 import com.keyspaceapps.goodtv.domain.ContentKind
+import com.keyspaceapps.goodtv.domain.Episode
 import com.keyspaceapps.goodtv.domain.LiveChannel
 import com.keyspaceapps.goodtv.domain.Movie
+import com.keyspaceapps.goodtv.domain.MovieDetail
+import com.keyspaceapps.goodtv.domain.Season
 import com.keyspaceapps.goodtv.domain.Series
+import com.keyspaceapps.goodtv.domain.SeriesDetail
 import com.keyspaceapps.goodtv.domain.SourceRecord
+import com.keyspaceapps.goodtv.ui.movies.MovieDetailScreen
 import com.keyspaceapps.goodtv.ui.movies.MoviesScreen
+import com.keyspaceapps.goodtv.ui.nav.MovieDetailKey
+import com.keyspaceapps.goodtv.ui.nav.SeriesDetailKey
+import com.keyspaceapps.goodtv.ui.series.SeriesDetailScreen
 import com.keyspaceapps.goodtv.ui.theme.GoodTvTheme
 import com.keyspaceapps.goodtv.ui.watchlist.WatchListHost
 import kotlinx.coroutines.flow.first
@@ -66,6 +75,9 @@ class WatchListUiTest {
                 listOf(Series(sid, "s1", "dra", "Severance", null, null, null)),
             ),
         )
+        graph.store.saveMovieDetail(MovieDetail(Movie(sid, "m1", "act", "Heat", null, "mkv", null, null), null, null, null, null, null, 10_200, null))
+        val eps = listOf(Episode(sid, "s1", "e1", 1, 1, "Good News About Hell", "mp4", 3000, null, null))
+        graph.store.saveSeriesDetail(SeriesDetail(Series(sid, "s1", "dra", "Severance", null, null, null), null, null, null, null, null, listOf(Season(1, "Season 1", null)), eps))
     }
 
     private fun showMovies() = composeRule.setContent {
@@ -117,5 +129,42 @@ class WatchListUiTest {
         openMenu("Remove from watch list").performKeyInput { pressKey(Key.DirectionCenter) }
         composeRule.waitUntil(5_000) { heat !in saved() }
         composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasTestTag("watchlist-saved"), useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+    }
+
+    private fun pressCenterOn(text: String) {
+        composeRule.onNode(hasText(text)).requestFocus()
+        waitFocused(text)
+        composeRule.onRoot().performKeyInput { pressKey(Key.DirectionCenter) }
+    }
+
+    @Test
+    fun movieDetailButtonToggles() {
+        composeRule.setContent { GoodTvTheme { WatchListHost(graph.watchList) { MovieDetailScreen(MovieDetailKey(sid, "m1"), onPlay = { opened += it }) } } }
+        waitFor("＋ Watch list")
+        pressCenterOn("＋ Watch list")
+        waitFor("✓ On watch list")
+        composeRule.waitUntil(5_000) { heat in saved() }
+        pressCenterOn("✓ On watch list")
+        waitFor("＋ Watch list")
+        composeRule.waitUntil(5_000) { heat !in saved() }
+        assertEquals(emptyList<Any>(), opened)
+    }
+
+    @Test
+    fun seriesDetailButtonToggles() {
+        val severance = WatchListRef(sid, WatchListKind.SERIES, "s1")
+        composeRule.setContent { GoodTvTheme { WatchListHost(graph.watchList) { SeriesDetailScreen(SeriesDetailKey(sid, "s1"), onPlay = { opened += it }) } } }
+        waitFor("＋ Watch list")
+        pressCenterOn("＋ Watch list")
+        waitFor("✓ On watch list")
+        composeRule.waitUntil(5_000) { severance in saved() }
+        assertEquals(emptyList<Any>(), opened)
+    }
+
+    @Test
+    fun playStillTakesInitialFocus() {
+        composeRule.setContent { GoodTvTheme { WatchListHost(graph.watchList) { MovieDetailScreen(MovieDetailKey(sid, "m1"), onPlay = { opened += it }) } } }
+        waitFor("＋ Watch list")
+        waitFocused("Play")
     }
 }

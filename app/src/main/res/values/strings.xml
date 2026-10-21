@@ -126,6 +126,8 @@
     <string name="browse_search_series">Search series</string>
     <string name="genre_search_no_results">Nothing in this genre matches “%1$s”</string>
     <string name="tab_sports">Sports</string>
+    <string name="watch_list_button">＋ Watch list</string>
+    <string name="watch_list_on">✓ On watch list</string>
     <string name="watch_list_add">Add to watch list</string>
     <string name="watch_list_remove">Remove from watch list</string>
     <string name="sports_live">LIVE</string>
