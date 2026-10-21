@@ -128,6 +128,7 @@
     <string name="tab_sports">Sports</string>
     <string name="watch_list_button">＋ Watch list</string>
     <string name="watch_list_on">✓ On watch list</string>
+    <string name="home_watch_list">Watch list</string>
     <string name="watch_list_add">Add to watch list</string>
     <string name="watch_list_remove">Remove from watch list</string>
     <string name="sports_live">LIVE</string>

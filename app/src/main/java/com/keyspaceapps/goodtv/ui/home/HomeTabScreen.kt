@@ -33,6 +33,8 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.keyspaceapps.goodtv.R
 import com.keyspaceapps.goodtv.data.progress.ContinueItem
+import com.keyspaceapps.goodtv.data.watchlist.WatchListItem
+import com.keyspaceapps.goodtv.data.watchlist.WatchListRef
 import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.ui.browse.FocusMemory
 import com.keyspaceapps.goodtv.ui.browse.PosterCard
@@ -63,6 +65,8 @@ fun HomeTabScreen(onNavigate: (GoodTvKey) -> Unit) {
     val continueVm = goodTvViewModel { ContinueWatchingViewModel(it.watchProgress) }
     val continueItems by continueVm.items.collectAsState()
     val popularVm = goodTvViewModel { PopularViewModel(it.popularMovies, it.popularShows, it.popularStore, it.appScope) }
+    val watchVm = goodTvViewModel { WatchListViewModel(it.watchList) }
+    val watchItems by watchVm.items.collectAsState()
     val popularMovies by popularVm.movies.collectAsState()
     val popularShows by popularVm.shows.collectAsState()
     var searchEditing by remember { mutableStateOf(false) }
@@ -89,10 +93,14 @@ fun HomeTabScreen(onNavigate: (GoodTvKey) -> Unit) {
             // Wait for both stored rows so the first row (and its focus) doesn't change under the user.
             found == null -> {
                 val items = continueItems
+                val saved = watchItems
                 val movies = popularMovies
                 val shows = popularShows
-                if (items != null && movies != null && shows != null) {
-                    HomeRows(items, movies, shows, popularVm.focus, rowsRequested, searchEditing, scopeFocus, onNavigate, onRemove = continueVm::remove)
+                if (items != null && saved != null && movies != null && shows != null) {
+                    HomeRows(
+                        items, saved, movies, shows, popularVm.focus, rowsRequested, searchEditing, scopeFocus, onNavigate,
+                        onRemove = continueVm::remove, onRemoveSaved = watchVm::remove,
+                    )
                 }
             }
             found.isEmpty() -> Text(
@@ -147,6 +155,7 @@ private fun SearchResultsGrid(
 @Composable
 private fun HomeRows(
     continueItems: List<ContinueItem>,
+    watchItems: List<WatchListItem>,
     popularMovies: List<PopularCard>,
     popularShows: List<PopularCard>,
     focus: FocusMemory,
@@ -155,12 +164,14 @@ private fun HomeRows(
     scopeFocus: FocusRequester,
     onNavigate: (GoodTvKey) -> Unit,
     onRemove: (ContinueItem) -> Unit,
+    onRemoveSaved: (WatchListRef) -> Unit,
 ) {
     // Set when focus should move down to the first card of the first row present: the last Continue
     // Watching card was removed, or a row arrived above where focus started. Kept apart from
     // [requested] so a vanishing card can't claim it back.
     val handOff = remember { mutableStateOf(false) }
-    val popularComingBack = focus.key in (popularMovies + popularShows).map { it.key }
+    // Coming back from a title opened from the Watch list or a popular row: that card takes focus, not the first row's.
+    val comingBack = focus.key in (popularMovies + popularShows).map { it.key } + watchItems.map { watchListFocusKey(it.ref) }
     val listState = rememberLazyListState()
 
     // Rankings can land after Home opened (fresh install: they wait for the first sync). When a row
@@ -171,13 +182,13 @@ private fun HomeRows(
     LaunchedEffect(firstPopularKey) {
         val before = lastFirstKey.value
         lastFirstKey.value = firstPopularKey
-        if (firstPopularKey != null && firstPopularKey != before && continueItems.isEmpty() && !searchEditing && (focus.key == null || focus.key == before)) {
+        if (firstPopularKey != null && firstPopularKey != before && continueItems.isEmpty() && watchItems.isEmpty() && !searchEditing && (focus.key == null || focus.key == before)) {
             handOff.value = true
             listState.scrollToItem(0)
         }
     }
 
-    val nothingToShow = continueItems.isEmpty() && popularMovies.isEmpty() && popularShows.isEmpty()
+    val nothingToShow = continueItems.isEmpty() && watchItems.isEmpty() && popularMovies.isEmpty() && popularShows.isEmpty()
     LaunchedEffect(nothingToShow) {
         if (nothingToShow && (!requested.value || handOff.value)) {
             requested.value = true
@@ -199,19 +210,25 @@ private fun HomeRows(
         if (continueItems.isNotEmpty()) item(key = "continue") {
             ContinueWatchingRow(
                 continueItems, requested, onNavigate, onRemove, onEmptied = { handOff.value = true },
-                focus = focus, claimInitialFocus = !popularComingBack,
+                focus = focus, claimInitialFocus = !comingBack, handOff = handOff,
+            )
+        }
+        if (watchItems.isNotEmpty()) item(key = "watch-list") {
+            WatchListRow(
+                watchItems, focus, requested, handOff, isFirstRow = continueItems.isEmpty(), comingBack = comingBack,
+                onOpen = onNavigate, onRemove = onRemoveSaved, onEmptied = { handOff.value = true },
             )
         }
         if (popularMovies.isNotEmpty()) item(key = "popular-movies") {
             PopularRow(
                 R.string.home_popular_movies, popularMovies, focus, requested, handOff,
-                isFirstRow = continueItems.isEmpty(), comingBack = popularComingBack, onOpen = onNavigate,
+                isFirstRow = continueItems.isEmpty() && watchItems.isEmpty(), comingBack = comingBack, onOpen = onNavigate,
             )
         }
         if (popularShows.isNotEmpty()) item(key = "popular-shows") {
             PopularRow(
                 R.string.home_popular_shows, popularShows, focus, requested, handOff,
-                isFirstRow = continueItems.isEmpty() && popularMovies.isEmpty(), comingBack = popularComingBack, onOpen = onNavigate,
+                isFirstRow = continueItems.isEmpty() && watchItems.isEmpty() && popularMovies.isEmpty(), comingBack = comingBack, onOpen = onNavigate,
             )
         }
     }
