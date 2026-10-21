@@ -1,8 +1,10 @@
 package com.keyspaceapps.goodtv.data.subtitles
 
+import com.keyspaceapps.goodtv.ui.player.Srt
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -26,6 +28,7 @@ interface OnlineSubtitleSource {
 class OnlineSubtitles(private val api: OpenSubtitlesApi, private val dir: File) {
     private val lock = Mutex()
     private val searches = HashMap<String, OsSubtitle?>()
+    private val downloads = KeyedLocks()
 
     fun forQuery(query: SubtitleQuery): OnlineSubtitleSource = object : OnlineSubtitleSource {
         private val srt = File(dir, "${query.key}.srt")
@@ -37,30 +40,59 @@ class OnlineSubtitles(private val api: OpenSubtitlesApi, private val dir: File) 
                 SubtitlePicker.best(api.search(query), query)
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: OpenSubtitlesException) {
-                return@withLock null // not remembered: try again next time
+            } catch (e: Exception) {
+                return@withLock null // best-effort and not remembered: try again next time
             }
             found.also { searches[query.key] = it }
         }
 
         override suspend fun fetch(choice: OsSubtitle): Result<String> = try {
-            withContext(Dispatchers.IO) { if (srt.exists()) srt.readText() else null }?.let { return Result.success(it) }
-            val text = api.fetchText(api.downloadLink(choice.fileId))
-            withContext(Dispatchers.IO) {
-                dir.mkdirs()
-                val tmp = File(dir, "${query.key}.srt.tmp")
-                tmp.writeText(text)
-                tmp.renameTo(srt)
-            }
-            Result.success(text)
+            // One download per title even if asked twice at once; the paid-for download is kept even
+            // if the player closes meanwhile (NonCancellable), and only text that has cues is saved.
+            withContext(NonCancellable + Dispatchers.IO) {
+                downloads.withLock(query.key) {
+                    readSaved() ?: run {
+                        val text = api.fetchText(api.downloadLink(choice.fileId))
+                        if (Srt.parse(text).isEmpty()) {
+                            throw OpenSubtitlesException("OpenSubtitles sent a file with no subtitles in it", OpenSubtitlesException.Reason.BAD_RESPONSE)
+                        }
+                        save(text)
+                        text
+                    }
+                }
+            }.let { Result.success(it) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
 
-        override suspend fun offsetMs(): Long = withContext(Dispatchers.IO) { offset.takeIf { it.exists() }?.readText()?.trim()?.toLongOrNull() ?: 0L }
+        private fun readSaved(): String? = runCatching { srt.takeIf { it.exists() }?.readText() }.getOrNull()
 
-        override suspend fun setOffsetMs(ms: Long) = withContext(Dispatchers.IO) { dir.mkdirs(); offset.writeText(ms.toString()) }
+        /** Best effort: a failed save (disk full) still shows this time's subtitles. */
+        private fun save(text: String) {
+            runCatching {
+                dir.mkdirs()
+                val tmp = File(dir, "${query.key}.srt.tmp")
+                tmp.writeText(text)
+                if (!tmp.renameTo(srt)) { tmp.copyTo(srt, overwrite = true); tmp.delete() }
+            }
+        }
+
+        override suspend fun offsetMs(): Long = withContext(Dispatchers.IO) {
+            runCatching { offset.takeIf { it.exists() }?.readText()?.trim()?.toLongOrNull() }.getOrNull() ?: 0L
+        }
+
+        override suspend fun setOffsetMs(ms: Long) = withContext(Dispatchers.IO) {
+            runCatching { dir.mkdirs(); offset.writeText(ms.toString()) }
+            Unit
+        }
     }
 }
+
+/** One mutex per key, so downloads of different titles don't wait on each other. */
+private class KeyedLocks {
+    private val locks = HashMap<String, Mutex>()
+    suspend fun <T> withLock(key: String, block: suspend () -> T): T = synchronized(locks) { locks.getOrPut(key) { Mutex() } }.withLock { block() }
+}
+

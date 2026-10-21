@@ -63,7 +63,9 @@ class PlayerScreenTest {
         var fetches = 0
         var offset = 0L
         override suspend fun find(): OsSubtitle? { finds++; return found }
-        override suspend fun fetch(choice: OsSubtitle): Result<String> { fetches++; return result }
+        /** When set, fetch waits for it (a slow download). */
+        var gate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+        override suspend fun fetch(choice: OsSubtitle): Result<String> { fetches++; gate?.await(); return result }
         override suspend fun offsetMs() = offset
         override suspend fun setOffsetMs(ms: Long) { offset = ms }
     }
@@ -300,6 +302,39 @@ class PlayerScreenTest {
         openSubtitles()
         waitFor { composeRule.onNodeWithText("English · OpenSubtitles") }
         assertEquals("searched once, after the tracks were known", 1, online.finds)
+    }
+
+    /** Review I1: a second press while downloading doesn't start a second download. */
+    @Test
+    fun pressingAgainWhileDownloadingDoesNotDownloadTwice() {
+        val online = FakeOnline(result, Result.success(onlineSrt)).apply { gate = kotlinx.coroutines.CompletableDeferred() }
+        launchNoSubsPaused(online)
+        openSubtitles()
+        waitFor { composeRule.onNodeWithText("English · OpenSubtitles") }
+        keys(listOf(Key.DirectionDown, Key.DirectionCenter))
+        waitFor { composeRule.onNodeWithText("Downloading…") }
+        keys(Key.DirectionCenter)
+        composeRule.waitForIdle()
+        online.gate!!.complete(Unit)
+        waitFocused { composeRule.onNodeWithContentDescription("Subtitles") }
+        assertEquals(1, online.fetches)
+    }
+
+    /** Review I2: choosing Off while a download is on its way wins over the download. */
+    @Test
+    fun aLateDownloadDoesNotOverrideANewerChoice() {
+        val online = FakeOnline(result, Result.success(onlineSrt)).apply { gate = kotlinx.coroutines.CompletableDeferred() }
+        launchNoSubsPaused(online)
+        openSubtitles()
+        waitFor { composeRule.onNodeWithText("English · OpenSubtitles") }
+        keys(listOf(Key.DirectionDown, Key.DirectionCenter))
+        waitFor { composeRule.onNodeWithText("Downloading…") }
+        keys(listOf(Key.DirectionUp, Key.DirectionCenter)) // Off
+        waitFocused { composeRule.onNodeWithContentDescription("Subtitles") }
+        online.gate!!.complete(Unit)
+        keys(listOf(Key.DirectionLeft, Key.DirectionCenter)) // play
+        Thread.sleep(5_000)
+        assertEquals("no OpenSubtitles captions after choosing Off", false, captionsShown("Online line"))
     }
 }
 

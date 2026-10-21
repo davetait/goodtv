@@ -132,5 +132,26 @@ class OpenSubtitlesApiTest {
             assertEquals(0, server.requestCount)
         }
     }
+
+    /** Review I4: an expired login (401 with a token) logs in again once and retries. */
+    @Test fun expiredTokenLogsInAgainAndRetries() = runTest {
+        val host = "${server.hostName}:${server.port}"
+        server.enqueue(ok("""{"token":"old","base_url":"$host"}"""))
+        server.enqueue(MockResponse(code = 401, body = "{}"))
+        server.enqueue(ok("""{"token":"new","base_url":"$host"}"""))
+        server.enqueue(ok(searchFixture))
+        val api = OpenSubtitlesApi(OkHttpClient(), "k3y", OpenSubtitlesLogin("u", "p"), baseUrl = server.url("/api/v1/"), loginScheme = "http")
+        assertEquals(1, api.search(SubtitleQuery(136315, 1, 2)).size)
+        val paths = (1..4).map { server.takeRequest().let { r -> r.url.encodedPath to r.headers["Authorization"] } }
+        assertEquals(listOf("/api/v1/login" to null, "/api/v1/subtitles" to "Bearer old", "/api/v1/login" to null, "/api/v1/subtitles" to "Bearer new"), paths)
+    }
+
+    /** Review M2 (crash): a malformed base_url from login falls back to the default host instead of throwing. */
+    @Test fun malformedLoginHostFallsBackToBaseUrl() = runTest {
+        server.enqueue(ok("""{"token":"t","base_url":"not a host!!"}"""))
+        server.enqueue(ok("""{"data":[]}"""))
+        val api = OpenSubtitlesApi(OkHttpClient(), "k3y", OpenSubtitlesLogin("u", "p"), baseUrl = server.url("/api/v1/"), loginScheme = "http")
+        assertEquals(emptyList<OsSubtitle>(), api.search(SubtitleQuery(1)))
+    }
 }
 

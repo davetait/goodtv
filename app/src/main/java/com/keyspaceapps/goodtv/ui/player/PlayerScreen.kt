@@ -84,8 +84,11 @@ import com.keyspaceapps.goodtv.data.subtitles.OpenSubtitlesException
 import com.keyspaceapps.goodtv.data.subtitles.OsSubtitle
 import com.keyspaceapps.goodtv.domain.PlayableItem
 import java.util.Date
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Controls fade out after this long without a key press, while playing. */
 const val CONTROLS_HIDE_MS = 4_000L
@@ -299,6 +302,8 @@ fun PlayerScreen(
     var onlineCues by remember { mutableStateOf<List<Cue>>(emptyList()) }
     var subtitleBusy by remember { mutableStateOf(false) }
     var subtitleNotice by remember { mutableStateOf<String?>(null) }
+    // The download in progress: one at a time, and dropped if the user picks something else first.
+    var onlineJob by remember { mutableStateOf<Job?>(null) }
     val needsOnline = onlineSubtitles != null && tracks.groups.isNotEmpty() && !remember(tracks) { hasEnglishTrack(tracks) }
     LaunchedEffect(onlineSubtitles, needsOnline) {
         if (needsOnline && onlineFound == null) onlineFound = onlineSubtitles?.find()
@@ -314,21 +319,33 @@ fun PlayerScreen(
     val failedNotice = stringResource(R.string.player_subtitles_online_failed)
     fun chooseOnline(choice: OsSubtitle) {
         val source = onlineSubtitles ?: return
-        scope.launch {
-            subtitleBusy = true
-            subtitleNotice = null
+        if (onlineJob?.isActive == true) return // already downloading: a second press mustn't spend another
+        subtitleBusy = true
+        subtitleNotice = null
+        onlineJob = scope.launch {
             val result = source.fetch(choice)
-            subtitleBusy = false
-            result.onSuccess { text ->
-                onlineAll = Srt.parse(text)
-                onlineOffsetMs = source.offsetMs()
-                player.selectTrack(C.TRACK_TYPE_TEXT, null) // the file has no English; its other subtitles go off
-                panel = null
-            }.onFailure { e ->
-                val reset = (e as? OpenSubtitlesException)?.takeIf { it.reason == OpenSubtitlesException.Reason.QUOTA }?.resetUtc?.let(PlaybackErrors::utcClock)
-                subtitleNotice = if (reset != null) quotaNotice.format(reset) else failedNotice
+            val cues = result.getOrNull()?.let { withContext(Dispatchers.Default) { Srt.parse(it) } }
+            val offset = if (cues != null) source.offsetMs() else 0L
+            withContext(Dispatchers.Main.immediate) {
+                subtitleBusy = false
+                if (cues != null) {
+                    onlineAll = cues
+                    onlineOffsetMs = offset
+                    player.selectTrack(C.TRACK_TYPE_TEXT, null) // the file has no English; its other subtitles go off
+                    panel = null
+                } else {
+                    val e = result.exceptionOrNull()
+                    val reset = (e as? OpenSubtitlesException)?.takeIf { it.reason == OpenSubtitlesException.Reason.QUOTA }?.resetUtc?.let(PlaybackErrors::utcClock)
+                    subtitleNotice = if (reset != null) quotaNotice.format(reset) else failedNotice
+                }
             }
         }
+    }
+    /** Another subtitle choice wins over a download still on its way (which is kept for next time). */
+    fun cancelOnline() {
+        onlineJob?.cancel()
+        onlineJob = null
+        subtitleBusy = false
     }
     val onlineLabel = stringResource(R.string.player_subtitles_online)
 
@@ -450,7 +467,7 @@ fun PlayerScreen(
                         onlineFound?.let(::chooseOnline) // the panel closes once the download is in
                         return@PlayerControls
                     }
-                    if (p == PlayerPanel.SUBTITLES) onlineAll = null
+                    if (p == PlayerPanel.SUBTITLES) { cancelOnline(); onlineAll = null }
                     player.selectTrack(if (p == PlayerPanel.AUDIO) C.TRACK_TYPE_AUDIO else C.TRACK_TYPE_TEXT, choice.ref)
                     panel = null
                 },

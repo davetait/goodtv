@@ -84,8 +84,7 @@ class OpenSubtitlesApi(
     private val downloadClient = if (allowInsecureLinks) client else client.newBuilder().addNetworkInterceptor(HttpsOnly).build()
     @Volatile private var session: Pair<String, HttpUrl>? = null // token, base url
 
-    suspend fun search(query: SubtitleQuery): List<OsSubtitle> {
-        val (token, base) = session()
+    suspend fun search(query: SubtitleQuery): List<OsSubtitle> = withSession { token, base ->
         val url = base.newBuilder().addPathSegment("subtitles").apply {
             addQueryParameter("languages", "en")
             if (query.isEpisode) {
@@ -97,7 +96,7 @@ class OpenSubtitlesApi(
             }
         }.build()
         val page = call(Request.Builder().url(url).get(), token, OsSearchPage.serializer())
-        return page.data.mapNotNull { item ->
+        page.data.mapNotNull { item ->
             val a = item.attributes
             val file = a.files.firstOrNull() ?: return@mapNotNull null
             OsSubtitle(
@@ -109,10 +108,9 @@ class OpenSubtitlesApi(
     }
 
     /** Spends one download: the temporary link to [fileId] as SRT. */
-    suspend fun downloadLink(fileId: Long): String {
-        val (token, base) = session()
+    suspend fun downloadLink(fileId: Long): String = withSession { token, base ->
         val body = json.encodeToString(OsDownloadRequest.serializer(), OsDownloadRequest(fileId)).toRequestBody(JSON)
-        return call(Request.Builder().url(base.newBuilder().addPathSegment("download").build()).post(body), token, OsDownload.serializer()).link
+        call(Request.Builder().url(base.newBuilder().addPathSegment("download").build()).post(body), token, OsDownload.serializer()).link
             ?: throw OpenSubtitlesException("OpenSubtitles returned no download link", OpenSubtitlesException.Reason.BAD_RESPONSE)
     }
 
@@ -132,6 +130,22 @@ class OpenSubtitlesApi(
         }
     }
 
+    /**
+     * Runs [block] with the session; a rejected token (logins expire) logs in again once and
+     * retries, so a long-running TV doesn't quietly lose OpenSubtitles.
+     */
+    private suspend fun <T> withSession(block: suspend (token: String?, base: HttpUrl) -> T): T {
+        val (token, base) = session()
+        return try {
+            block(token, base)
+        } catch (e: OpenSubtitlesException) {
+            if (e.reason != OpenSubtitlesException.Reason.AUTH || token == null) throw e
+            loginLock.withLock { if (session?.first == token) session = null }
+            val (fresh, freshBase) = session()
+            block(fresh, freshBase)
+        }
+    }
+
     private suspend fun session(): Pair<String?, HttpUrl> {
         val login = credentials ?: return null to baseUrl
         session?.let { return it }
@@ -140,7 +154,7 @@ class OpenSubtitlesApi(
                 val body = json.encodeToString(OsLoginRequest.serializer(), OsLoginRequest(login.username, login.password)).toRequestBody(JSON)
                 val r = call(Request.Builder().url(baseUrl.newBuilder().addPathSegment("login").build()).post(body), null, OsLogin.serializer())
                 val token = r.token ?: throw OpenSubtitlesException("OpenSubtitles login returned no token", OpenSubtitlesException.Reason.AUTH)
-                val base = r.base_url?.takeIf { it.isNotBlank() }?.let { "$loginScheme://$it/api/v1/".toHttpUrl() } ?: baseUrl
+                val base = r.base_url?.takeIf { it.isNotBlank() }?.let { "$loginScheme://$it/api/v1/".toHttpUrlOrNull() } ?: baseUrl
                 (token to base).also { session = it }
             }
         }
