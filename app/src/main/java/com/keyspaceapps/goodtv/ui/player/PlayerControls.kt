@@ -44,6 +44,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.nativeKeyCode
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.res.stringResource
@@ -80,6 +81,12 @@ data class PlayerUi(
     val clock: String = "",
     /** "Ends at 22:41", null when unknown or live. */
     val endsAt: String? = null,
+    /** The OpenSubtitles timing while those subtitles are on (shows the Timing row); null otherwise. */
+    val onlineSubtitleOffsetMs: Long? = null,
+    /** A message for the Subtitles panel, e.g. the daily download limit was reached. */
+    val subtitleNotice: String? = null,
+    /** OpenSubtitles subtitles are being downloaded. */
+    val subtitleBusy: Boolean = false,
 )
 
 enum class PlayerPanel { SUBTITLES, AUDIO }
@@ -104,6 +111,7 @@ fun PlayerControls(
     onOpenPanel: (PlayerPanel) -> Unit,
     onSelectTrack: (PlayerPanel, TrackChoice) -> Unit,
     modifier: Modifier = Modifier,
+    onSubtitleTiming: (deltaMs: Long) -> Unit = {},
 ) {
     val seekFocus = remember { FocusRequester() }
     val playFocus = remember { FocusRequester() }
@@ -168,7 +176,7 @@ fun PlayerControls(
                     icon = PlayerIcons.Subtitles,
                     description = stringResource(R.string.player_subtitles),
                     onClick = { onOpenPanel(PlayerPanel.SUBTITLES) },
-                    active = ui.subtitles.any { it.selected && it.ref != null },
+                    active = ui.subtitles.any { it.selected && (it.ref != null || it.online) },
                     modifier = Modifier.focusRequester(subtitlesFocus).focusProperties { if (!ui.isLive) up = seekFocus },
                 )
                 if (ui.audio.size > 1) {
@@ -183,11 +191,15 @@ fun PlayerControls(
         }
 
         if (panel != null) {
+            val subtitles = panel == PlayerPanel.SUBTITLES
             TrackPanel(
                 title = stringResource(if (panel == PlayerPanel.AUDIO) R.string.player_audio else R.string.player_subtitles),
                 choices = if (panel == PlayerPanel.AUDIO) ui.audio else ui.subtitles,
-                emptyText = if (panel == PlayerPanel.SUBTITLES && ui.subtitles.size <= 1) stringResource(R.string.player_no_subtitles) else null,
+                emptyText = if (subtitles) ui.subtitleNotice ?: stringResource(R.string.player_no_subtitles).takeIf { ui.subtitles.size <= 1 } else null,
                 onSelect = { onSelectTrack(panel, it) },
+                busy = subtitles && ui.subtitleBusy,
+                timingMs = if (subtitles) ui.onlineSubtitleOffsetMs else null,
+                onTiming = onSubtitleTiming,
                 modifier = Modifier.align(Alignment.CenterEnd),
             )
         }
@@ -332,6 +344,9 @@ private fun TrackPanel(
     emptyText: String?,
     onSelect: (TrackChoice) -> Unit,
     modifier: Modifier = Modifier,
+    busy: Boolean = false,
+    timingMs: Long? = null,
+    onTiming: (Long) -> Unit = {},
 ) {
     val selectedIndex = choices.indexOfFirst { it.selected }.coerceAtLeast(0)
     val first = remember { FocusRequester() }
@@ -354,6 +369,11 @@ private fun TrackPanel(
                     selected = choice.selected,
                     onClick = { onSelect(choice) },
                     headlineContent = { Text(choice.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    supportingContent = if (choice.online && busy) {
+                        { Text(stringResource(R.string.player_subtitles_downloading)) }
+                    } else {
+                        null
+                    },
                     leadingContent = {
                         Box(Modifier.size(24.dp)) { if (choice.selected) Icon(PlayerIcons.Check, contentDescription = null) }
                     },
@@ -372,6 +392,50 @@ private fun TrackPanel(
                     },
                 )
             }
+            if (timingMs != null) item(key = "timing") { TimingRow(timingMs, onTiming) }
         }
+    }
+}
+
+/** "Timing   ‹ +0.5 s ›": left/right move OpenSubtitles subtitles earlier/later by half a second. */
+@Composable
+private fun TimingRow(offsetMs: Long, onTiming: (Long) -> Unit) {
+    ListItem(
+        selected = false,
+        onClick = {},
+        headlineContent = { Text(stringResource(R.string.player_subtitles_timing)) },
+        trailingContent = {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("‹")
+                Text(SubtitleTiming.format(offsetMs), fontWeight = FontWeight.SemiBold)
+                Text("›")
+            }
+        },
+        colors = ListItemDefaults.colors(
+            containerColor = Color.Transparent,
+            contentColor = Color.White,
+            focusedContainerColor = Color.White,
+            focusedContentColor = Color.Black,
+        ),
+        modifier = Modifier.padding(top = 12.dp).onPreviewKeyEvent { e ->
+            if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+            when (e.key.nativeKeyCode) {
+                android.view.KeyEvent.KEYCODE_DPAD_LEFT -> { onTiming(-SubtitleTiming.STEP_MS); true }
+                android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> { onTiming(SubtitleTiming.STEP_MS); true }
+                else -> false
+            }
+        },
+    )
+}
+
+/** The OpenSubtitles timing adjustment: half-second steps within ±30 s, shown as "+0.5 s" / "−0.5 s". */
+object SubtitleTiming {
+    const val STEP_MS = 500L
+    const val LIMIT_MS = 30_000L
+
+    fun format(offsetMs: Long): String = when {
+        offsetMs == 0L -> "0.0 s"
+        offsetMs > 0 -> "+%.1f s".format(offsetMs / 1000.0)
+        else -> "−%.1f s".format(-offsetMs / 1000.0)
     }
 }

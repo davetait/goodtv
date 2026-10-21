@@ -117,4 +117,9 @@
     <string name="player_up_next">Up next</string>
     <string name="player_play_now_in">Play now · %1$d</string>
     <string name="player_back_to_credits">Back to credits</string>
+    <string name="player_subtitles_online">English · OpenSubtitles</string>
+    <string name="player_subtitles_timing">Timing</string>
+    <string name="player_subtitles_downloading">Downloading…</string>
+    <string name="player_subtitles_quota">Daily OpenSubtitles limit reached. Try again after %1$s UTC</string>
+    <string name="player_subtitles_online_failed">Couldn’t get subtitles from OpenSubtitles.</string>
 </resources>

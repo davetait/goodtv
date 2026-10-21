@@ -11,8 +11,8 @@ import java.util.Locale
 /** What a subtitle or audio track says about itself, enough to name it for a person. */
 data class TrackInfo(val language: String?, val label: String?, val channels: Int = 0, val forced: Boolean = false)
 
-/** One choice in the Subtitles or Audio panel. [ref] is null for "Off". */
-data class TrackChoice(val label: String, val selected: Boolean, val ref: TrackRef?)
+/** One choice in the Subtitles or Audio panel. [ref] is null for "Off" and for the [online] (OpenSubtitles) choice. */
+data class TrackChoice(val label: String, val selected: Boolean, val ref: TrackRef?, val online: Boolean = false)
 
 /** Where a track lives in [Tracks], so it can be selected. */
 data class TrackRef(val groupIndex: Int, val trackIndex: Int)
@@ -104,3 +104,18 @@ fun Player.selectTrack(type: @C.TrackType Int, ref: TrackRef?) {
     }
     trackSelectionParameters = params.build()
 }
+
+/** Whether any of [infos] is a full (not forced) English track: then the file's own subtitles win. */
+fun hasEnglish(infos: List<TrackInfo>): Boolean =
+    infos.any { !it.forced && it.language?.let { lang -> TrackLabels.twoLetter(lang) } == "en" }
+
+/** Whether the stream carries English subtitles of its own ([hasEnglish] over its playable text tracks). */
+@OptIn(UnstableApi::class)
+fun hasEnglishTrack(tracks: Tracks): Boolean = hasEnglish(
+    tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }.flatMap { g ->
+        (0 until g.length).filter { g.isTrackSupported(it) }.map { t ->
+            val f = g.getTrackFormat(t)
+            TrackInfo(f.language, f.label, forced = f.selectionFlags and C.SELECTION_FLAG_FORCED != 0)
+        }
+    },
+)

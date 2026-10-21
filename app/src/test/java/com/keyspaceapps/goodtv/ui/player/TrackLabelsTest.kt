@@ -35,4 +35,16 @@ class TrackLabelsTest {
     @Test fun repeatedLabelsAreNumbered() {
         assertEquals(listOf("English", "English (2)", "German", "English (3)"), TrackLabels.disambiguate(listOf("English", "English", "German", "English")))
     }
+
+    @Test fun englishTrackDetected() {
+        assertEquals(true, hasEnglish(listOf(TrackInfo("fre", null), TrackInfo("eng", null))))
+        assertEquals(true, hasEnglish(listOf(TrackInfo("en-US", null))))
+        assertEquals(false, hasEnglish(listOf(TrackInfo("fre", null), TrackInfo(null, "English"))))
+        assertEquals(false, hasEnglish(emptyList()))
+    }
+
+    @Test fun onlineOfferedWhenOnlyForcedEnglish() {
+        assertEquals("forced lines only don't count", false, hasEnglish(listOf(TrackInfo("en", null, forced = true))))
+    }
 }
+
