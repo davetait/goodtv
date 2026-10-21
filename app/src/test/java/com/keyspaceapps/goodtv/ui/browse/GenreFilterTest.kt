@@ -116,4 +116,37 @@ class GenreFilterTest {
         vm.genres.select(Genre.ANIMATION)
         assertNull(vm.genres.focus.key)
     }
+
+    private fun TestScope.watchSearch(f: GenreFilter) = backgroundScope.launch { f.searchResults.collect {} }
+
+    @Test
+    fun searchLooksOnlyInTheChosenGenre() = runTest(dispatcher) {
+        val vm = MoviesViewModel(repo)
+        watch(vm.genres); watchSearch(vm.genres); advanceUntilIdle()
+        assertNull("no query: rows (or the genre grid) show", vm.genres.searchResults.value)
+
+        vm.genres.setQuery("heat"); advanceUntilIdle()
+        assertEquals("all genres: every match", setOf("EN - Heat (1995)", "DE - Heat (1995)"), vm.genres.searchResults.value!!.map { it.title }.toSet())
+
+        vm.genres.select(Genre.ANIMATION); advanceUntilIdle()
+        assertEquals("Heat isn't animation", emptyList<RowItem>(), vm.genres.searchResults.value)
+
+        vm.genres.select(Genre.CRIME); advanceUntilIdle()
+        assertEquals(2, vm.genres.searchResults.value!!.size)
+
+        vm.genres.setQuery("  "); advanceUntilIdle()
+        assertNull(vm.genres.searchResults.value)
+    }
+
+    @Test
+    fun seriesSearchUsesTheProvidersGenres() = runTest(dispatcher) {
+        val vm = SeriesViewModel(repo)
+        watch(vm.genres); watchSearch(vm.genres)
+        vm.genres.setQuery("dark")
+        vm.genres.select(Genre.KIDS); advanceUntilIdle()
+        assertEquals(emptyList<RowItem>(), vm.genres.searchResults.value)
+        vm.genres.select(Genre.MYSTERY); advanceUntilIdle()
+        assertEquals(listOf("Dark"), vm.genres.searchResults.value!!.map { it.title })
+    }
 }
+

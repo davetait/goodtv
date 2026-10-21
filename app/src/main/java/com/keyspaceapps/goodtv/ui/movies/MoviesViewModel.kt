@@ -5,10 +5,12 @@ import androidx.lifecycle.viewModelScope
 import com.keyspaceapps.goodtv.data.repo.LibraryRepository
 import com.keyspaceapps.goodtv.data.tmdb.TmdbGenreFetcher
 import com.keyspaceapps.goodtv.domain.ContentKind
+import com.keyspaceapps.goodtv.domain.Movie
 import com.keyspaceapps.goodtv.ui.browse.CategoryRow
 import com.keyspaceapps.goodtv.ui.browse.BrowseEmptyState
 import com.keyspaceapps.goodtv.ui.browse.EmptyStates
 import com.keyspaceapps.goodtv.ui.browse.FocusMemory
+import com.keyspaceapps.goodtv.ui.browse.BROWSE_SEARCH_LIMIT
 import com.keyspaceapps.goodtv.ui.browse.GENRE_LIMIT
 import com.keyspaceapps.goodtv.ui.browse.GenreFilter
 import com.keyspaceapps.goodtv.ui.browse.ROW_LIMIT
@@ -41,9 +43,13 @@ class MoviesViewModel(repo: LibraryRepository, genreFill: StateFlow<TmdbGenreFet
         repo.moviesByCategory(ROW_LIMIT + 1).map { grouped -> grouped.mapValues { (_, list) -> list.map { RowItem(it.sourceId, it.id, it.label, it.posterUrl, it.tmdbId, lookupName = it.name) } } },
     ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    val genres = GenreFilter(viewModelScope, repo.genreCounts(ContentKind.MOVIE)) { g ->
-        repo.moviesByGenre(g, GENRE_LIMIT).map { list -> list.map { RowItem(it.sourceId, it.id, it.label, it.posterUrl, it.tmdbId, lookupName = it.name) } }
-    }
+    val genres = GenreFilter(
+        viewModelScope, repo.genreCounts(ContentKind.MOVIE),
+        items = { g -> repo.moviesByGenre(g, GENRE_LIMIT).map { list -> list.map { it.rowItem() } } },
+        search = { q, g -> repo.searchMovies(q, BROWSE_SEARCH_LIMIT, g).map { list -> list.map { it.rowItem() } } },
+    )
+
+    private fun Movie.rowItem() = RowItem(sourceId, id, label, posterUrl, tmdbId, lookupName = name)
 
     val genreFill: StateFlow<TmdbGenreFetcher.State> = genreFill ?: MutableStateFlow(TmdbGenreFetcher.State.Idle)
 }

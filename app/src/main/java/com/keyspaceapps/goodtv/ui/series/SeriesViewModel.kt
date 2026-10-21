@@ -4,10 +4,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keyspaceapps.goodtv.data.repo.LibraryRepository
 import com.keyspaceapps.goodtv.domain.ContentKind
+import com.keyspaceapps.goodtv.domain.Series
 import com.keyspaceapps.goodtv.ui.browse.CategoryRow
 import com.keyspaceapps.goodtv.ui.browse.BrowseEmptyState
 import com.keyspaceapps.goodtv.ui.browse.EmptyStates
 import com.keyspaceapps.goodtv.ui.browse.FocusMemory
+import com.keyspaceapps.goodtv.ui.browse.BROWSE_SEARCH_LIMIT
 import com.keyspaceapps.goodtv.ui.browse.GENRE_LIMIT
 import com.keyspaceapps.goodtv.ui.browse.GenreFilter
 import com.keyspaceapps.goodtv.ui.browse.ROW_LIMIT
@@ -38,7 +40,11 @@ class SeriesViewModel(repo: LibraryRepository) : ViewModel() {
         repo.seriesByCategory(ROW_LIMIT + 1).map { grouped -> grouped.mapValues { (_, list) -> list.map { RowItem(it.sourceId, it.id, it.label, it.coverUrl, it.tmdbId, lookupName = it.name) } } },
     ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    val genres = GenreFilter(viewModelScope, repo.genreCounts(ContentKind.SERIES)) { g ->
-        repo.seriesByGenre(g, GENRE_LIMIT).map { list -> list.map { RowItem(it.sourceId, it.id, it.label, it.coverUrl, it.tmdbId, lookupName = it.name) } }
-    }
+    val genres = GenreFilter(
+        viewModelScope, repo.genreCounts(ContentKind.SERIES),
+        items = { g -> repo.seriesByGenre(g, GENRE_LIMIT).map { list -> list.map { it.rowItem() } } },
+        search = { q, g -> repo.searchSeries(q, BROWSE_SEARCH_LIMIT, g).map { list -> list.map { it.rowItem() } } },
+    )
+
+    private fun Series.rowItem() = RowItem(sourceId, id, label, coverUrl, tmdbId, lookupName = name)
 }

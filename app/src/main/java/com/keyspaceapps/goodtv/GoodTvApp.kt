@@ -26,6 +26,8 @@ class GoodTvApp : Application() {
         var skipDebugSource: Boolean = false
         /** Set by the instrumented test runner so tests never reach the real TMDB API. */
         @Volatile var disableTmdb: Boolean = false
+        /** Instrumented tests turn OpenSubtitles off so they never spend the real account's downloads. */
+        @Volatile var disableOpenSubtitles: Boolean = false
     }
 }
 

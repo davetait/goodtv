@@ -13,3 +13,4 @@ local.properties
 
 # Conductor scratch
 .context/
+.superpowers/

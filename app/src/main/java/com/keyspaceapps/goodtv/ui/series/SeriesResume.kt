@@ -23,4 +23,12 @@ object SeriesResumes {
         val started = byId[next.id]?.takeIf { it.resumable }
         return SeriesResume(next, started?.positionMs ?: 0, resume = started != null)
     }
+
+    /** The episode after [currentId] in season/number order (a finale leads to the next season's first), or null. */
+    fun next(episodes: List<Episode>, currentId: String): Episode? {
+        val ordered = episodes.sortedWith(compareBy({ it.season }, { it.number }))
+        val index = ordered.indexOfFirst { it.id == currentId }
+        return if (index < 0) null else ordered.getOrNull(index + 1)
+    }
 }
+

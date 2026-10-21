@@ -93,5 +93,28 @@ class DisplayTitleTest {
         assertNull(DisplayTitle.episodeTitle("FR - Breaking Bad - S01E01", "Breaking Bad"))
         assertEquals("Pilot", DisplayTitle.episodeTitle("EN - Breaking Bad - S01E01 - Pilot", "Breaking Bad"))
         assertEquals("The One Where It All Began", DisplayTitle.episodeTitle("The One Where It All Began", "Friends"))
+        assertEquals("the show's tag and the gap left by the code go", "System", DisplayTitle.episodeTitle("EN - The Bear (US) - S01E01 - System", "The Bear"))
+        assertEquals("Part 1 - The Return", DisplayTitle.episodeTitle("EN - Show - S02E03 - Part 1 - The Return", "Show"))
+    }
+
+    /** Panels sometimes drop the space after the dash: "AR-DUB -We Bare Bears (2015)" (211 titles on a real panel). */
+    @Test fun tagWithoutASpaceAfterTheDash() {
+        val d = DisplayTitle.parse("AR-DUB -We Bare Bears (2015)")
+        assertEquals("We Bare Bears", d.title)
+        assertEquals(2015, d.year)
+        assertEquals("AR-DUB", d.language)
+        assertEquals("Pita Hall", DisplayTitle.parse("4K-D+  -Pita Hall (2025)").title)
+        assertEquals("4K", DisplayTitle.parse("4K-D+  -Pita Hall (2025)").quality)
+        assertEquals("Tale of Ashes", DisplayTitle.parse("EN -Tale of Ashes").title)
+        assertEquals("a hyphenated title stays whole", "Spider-Man", DisplayTitle.parse("Spider-Man").title)
+        assertEquals("a dash inside a title stays", "Mission: Impossible -Fallout", DisplayTitle.parse("Mission: Impossible -Fallout").title)
+    }
+
+    /** Some panels use non-breaking spaces around the tag ("AR-KH\u00a0- …") or inside the title. */
+    @Test fun nonBreakingSpacesCountAsSpaces() {
+        assertEquals("ناقة", DisplayTitle.parse("AR-KH\u00a0- ناقة").title)
+        assertEquals("AR-KH", DisplayTitle.parse("AR-KH\u00a0- ناقة").language)
+        assertEquals("A Quiet Place: Day One", DisplayTitle.parse("EN - A Quiet Place:\u00a0Day One  (2024)").title)
     }
 }
+

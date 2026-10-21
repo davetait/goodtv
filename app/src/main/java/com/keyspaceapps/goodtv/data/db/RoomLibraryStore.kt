@@ -96,11 +96,13 @@ class RoomLibraryStore(
     override fun searchLive(query: String, limit: Int): Flow<List<LiveChannel>> =
         library.searchLive(escapeLike(query), limit).map { rows -> rows.map { it.toDomain() } }
 
-    override fun searchMovies(query: String, limit: Int): Flow<List<Movie>> =
-        library.searchMovies(escapeLike(query), limit).map { rows -> rows.map { it.toDomain() } }
+    override fun searchMovies(query: String, limit: Int, genre: Genre?): Flow<List<Movie>> =
+        (if (genre == null) library.searchMovies(escapeLike(query), limit) else genres.searchMovies(escapeLike(query), genre.name, limit))
+            .map { rows -> rows.map { it.toDomain() } }
 
-    override fun searchSeries(query: String, limit: Int): Flow<List<Series>> =
-        library.searchSeries(escapeLike(query), limit).map { rows -> rows.map { it.toDomain() } }
+    override fun searchSeries(query: String, limit: Int, genre: Genre?): Flow<List<Series>> =
+        (if (genre == null) library.searchSeries(escapeLike(query), limit) else genres.searchSeries(escapeLike(query), genre.name, limit))
+            .map { rows -> rows.map { it.toDomain() } }
 
     override fun observeMoviesByGenre(genre: Genre, limit: Int): Flow<List<Movie>> =
         genres.observeMovies(genre.name, limit).map { rows -> rows.map { it.toDomain() } }

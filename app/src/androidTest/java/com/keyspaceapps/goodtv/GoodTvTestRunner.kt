@@ -8,6 +8,7 @@ class GoodTvTestRunner : AndroidJUnitRunner() {
     override fun onCreate(arguments: Bundle?) {
         GoodTvApp.skipDebugSource = true
         GoodTvApp.disableTmdb = true
+        GoodTvApp.disableOpenSubtitles = true
         super.onCreate(arguments)
     }
 }

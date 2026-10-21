@@ -19,6 +19,9 @@ import com.keyspaceapps.goodtv.data.repo.SyncState
 import com.keyspaceapps.goodtv.data.source.SourceRegistry
 import com.keyspaceapps.goodtv.data.tmdb.TmdbApi
 import com.keyspaceapps.goodtv.data.tmdb.TmdbCredential
+import com.keyspaceapps.goodtv.data.subtitles.OnlineSubtitles
+import com.keyspaceapps.goodtv.data.subtitles.OpenSubtitlesApi
+import com.keyspaceapps.goodtv.data.subtitles.OpenSubtitlesLogin
 import com.keyspaceapps.goodtv.data.tmdb.PopularMoviesQuery
 import com.keyspaceapps.goodtv.data.tmdb.PopularRepository
 import com.keyspaceapps.goodtv.data.tmdb.PopularShowsQuery
@@ -39,6 +42,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
+import java.io.File
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
@@ -97,6 +101,18 @@ class AppGraph(val context: Context) {
     val popularStore: PopularStore by lazy { RoomPopularStore(db.popular()) }
     val popularMovies: PopularRepository by lazy { PopularRepository(tmdbApi, popularStore, PopularMoviesQuery, tmdbLanguage) }
     val popularShows: PopularRepository by lazy { PopularRepository(tmdbApi, popularStore, PopularShowsQuery, tmdbLanguage) }
+
+    /**
+     * English subtitles from OpenSubtitles for titles without their own; null when no key is
+     * configured or [GoodTvApp.disableOpenSubtitles]. Logs in when a username and password are set.
+     */
+    val onlineSubtitles: OnlineSubtitles? by lazy {
+        BuildConfig.OPENSUBTITLES_API_KEY.takeIf { it.isNotBlank() && !GoodTvApp.disableOpenSubtitles }?.let { key ->
+            val login = OpenSubtitlesLogin(BuildConfig.OPENSUBTITLES_USERNAME, BuildConfig.OPENSUBTITLES_PASSWORD)
+                .takeIf { it.username.isNotBlank() && it.password.isNotBlank() }
+            OnlineSubtitles(OpenSubtitlesApi(okHttp, key, login), File(context.filesDir, "subtitles"))
+        }
+    }
 
     /** Background TMDB genre fill for movies; started on launch after stale sources refresh. */
     val genreFetcher: TmdbGenreFetcher by lazy {

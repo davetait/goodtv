@@ -6,6 +6,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -13,7 +14,10 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performTextClearance
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
 import androidx.test.core.app.ApplicationProvider
 import com.keyspaceapps.goodtv.appGraph
 import com.keyspaceapps.goodtv.data.db.RoomTmdbGenreStore
@@ -106,4 +110,33 @@ class GenreFilterUiTest {
         composeRule.onNodeWithText("Bluey").assertIsDisplayed()
         composeRule.onAllNodesWithText("Dark").assertCountEquals(0)
     }
+
+    /** The search bar sits right of the dropdown; typing shows matches within the chosen genre. */
+    @Test
+    fun searchShowsMatchesWithinTheChosenGenre() {
+        composeRule.setContent { GoodTvTheme { MoviesScreen(onMovie = {}, onSeeAll = {}) } }
+        waitFor("Films")
+        composeRule.waitUntil(5_000) { runCatching { composeRule.onNodeWithText("Up").assertIsFocused() }.isSuccess }
+        composeRule.onNodeWithText("Search movies").assertIsDisplayed()
+
+        composeRule.onNode(hasSetTextAction()).performTextInput("u")
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasText("Films")).fetchSemanticsNodes().isEmpty() }
+        composeRule.onNodeWithText("Up").assertIsDisplayed()
+        composeRule.onAllNodesWithText("Heat").assertCountEquals(0)
+
+        composeRule.onNodeWithText("All genres").requestFocus()
+        pickFromDropdownFocused(downs = 2) // Crime: "Up" isn't crime
+        waitFor("Nothing in this genre matches “u”")
+
+        composeRule.onNode(hasSetTextAction()).performTextClearance()
+        waitFor("Heat")
+    }
+
+    private fun pickFromDropdownFocused(downs: Int) {
+        composeRule.onRoot().performKeyInput { pressKey(Key.DirectionCenter) }
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(isRoot()).fetchSemanticsNodes().size == 2 }
+        composeRule.onAllNodes(isRoot())[1].performKeyInput { repeat(downs) { pressKey(Key.DirectionDown) }; pressKey(Key.DirectionCenter) }
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(isRoot()).fetchSemanticsNodes().size == 1 }
+    }
 }
+
