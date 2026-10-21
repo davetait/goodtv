@@ -76,7 +76,9 @@ object DisplayTitle {
     fun episodeTitle(raw: String, seriesTitle: String): String? {
         var s = parse(raw).title
         if (s.startsWith(seriesTitle, ignoreCase = true)) s = s.substring(seriesTitle.length)
-        s = EPISODE_CODE.replace(s, " ").replace(EDGE_SEPARATORS, "").replace(Regex("""\s+"""), " ")
+        // "The Bear (US) - S01E01 - System": the show's own tag is left in front once its name is gone.
+        s = LEADING_TAG.replace(s, "")
+        s = EPISODE_CODE.replace(s, " ").replace(REPEATED_SEPARATORS, " - ").replace(EDGE_SEPARATORS, "").replace(Regex("""\s+"""), " ")
         return s.ifEmpty { null }
     }
 
@@ -144,6 +146,8 @@ object DisplayTitle {
     // A full date ("08.12.2024") means a dated event; its year is not a release year.
     private val EVENT_DATE = Regex("""\b\d{1,2}\.\d{1,2}\.\d{2,4}\b""")
     private val EDGE_SEPARATORS = Regex("""^[\s\-:|.,]+|[\s\-:|.,]+$""")
+    private val LEADING_TAG = Regex("""^\s*\([^)]{1,12}\)""")
+    private val REPEATED_SEPARATORS = Regex("""(\s*[\-–|]\s*){2,}""")
     private val EPISODE_CODE = Regex("""\b[Ss]\d{1,2}\s?[Ee]\d{1,3}\b""")
 
     /** Superscript/small-capital decorations ("ᴿᴬᵂ", "³⁸⁴⁰ᴾ", "◉") removed, spaces collapsed. */

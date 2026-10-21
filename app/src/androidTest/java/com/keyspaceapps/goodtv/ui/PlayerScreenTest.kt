@@ -3,6 +3,7 @@ package com.keyspaceapps.goodtv.ui
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
@@ -17,6 +18,7 @@ import androidx.compose.ui.test.pressKey
 import androidx.test.platform.app.InstrumentationRegistry
 import com.keyspaceapps.goodtv.domain.PlayableItem
 import com.keyspaceapps.goodtv.ui.player.PlayerScreen
+import com.keyspaceapps.goodtv.ui.player.UpNext
 import com.keyspaceapps.goodtv.ui.theme.GoodTvTheme
 import java.io.File
 import org.junit.Assert.assertEquals
@@ -34,6 +36,7 @@ class PlayerScreenTest {
     val composeRule = createComposeRule()
     private lateinit var url: String
     private var backs = 0
+    private var nexts = 0
 
     @Before
     fun copyMedia() {
@@ -43,9 +46,12 @@ class PlayerScreenTest {
         url = file.toURI().toString()
     }
 
-    private fun launch() = composeRule.setContent {
-        GoodTvTheme { PlayerScreen(PlayableItem("Test pattern", url, isLive = false), onBack = { backs++ }) }
+    private fun launch(upNext: UpNext? = null) = composeRule.setContent {
+        GoodTvTheme { PlayerScreen(PlayableItem("Test pattern", url, isLive = false), onBack = { backs++ }, upNext = upNext, onPlayNext = { nexts++ }) }
     }
+
+    // A 20-second file is "in its credits" from the start (the last 2 minutes count), so Up next shows at once.
+    private val next = UpNext("S1 E4 · The Long Night", "Test Show", meta = "52m", summary = "A message arrives that changes everything.")
 
     private fun keys(k: List<Key>) = composeRule.onRoot().performKeyInput { k.forEach { pressKey(it) } }
     private fun keys(k: Key) = keys(listOf(k))
@@ -148,4 +154,40 @@ class PlayerScreenTest {
         keys(Key.Back)
         composeRule.waitUntil(5_000) { backs == 1 }
     }
+
+    @Test
+    fun upNextPlaysTheNextEpisodeOnSelect() {
+        launch(next)
+        waitFor(15_000) { composeRule.onNodeWithText("UP NEXT") }
+        composeRule.onNodeWithText("S1 E4 · The Long Night").assertExists()
+        composeRule.onNodeWithText("A message arrives that changes everything.").assertExists()
+        composeRule.onAllNodes(hasContentDescription("Seek")).assertCountEquals(0)
+        waitFocused { composeRule.onNode(hasText("Play now", substring = true)) }
+        keys(Key.DirectionCenter)
+        composeRule.waitUntil(5_000) { nexts == 1 }
+    }
+
+    @Test
+    fun upNextCountsDownTenSecondsThenPlaysTheNextEpisode() {
+        launch(next)
+        waitFor(15_000) { composeRule.onNodeWithText("UP NEXT") }
+        Thread.sleep(5_000)
+        assertEquals("not yet", 0, nexts)
+        composeRule.waitUntil(12_000) { nexts == 1 }
+        assertEquals(0, backs)
+    }
+
+    @Test
+    fun backDismissesUpNextAndTheEndOfTheEpisodeLeaves() {
+        launch(next)
+        waitFor(15_000) { composeRule.onNodeWithText("UP NEXT") }
+        keys(Key.Back)
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasText("UP NEXT")).fetchSemanticsNodes().isEmpty() }
+        assertEquals(0, backs)
+        // It doesn't come back; when the 20 s file ends the player leaves instead of moving on.
+        composeRule.waitUntil(30_000) { backs == 1 }
+        assertEquals(0, nexts)
+        composeRule.onAllNodes(hasText("UP NEXT")).assertCountEquals(0)
+    }
 }
+

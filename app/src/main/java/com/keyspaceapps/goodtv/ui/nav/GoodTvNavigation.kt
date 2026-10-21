@@ -24,6 +24,8 @@ import com.keyspaceapps.goodtv.ui.browse.CategoryGridScreen
 import com.keyspaceapps.goodtv.ui.categories.CategoriesScreen
 import com.keyspaceapps.goodtv.ui.home.HomeScreen
 import com.keyspaceapps.goodtv.ui.movies.MovieDetailScreen
+import com.keyspaceapps.goodtv.ui.series.NextEpisode
+import com.keyspaceapps.goodtv.ui.series.NextEpisodes
 import com.keyspaceapps.goodtv.ui.series.SeriesDetailScreen
 import com.keyspaceapps.goodtv.ui.player.PlayerScreen
 import com.keyspaceapps.goodtv.ui.sources.EditSourceScreen
@@ -48,7 +50,9 @@ fun GoodTvNavigation() {
             entry<PlayerKey> { key ->
                 val graph = LocalContext.current.appGraph()
                 var item by remember(key) { mutableStateOf<PlayableItem?>(null) }
+                var next by remember(key) { mutableStateOf<NextEpisode?>(null) }
                 LaunchedEffect(key) { item = graph.repository.playable(key.sourceId, key.toRef(), key.title) }
+                LaunchedEffect(key) { next = NextEpisodes.after(key, graph.repository, graph.watchProgress) }
                 val current = item
                 if (current == null) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Loading…") }
@@ -60,6 +64,9 @@ fun GoodTvNavigation() {
                         startPositionMs = key.startPositionMs,
                         // App scope, so the save on leaving the player outlives the player screen.
                         onProgress = ref?.let { r -> { pos, dur -> graph.appScope.launch { graph.watchProgress.record(r, pos, dur, key.playbackInfo()) } } },
+                        upNext = next?.prompt,
+                        // The next episode replaces this one, so Back still goes where this one came from.
+                        onPlayNext = { next?.key?.let { k -> backStack.removeLastOrNull(); backStack.add(k) } },
                     )
                 }
             }

@@ -114,4 +114,7 @@
     <string name="player_error_generic">Something went wrong while playing this video.</string>
     <string name="player_try_again">Try again</string>
     <string name="player_back">Back</string>
+    <string name="player_up_next">Up next</string>
+    <string name="player_play_now_in">Play now · %1$d</string>
+    <string name="player_back_to_credits">Back to credits</string>
 </resources>

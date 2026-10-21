@@ -31,4 +31,13 @@ class SeriesResumeTest {
     }
 
     @Test fun finishingTheLastEpisodeOffersNothing() = assertNull(SeriesResumes.of(episodes, listOf(p("f1", 2_650_000, true, 9))))
+
+    @Test fun nextFollowsSeasonAndNumberOrderAcrossSeasons() {
+        val shuffled = listOf(ep("b2", 2, 1), ep("a2", 1, 2), ep("a1", 1, 1), ep("sp", 0, 1))
+        assertEquals("a2", SeriesResumes.next(shuffled, "a1")?.id)
+        assertEquals("a finale leads to the next season", "b2", SeriesResumes.next(shuffled, "a2")?.id)
+        assertNull("the last episode has no next", SeriesResumes.next(shuffled, "b2"))
+        assertNull("unknown episode", SeriesResumes.next(shuffled, "zz"))
+    }
 }
+

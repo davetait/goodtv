@@ -8,6 +8,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -18,11 +19,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -34,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,6 +59,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.C
@@ -72,6 +77,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.OutlinedButton
 import androidx.tv.material3.Text
 import com.keyspaceapps.goodtv.R
+import com.keyspaceapps.goodtv.data.progress.WatchRules
 import com.keyspaceapps.goodtv.domain.PlayableItem
 import java.util.Date
 import kotlinx.coroutines.delay
@@ -88,6 +94,11 @@ const val PROGRESS_REPORT_MS = 10_000L
  * closes a panel, then hides controls the user has been using, then leaves (controls that only
  * appeared on their own, as a stream starts, don't cost an extra Back). Subtitles are drawn by [SubtitleLayer].
  *
+ * Episodes with a next one ([upNext]): at the credits (the point an episode counts as watched,
+ * [WatchRules.isFinished]) the video shrinks top-left and [UpNextScreen] offers it; "Play now" or a
+ * [UP_NEXT_COUNTDOWN_MS] countdown (which only runs while playing) calls [onPlayNext]. Back or "Back
+ * to credits" dismisses it for good; if the episode then ends, the player leaves ([onBack]).
+ *
  * On demand, playback starts at [startPositionMs] and [onProgress] (position, duration) is called
  * every [PROGRESS_REPORT_MS] while playing, on pause, when the app goes to the background and when
  * the screen closes; never before playback has actually started, so a resume can't be wiped by
@@ -101,6 +112,8 @@ fun PlayerScreen(
     modifier: Modifier = Modifier,
     startPositionMs: Long = 0,
     onProgress: ((positionMs: Long, durationMs: Long) -> Unit)? = null,
+    upNext: UpNext? = null,
+    onPlayNext: () -> Unit = {},
 ) {
     val context = LocalContext.current
     var isBuffering by remember { mutableStateOf(true) }
@@ -124,6 +137,18 @@ fun PlayerScreen(
     var scrubMs by remember { mutableStateOf<Long?>(null) }
     val rootFocus = remember { FocusRequester() }
     var focusRequested by remember { mutableStateOf(false) }
+    var upNextDismissed by remember { mutableStateOf(false) }
+    var upNextLeftMs by remember { mutableLongStateOf(UP_NEXT_COUNTDOWN_MS) }
+    val showUpNext = !item.isLive && upNext != null && !upNextDismissed && error == null &&
+        durationMs > 0 && WatchRules.isFinished(positionMs, durationMs)
+    val latestUpNext by rememberUpdatedState(upNext)
+    val latestOnPlayNext by rememberUpdatedState(onPlayNext)
+    val latestOnBack by rememberUpdatedState(onBack)
+    // The countdown, Play now and the episode ending can coincide; hand over to the next one once.
+    val playNextOnce = remember {
+        var done = false
+        { if (!done) { done = true; latestOnPlayNext() } }
+    }
 
     val player = remember(item.url) {
         PlayerFactory.create(context).apply {
@@ -148,7 +173,11 @@ fun PlayerScreen(
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 isBuffering = playbackState == Player.STATE_BUFFERING || playbackState == Player.STATE_IDLE && error == null
-                if (playbackState == Player.STATE_ENDED) report.now()
+                if (playbackState == Player.STATE_ENDED) {
+                    report.now()
+                    // The credits ran out: on to the next episode, or out if Up next was dismissed.
+                    if (latestUpNext != null) { if (upNextDismissed) latestOnBack() else playNextOnce() }
+                }
             }
             override fun onIsPlayingChanged(playing: Boolean) {
                 isPlaying = playing
@@ -200,9 +229,24 @@ fun PlayerScreen(
             controlsVisible = false
         }
     }
-    // With the controls gone, the screen itself takes the remote's keys again.
-    LaunchedEffect(controlsVisible) {
-        if (!controlsVisible) { controlsInUse = false; if (focusRequested) rootFocus.requestFocus() }
+    // With the controls (and Up next) gone, the screen itself takes the remote's keys again.
+    LaunchedEffect(controlsVisible, showUpNext) {
+        if (!controlsVisible) controlsInUse = false
+        if (!controlsVisible && !showUpNext && focusRequested) rootFocus.requestFocus()
+    }
+
+    // Up next replaces the controls and counts down while the credits play.
+    LaunchedEffect(showUpNext) {
+        upNextLeftMs = UP_NEXT_COUNTDOWN_MS
+        if (!showUpNext) return@LaunchedEffect
+        controlsVisible = false
+        panel = null
+        scrubMs = null
+        while (upNextLeftMs > 0) {
+            delay(100)
+            if (player.isPlaying) upNextLeftMs -= 100
+        }
+        playNextOnce()
     }
 
     // Pause when the user leaves the app (Home), resume on return if it was playing.
@@ -224,6 +268,7 @@ fun PlayerScreen(
         when {
             error != null -> onBack()
             panel != null -> panel = null
+            showUpNext -> upNextDismissed = true
             controlsVisible && controlsInUse -> controlsVisible = false
             else -> onBack()
         }
@@ -272,7 +317,9 @@ fun PlayerScreen(
             .onKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown || error != null) return@onKeyEvent false
                 // nativeKeyCode is the android.view.KeyEvent code; Key.keyCode packs it into the upper 32 bits.
-                val action = PlayerKeys.actionFor(event.key.nativeKeyCode, item.isLive, controlsVisible && controlsFocused) ?: return@onKeyEvent false
+                // While Up next shows, the D-pad stays with its buttons; media keys still work.
+                val action = PlayerKeys.actionFor(event.key.nativeKeyCode, item.isLive, (controlsVisible && controlsFocused) || showUpNext)
+                    ?: return@onKeyEvent false
                 when (action) {
                     PlayerAction.SHOW_CONTROLS -> Unit
                     PlayerAction.TOGGLE_PLAY -> togglePlay()
@@ -283,18 +330,40 @@ fun PlayerScreen(
                     PlayerAction.SCRUB_FORWARD -> scrub(true, event.nativeKeyEvent.repeatCount)
                     PlayerAction.SCRUB_BACK -> scrub(false, event.nativeKeyEvent.repeatCount)
                 }
-                controlsVisible = true
+                if (!showUpNext) controlsVisible = true
                 true
             }
             .focusRequester(rootFocus)
             .onPlaced { if (!focusRequested) { focusRequested = true; rootFocus.requestFocus() } }
             .focusable(),
     ) {
-        PlayerSurface(player = player, surfaceType = SURFACE_TYPE_SURFACE_VIEW, modifier = Modifier.fillMaxSize())
+        // Full screen, or (Up next) a 16:9 window top-left with the next episode around it.
+        val shrink by animateFloatAsState(if (showUpNext) 1f else 0f, tween(450), label = "upNext")
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val small = maxWidth * UpNextLayout.VIDEO_WIDTH_FRACTION
+            val margin = lerp(0.dp, UpNextLayout.Margin, shrink)
+            PlayerSurface(
+                player = player,
+                surfaceType = SURFACE_TYPE_SURFACE_VIEW,
+                modifier = Modifier.offset(margin, margin).size(lerp(maxWidth, small, shrink), lerp(maxHeight, small * 9f / 16f, shrink)),
+            )
+            val prompt = upNext
+            if (prompt != null) {
+                AnimatedVisibility(visible = showUpNext, enter = fadeIn(tween(300, delayMillis = 150)), exit = fadeOut(tween(200))) {
+                    UpNextScreen(
+                        upNext = prompt,
+                        remainingMs = upNextLeftMs,
+                        screenWidth = maxWidth,
+                        onPlayNow = playNextOnce,
+                        onBackToCredits = { upNextDismissed = true },
+                    )
+                }
+            }
+        }
 
-        val showControls = controlsVisible && error == null
+        val showControls = controlsVisible && error == null && !showUpNext
         val captionInset by animateDpAsState(if (showControls) (if (item.isLive) 150.dp else 210.dp) else 64.dp, label = "captions")
-        SubtitleLayer(cues, bottomInset = captionInset)
+        if (!showUpNext) SubtitleLayer(cues, bottomInset = captionInset)
 
         if (isBuffering && error == null) Spinner(Modifier.align(Alignment.Center))
 

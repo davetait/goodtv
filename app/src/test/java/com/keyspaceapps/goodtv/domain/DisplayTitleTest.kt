@@ -93,5 +93,7 @@ class DisplayTitleTest {
         assertNull(DisplayTitle.episodeTitle("FR - Breaking Bad - S01E01", "Breaking Bad"))
         assertEquals("Pilot", DisplayTitle.episodeTitle("EN - Breaking Bad - S01E01 - Pilot", "Breaking Bad"))
         assertEquals("The One Where It All Began", DisplayTitle.episodeTitle("The One Where It All Began", "Friends"))
+        assertEquals("the show's tag and the gap left by the code go", "System", DisplayTitle.episodeTitle("EN - The Bear (US) - S01E01 - System", "The Bear"))
+        assertEquals("Part 1 - The Return", DisplayTitle.episodeTitle("EN - Show - S02E03 - Part 1 - The Return", "Show"))
     }
 }
