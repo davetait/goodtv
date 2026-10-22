@@ -10,8 +10,10 @@ import com.keyspaceapps.goodtv.data.db.RoomLibraryStore
 import com.keyspaceapps.goodtv.data.db.RoomPopularStore
 import com.keyspaceapps.goodtv.data.db.RoomTmdbCache
 import com.keyspaceapps.goodtv.data.db.RoomTmdbGenreStore
+import com.keyspaceapps.goodtv.data.db.RoomGuideStore
 import com.keyspaceapps.goodtv.data.db.RoomWatchListStore
 import com.keyspaceapps.goodtv.data.db.RoomWatchProgressStore
+import com.keyspaceapps.goodtv.data.guide.GuideStore
 import com.keyspaceapps.goodtv.data.progress.WatchProgressRepository
 import com.keyspaceapps.goodtv.data.repo.LibraryRepository
 import com.keyspaceapps.goodtv.data.repo.LibraryStore
@@ -115,6 +117,9 @@ class AppGraph(val context: Context) {
 
     /** Titles saved to watch later, for the Watch list row, poster bookmarks and detail pages. */
     val watchList: WatchListRepository by lazy { WatchListRepository(RoomWatchListStore(db.watchList())) }
+
+    /** Guide programmes, the channel-to-guide links and favourite channels. */
+    val guideStore: GuideStore by lazy { RoomGuideStore(db) }
 
     /** Home's popular rows: TMDB's popular streaming titles the library has, rankings refreshed daily. */
     val popularStore: PopularStore by lazy { RoomPopularStore(db.popular()) }

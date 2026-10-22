@@ -34,7 +34,7 @@ object XtreamMappers {
             s.stream_id?.let {
                 val name = s.name ?: it
                 val d = DisplayTitle.parse(name, live = true)
-                LiveChannel(sourceId, it, s.category_id, name, s.stream_icon, s.num, d.base, d.language, d.quality)
+                LiveChannel(sourceId, it, s.category_id, name, s.stream_icon, s.num, d.base, d.language, d.quality, s.epg_channel_id?.takeIf { it.isNotBlank() })
             }
         }
 

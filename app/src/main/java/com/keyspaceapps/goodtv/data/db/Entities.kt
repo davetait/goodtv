@@ -35,7 +35,7 @@ data class CategoryEntity(val sourceId: Long, val kind: String, val id: String, 
 )
 data class LiveChannelEntity(
     val sourceId: Long, val id: String, val categoryId: String?, val name: String, val logoUrl: String?, val number: Int?,
-    val title: String? = null, val language: String? = null, val quality: String? = null,
+    val title: String? = null, val language: String? = null, val quality: String? = null, val epgChannelId: String? = null,
 )
 
 @Entity(
@@ -191,3 +191,35 @@ data class WatchProgressEntity(
     indices = [Index("sourceId"), Index("savedAt")],
 )
 data class WatchListEntity(val sourceId: Long, val kind: String, val itemId: String, val savedAt: Long)
+
+/** A guide channel from one origin; [origin] is a GuideOrigin name. Its programmes go with it. */
+@Entity(tableName = "guide_channels")
+data class GuideChannelEntity(@PrimaryKey val guideId: String, val origin: String, val logoUrl: String?)
+
+/** One scheduled programme; [genres] is joined with "|". */
+@Entity(
+    tableName = "guide_programmes",
+    primaryKeys = ["guideId", "startMs"],
+    foreignKeys = [ForeignKey(entity = GuideChannelEntity::class, parentColumns = ["guideId"], childColumns = ["guideId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("endMs")],
+)
+data class GuideProgrammeEntity(
+    val guideId: String, val startMs: Long, val endMs: Long, val title: String,
+    val description: String?, val genres: String, val imageUrl: String?,
+)
+
+/** Which guide channel a live channel shows; rebuilt by the matcher, gone with its source. */
+@Entity(
+    tableName = "channel_guide",
+    primaryKeys = ["sourceId", "channelId"],
+    foreignKeys = [ForeignKey(entity = SourceEntity::class, parentColumns = ["id"], childColumns = ["sourceId"], onDelete = ForeignKey.CASCADE)],
+)
+data class ChannelGuideEntity(val sourceId: Long, val channelId: String, val guideId: String)
+
+/** A favourite channel, keyed by the channel's row key (not a foreign key: it must survive a catalog replace). */
+@Entity(tableName = "favourite_channels")
+data class FavouriteChannelEntity(@PrimaryKey val rowKey: String, val addedAt: Long)
+
+/** When each guide origin was last fetched ([origin] is a GuideOrigin name). */
+@Entity(tableName = "guide_meta")
+data class GuideMetaEntity(@PrimaryKey val origin: String, val fetchedAt: Long)
