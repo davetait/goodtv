@@ -77,6 +77,7 @@ class GuideRepository(
     private val clock: () -> Long,
     private val compute: CoroutineDispatcher,
     private val warn: (String) -> Unit = { Log.w("GoodTV", it) },
+    private val debug: (String) -> Unit = { Log.d("GoodTvGuide", it) },
 ) : GuideSource {
     /** A row before guide data: the part that depends on the lineup alone. */
     private class Base(
@@ -105,14 +106,19 @@ class GuideRepository(
 
     private fun lineupOf(candidates: List<ChannelCandidate>): Lineup {
         lineupCache?.takeIf { it.source == candidates }?.let { return it }
+        var started = System.nanoTime()
         val placeholders = PlaceholderLogos.of(candidates.map { it.channel })
         val groups = LinkedHashMap<String, MutableList<Pair<ChannelCandidate, ChannelIdentity>>>()
         val sorted = ChannelOrder.sort(candidates)
+        debug("sort ${msSince(started)} ms, ${candidates.size} channels")
+        started = System.nanoTime()
         for (c in sorted) {
             val id = ChannelIdentity.of(c.channel.name, c.categoryName)
             if (!id.hidden) groups.getOrPut(id.rowKey) { ArrayList() }.add(c to id)
         }
         foldIntoStations(groups, sorted)
+        debug("identities ${msSince(started)} ms, ${groups.size} rows")
+        started = System.nanoTime()
         val rows = groups.map { (key, feeds) ->
             val ids = feeds.map { it.second }
             val network = ids.firstNotNullOfOrNull { it.network }
@@ -134,6 +140,7 @@ class GuideRepository(
                 appCopy = network != null && APP_PREFIXES.any { key.startsWith(it) },
             )
         }
+        debug("rows ${msSince(started)} ms")
         return Lineup(candidates, rows).also { lineupCache = it }
     }
 
@@ -189,6 +196,15 @@ class GuideRepository(
     }
 
     private fun resolve(lineup: Lineup, links: List<ChannelGuideLink>, channels: List<GuideChannel>): List<Resolved> {
+        val started = System.nanoTime()
+        try {
+            return resolveRows(lineup, links, channels)
+        } finally {
+            debug("resolve ${msSince(started)} ms, ${links.size} links")
+        }
+    }
+
+    private fun resolveRows(lineup: Lineup, links: List<ChannelGuideLink>, channels: List<GuideChannel>): List<Resolved> {
         val guideOf = HashMap<Pair<Long, String>, String>(links.size * 2)
         for (l in links) guideOf[l.sourceId to l.channelId] = l.guideId
         val epgLogos = channels.filter { it.origin == GuideOrigin.EPGSHARE && !it.logoUrl.isNullOrBlank() }.associate { it.guideId to it.logoUrl }
@@ -209,7 +225,7 @@ class GuideRepository(
      */
     private val resolved: Flow<Pair<List<Resolved>, Set<String>>> = combine(
         // Room re-runs a query on every write to its tables; an unchanged result rebuilds nothing.
-        library.observeSportsCandidates().distinctUntilChanged(), store.observeLinks().distinctUntilChanged(),
+        library.observeSportsCandidates().timedFirst("lineup query") { ", ${it.size} channels" }.distinctUntilChanged(), store.observeLinks().distinctUntilChanged(),
         store.observeChannels().distinctUntilChanged(), store.observeFavourites().distinctUntilChanged(),
     ) { candidates, links, channels, favourites -> resolve(lineupOf(candidates), links, channels) to favourites }
         .flowOn(compute)
@@ -248,7 +264,7 @@ class GuideRepository(
             val rows = shown.map { it to row(it, favourites, byGuide) }
             GuideBoard(sections(filter, rows), windowStartMs)
         }
-    }.flowOn(compute)
+    }.timedFirst("first board") { ", ${it.sections.sumOf { s -> s.rows.size + s.more.size }} rows" }.flowOn(compute)
 
     /**
      * [GuideStore.observeProgrammes] in chunks, so a long list of ids never overruns SQLite's bind-variable limit.
@@ -256,12 +272,28 @@ class GuideRepository(
      * are dropped, and after the first list the rest settle for [SETTLE_MS] so the board is rebuilt once per burst.
      */
     private fun programmesOf(ids: Set<String>, fromMs: Long, untilMs: Long): Flow<List<GuideProgramme>> {
-        if (ids.isEmpty()) return flowOf(emptyList())
+        if (ids.isEmpty()) return flowOf(emptyList<GuideProgramme>()).timedFirst("first programmes") { ", 0 ids" }
         val chunks = ids.chunked(ID_CHUNK).map { store.observeProgrammes(it.toSet(), fromMs, untilMs).distinctUntilChanged() }
         return combine(chunks) { parts -> parts.flatMap { it }.sortedWith(compareBy({ it.guideId }, { it.startMs })) }
+            .timedFirst("first programmes") { ", ${ids.size} ids, ${it.size} programmes" }
             .conflate()
             .settled(SETTLE_MS)
     }
+
+    /** Logs (at debug level, tag GoodTvGuide) how long the first value took from collection; counts only, never names. */
+    private fun <T> Flow<T>.timedFirst(stage: String, detail: (T) -> String = { "" }): Flow<T> = flow {
+        val started = System.nanoTime()
+        var first = true
+        collect {
+            if (first) {
+                first = false
+                debug("$stage ${msSince(started)} ms${detail(it)}")
+            }
+            emit(it)
+        }
+    }
+
+    private fun msSince(startNanos: Long) = (System.nanoTime() - startNanos) / 1_000_000
 
     /** The first value at once, later ones only after [ms] without a newer one. */
     @OptIn(FlowPreview::class)

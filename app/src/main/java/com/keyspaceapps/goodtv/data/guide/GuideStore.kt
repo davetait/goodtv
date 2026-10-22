@@ -8,6 +8,8 @@ interface GuideStore {
     suspend fun replaceGuide(origin: GuideOrigin, channels: List<GuideChannel>, programmes: Sequence<GuideProgramme>)
     suspend fun replaceLinks(links: List<ChannelGuideLink>)
     fun observeLinks(): Flow<List<ChannelGuideLink>>
+    /** The sources that have at least one link: a small read, unlike [observeLinks]. */
+    suspend fun linkedSourceIds(): Set<Long>
     fun observeChannels(): Flow<List<GuideChannel>>
     /** Programmes overlapping [fromMs, untilMs), ordered by guide id then start. */
     fun observeProgrammes(guideIds: Set<String>, fromMs: Long, untilMs: Long): Flow<List<GuideProgramme>>

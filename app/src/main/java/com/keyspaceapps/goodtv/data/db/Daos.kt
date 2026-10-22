@@ -422,6 +422,7 @@ interface GuideDao {
     @Query("DELETE FROM channel_guide") suspend fun deleteLinks()
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertLinks(rows: List<ChannelGuideEntity>)
     @Query("SELECT * FROM channel_guide") fun observeLinks(): Flow<List<ChannelGuideEntity>>
+    @Query("SELECT DISTINCT sourceId FROM channel_guide") suspend fun linkedSourceIds(): List<Long>
 
     @Query("SELECT fetchedAt FROM guide_meta WHERE origin = :origin") suspend fun fetchedAt(origin: String): Long?
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertMeta(row: GuideMetaEntity)

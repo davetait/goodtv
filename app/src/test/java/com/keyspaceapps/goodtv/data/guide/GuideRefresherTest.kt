@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.runBlocking
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
@@ -568,6 +569,32 @@ class GuideRefresherTest {
         refresherWith(lib = racing).refreshIfStale()
         assertTrue(channelSource.openGuideCalls.isEmpty())
         assertNull(guide.fetchedAt(GuideOrigin.PROVIDER))
+    }
+
+    // --- I4: a start with nothing due reads no lineup ---
+
+    @Test fun nothingDueReadsNeitherLineupNorLinks() = runBlocking {
+        var lineupReads = 0
+        var linkReads = 0
+        val counting = object : LibraryStore by library {
+            override fun observeSportsCandidates() = library.observeSportsCandidates().onStart { lineupReads++ }
+        }
+        val countingStore = object : GuideStore by guide {
+            override fun observeLinks() = guide.observeLinks().onStart { linkReads++ }
+        }
+        provides(providerXml())
+        val r = refresherWith(lib = counting, store = countingStore)
+        r.refreshIfStale()
+        assertEquals(now, guide.fetchedAt(GuideOrigin.EPGSHARE))
+        assertEquals(now, guide.fetchedAt(GuideOrigin.PROVIDER))
+        val reads = lineupReads to linkReads
+        now += 3_600_000L
+        r.refreshIfStale()
+        assertEquals(reads, lineupReads to linkReads)
+        // A new source without links is due an early refresh: now the lineup is read.
+        addSource("US: ABC 7 NEW YORK (WABC)" to null)
+        r.refreshIfStale()
+        assertTrue(lineupReads > reads.first)
     }
 
     @Test fun singleByteReadsAreCheckedToo() {

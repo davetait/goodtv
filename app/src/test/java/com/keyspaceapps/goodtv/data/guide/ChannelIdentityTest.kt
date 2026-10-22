@@ -4,11 +4,21 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChannelIdentityTest {
     private fun id(name: String, category: String = "US| TV ᴿᴬᵂ ⁶⁰ᶠᵖˢ") = ChannelIdentity.of(name, category)
+
+    /** I4(b): a category's words and genre are worked out once per category (93 of them), not once per channel. */
+    @Test fun categoryWorkIsDoneOncePerCategory() {
+        val news = ChannelIdentity.categoryOf("US| NEWS ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ")
+        assertSame(news, ChannelIdentity.categoryOf("US| NEWS ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"))
+        assertTrue("news" in news.words)
+        assertEquals(LiveGenre.SPORTS, ChannelIdentity.categoryOf("US| SPORT ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ").genre)
+        assertNull(news.genre)
+    }
 
     @Test fun headingsAndEmptySlotsAreHidden() {
         assertTrue(id("####### NBC ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ #######", "US| NBC ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ").hidden)

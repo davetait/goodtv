@@ -59,9 +59,10 @@ class GuideRepositoryTest {
         lib, limited,
         GuideRefresher(guide, refresherLibrary, SourceRegistry(emptyList()), EpgShareSource(OkHttpClient()), PlaybackState(), { now }, dispatcher, tmp.newFolder()),
         LiveRefresher(lib, SourceRegistry(listOf(FakeChannelSource())), { false }, { now }),
-        { now }, dispatcher, { warnings += it },
+        { now }, dispatcher, { warnings += it }, { timings += it },
     )
     private val warnings = ArrayList<String>()
+    private val timings = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     private var nextId = 0
     private fun feed(name: String, category: String, logo: String? = null): ChannelCandidate =
@@ -362,6 +363,20 @@ class GuideRepositoryTest {
         shared.forEach { (g, rs) -> println("GUIDE_SHARED $g: ${rs.joinToString(" || ") { it.key }}") }
         assertEquals(emptyMap<String, List<String>>(), cableShared)
         assertEquals(listOf("station:ABC:WABC"), main("ABC").filter { r -> r.feeds.any { "NEW YORK" in it.channel.name } }.map { it.key })
+    }
+
+    /** I4(c): the first board logs how long each stage took, and nothing about the channels. */
+    @Test fun firstBoardLogsEachStageTiming() = runBlocking {
+        val cnn = feed("US: CNN HD", NEWS)
+        lineup.value = listOf(cnn, feed("US: A&E HD", ENT))
+        guide.replaceGuide(GuideOrigin.EPGSHARE, listOf(GuideChannel("CNN", GuideOrigin.EPGSHARE, null)), sequenceOf(programme("CNN", "Show", windowStart)))
+        guide.replaceLinks(listOf(link(cnn, "CNN")))
+        board()
+        val ms = Regex("\\d+ ms")
+        for (stage in listOf("lineup query", "sort", "identities", "resolve", "first programmes", "first board")) {
+            assertTrue("$stage in $timings", timings.any { it.startsWith(stage) && ms.containsMatchIn(it) })
+        }
+        assertTrue(timings.toString(), timings.none { "CNN" in it || "A&E" in it })
     }
 
     private val fixture by lazy {

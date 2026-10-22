@@ -27,6 +27,8 @@ class InMemoryGuideStore : GuideStore {
 
     override fun observeLinks(): Flow<List<ChannelGuideLink>> = links
 
+    override suspend fun linkedSourceIds(): Set<Long> = links.value.mapTo(HashSet()) { it.sourceId }
+
     override fun observeChannels(): Flow<List<GuideChannel>> = channels
 
     override fun observeProgrammes(guideIds: Set<String>, fromMs: Long, untilMs: Long): Flow<List<GuideProgramme>> =

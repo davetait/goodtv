@@ -29,6 +29,8 @@ class RoomGuideStore(private val db: GoodTvDatabase) : GuideStore {
     override fun observeLinks(): Flow<List<ChannelGuideLink>> =
         dao.observeLinks().map { rows -> rows.map { ChannelGuideLink(it.sourceId, it.channelId, it.guideId) } }
 
+    override suspend fun linkedSourceIds(): Set<Long> = dao.linkedSourceIds().toSet()
+
     override fun observeChannels(): Flow<List<GuideChannel>> =
         dao.observeChannels().map { rows -> rows.map { GuideChannel(it.guideId, GuideOrigin.valueOf(it.origin), it.logoUrl) } }
 

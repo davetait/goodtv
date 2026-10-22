@@ -111,19 +111,29 @@ class GuideRefresher(
 
     private suspend fun refresh() {
         val now = clock()
-        val lineup = library.observeSportsCandidates().first()
-        if (lineup.isEmpty()) return
-        val stored = store.observeLinks().first()
-        val linkedSources = stored.mapTo(HashSet()) { it.sourceId }
+        // What is due comes from small reads (dates, sources, which sources have links) first: a start with
+        // nothing due never reads the ~12,600-channel lineup or the links.
+        val epgOpen = !failedRecently(GuideOrigin.EPGSHARE, now)
+        val epgStale = epgOpen && isStale(GuideOrigin.EPGSHARE, now)
+        val providerDue = isStale(GuideOrigin.PROVIDER, now) && !failedRecently(GuideOrigin.PROVIDER, now) && !playback.playing.value
         // A source without links gets one early refresh a day; one nothing matches would otherwise download on every start.
         // An attempt dated in the future (the clock was set back) doesn't count.
-        val unlinked = lineup.mapTo(HashSet()) { it.channel.sourceId }.filter { id ->
-            id !in linkedSources && early.lastEarlyRefresh(id)?.let { now - it in 0 until GUIDE_MAX_AGE_MS } != true
+        val unlinkedSources = if (!epgOpen) emptyList() else {
+            val linked = store.linkedSourceIds()
+            library.getSources().filter { it.enabled && it.id !in linked }.map { it.id }.filter { id ->
+                early.lastEarlyRefresh(id)?.let { now - it in 0 until GUIDE_MAX_AGE_MS } != true
+            }
         }
-        val epgDue = (isStale(GuideOrigin.EPGSHARE, now) || unlinked.isNotEmpty()) && !failedRecently(GuideOrigin.EPGSHARE, now)
-        val providerDue = isStale(GuideOrigin.PROVIDER, now) && !failedRecently(GuideOrigin.PROVIDER, now) && !playback.playing.value
+        if (!epgStale && unlinkedSources.isEmpty() && !providerDue) return
+        val lineup = library.observeSportsCandidates().first()
+        if (lineup.isEmpty()) return
+        // Only a source with visible channels counts.
+        val inLineup = lineup.mapTo(HashSet()) { it.channel.sourceId }
+        val unlinked = unlinkedSources.filter { it in inLineup }
+        val epgDue = epgStale || unlinked.isNotEmpty()
         if (!epgDue && !providerDue) return
         if (epgDue) unlinked.forEach { early.recordEarlyRefresh(it, now) }
+        val stored = store.observeLinks().first()
 
         // Whatever an earlier run left behind (a killed process) is garbage.
         tempDir.mkdirs()

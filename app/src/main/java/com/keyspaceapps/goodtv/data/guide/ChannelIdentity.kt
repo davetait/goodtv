@@ -87,6 +87,20 @@ data class ChannelIdentity(
             "replay" to LiveGenre.SPORTS, "cinemania" to LiveGenre.MOVIES, "kids" to LiveGenre.KIDS, "cartoon" to LiveGenre.KIDS,
         )
 
+        /** A provider category's words and the genre they give. */
+        class CategoryInfo(val words: Set<String>, val genre: LiveGenre?)
+
+        /** Per category name: a lineup has ~100 categories and ~12,600 channels. */
+        private val categories = java.util.concurrent.ConcurrentHashMap<String, CategoryInfo>()
+        private const val MAX_CATEGORIES = 4096
+
+        /** [categoryName]'s words and genre, worked out once per distinct name. */
+        fun categoryOf(categoryName: String): CategoryInfo = categories[categoryName] ?: run {
+            val words = GameMatcher.normalize(categoryName).split(' ').toSet()
+            if (categories.size >= MAX_CATEGORIES) categories.clear()
+            CategoryInfo(words, words.firstNotNullOfOrNull { CATEGORY_GENRES[it] }).also { categories[categoryName] = it }
+        }
+
         fun of(name: String, categoryName: String): ChannelIdentity {
             val plain = GameMatcher.normalize(name)
             val hidden = HEADING.containsMatchIn(name) || GameMatcher.CLOSED.any { plain.startsWith(it) } ||
@@ -98,7 +112,8 @@ data class ChannelIdentity(
             val loopTag = if (tagName == "24/7") null else LOOP.find(body)
             val loop = tagName == "24/7" || loopTag != null
             if (loopTag != null) body = body.substring(loopTag.range.last + 1)
-            val category = GameMatcher.normalize(categoryName).split(' ').toSet()
+            val categoryInfo = categoryOf(categoryName)
+            val category = categoryInfo.words
             val event = !loop && "ppv" in category
 
             val words = ChannelNames.words(body)
@@ -130,7 +145,7 @@ data class ChannelIdentity(
             val market = if (network == null) null else MARKET_WORDS.firstOrNull { " ${it.first} " in city }?.second
 
             val genre = if (event) LiveGenre.EVENTS else {
-                (if (loop) null else knownGenre(words)) ?: category.firstNotNullOfOrNull { CATEGORY_GENRES[it] } ?: when {
+                (if (loop) null else knownGenre(words)) ?: categoryInfo.genre ?: when {
                     news -> LiveGenre.NEWS
                     network != null -> LiveGenre.NETWORK
                     "news" in category -> LiveGenre.NEWS
