@@ -5,6 +5,9 @@ import java.io.InputStreamReader
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 
+/** What [XmltvReader.read] got through: how many programmes it passed on, and whether the file ended with `</tv>`. */
+data class XmltvReadResult(val programmes: Int, val complete: Boolean)
+
 /** A `<channel>` of an XMLTV file: its id, every display name, and its first icon. */
 data class XmltvChannel(val id: String, val names: List<String>, val iconUrl: String?)
 
@@ -33,6 +36,7 @@ object XmltvReader {
     private const val OPEN_PROGRAMME = "<programme"
     private const val CLOSE_CHANNEL = "</channel>"
     private const val CLOSE_PROGRAMME = "</programme>"
+    private const val CLOSE_TV = "</tv>"
     private const val IS_CHANNEL = 1
     private const val IS_PROGRAMME = 2
 
@@ -47,8 +51,10 @@ object XmltvReader {
     private fun attributeRegex(name: String) = Regex("""\s$name\s*=\s*(?:"([^"]*)"|'([^']*)')""")
 
     /**
-     * Streams [input] (UTF-8) and returns how many programmes were passed to [onProgramme]. Never
-     * throws on bad markup; an I/O failure of [input] itself still propagates.
+     * Streams [input] (UTF-8) and returns how many programmes were passed to [onProgramme], and whether
+     * the input ended with `</tv>` (trailing whitespace aside): a file cut off between two blocks parses
+     * cleanly, so only its missing end shows it is not whole. Never throws on bad markup; an I/O failure
+     * of [input] itself still propagates.
      *
      * [onChannel] gets every `<channel>`, wanted or not, because the channel matcher needs the whole
      * list. [keepChannel] only filters programmes, and so does the window: a programme is passed on
@@ -62,17 +68,22 @@ object XmltvReader {
         untilMs: Long,
         onChannel: (XmltvChannel) -> Unit,
         onProgramme: (GuideProgramme) -> Unit,
-    ): Int {
+    ): XmltvReadResult {
         val reader = InputStreamReader(input, Charsets.UTF_8)
         val chunk = CharArray(CHUNK_CHARS)
         var buf = ""
         var count = 0
+        // The last few non-blank characters of the input so far: a whole file ends with "</tv>".
+        var tail = ""
 
         /** Appends the next chunk to [buf] (from [keepFrom] on); false at the end of the input. */
         fun more(keepFrom: Int): Boolean {
             val n = reader.read(chunk)
             if (n < 0) return false
-            buf = buf.substring(keepFrom) + String(chunk, 0, n)
+            val text = String(chunk, 0, n)
+            val trimmed = text.trimEnd()
+            if (trimmed.isNotEmpty()) tail = (tail + trimmed.takeLast(CLOSE_TV.length)).takeLast(CLOSE_TV.length)
+            buf = buf.substring(keepFrom) + text
             return true
         }
 
@@ -154,7 +165,7 @@ object XmltvReader {
                 if (programme != null) { onProgramme(programme); count++ }
             }
         }
-        return count
+        return XmltvReadResult(count, complete = tail == CLOSE_TV)
     }
 
     /** Index of the next `<channel` or `<programme` tag start at or after [from], or -1. */

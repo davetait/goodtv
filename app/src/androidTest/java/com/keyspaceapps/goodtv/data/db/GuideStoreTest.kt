@@ -19,8 +19,10 @@ import kotlinx.serialization.json.Json
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.IOException
 
 class GuideStoreTest {
     private lateinit var db: GoodTvDatabase
@@ -60,6 +62,26 @@ class GuideStoreTest {
         val programmes = (0 until 1200).asSequence().map { GuideProgramme("c", it * 1000L, it * 1000L + 500, "P$it", null, emptyList(), null) }
         guide.replaceGuide(GuideOrigin.EPGSHARE, listOf(GuideChannel("c", GuideOrigin.EPGSHARE, null)), programmes)
         assertEquals(1200, guide.observeProgrammes(setOf("c"), 0, Long.MAX_VALUE).first().size)
+    }
+
+    /** A file that fails partway (cut download, playback starting) leaves the last guide exactly as it was. */
+    @Test
+    fun replaceGuideRollsBackWhenTheProgrammesFailMidway() = runBlocking {
+        guide.replaceGuide(GuideOrigin.EPGSHARE, listOf(GuideChannel("old", GuideOrigin.EPGSHARE, null)), sequenceOf(prog("old", 18, 19, "Kept")))
+        guide.replaceGuide(GuideOrigin.PROVIDER, listOf(GuideChannel("p1", GuideOrigin.PROVIDER, null)), sequenceOf(prog("p1", 18, 19, "Provider show")))
+        // More than two batches are written before the failure.
+        val failing = sequence {
+            repeat(1_100) { yield(GuideProgramme("new", it * 1000L, it * 1000L + 500, "P$it", null, emptyList(), null)) }
+            throw IOException("Guide read failed")
+        }
+        val error = runCatching {
+            guide.replaceGuide(GuideOrigin.EPGSHARE, listOf(GuideChannel("new", GuideOrigin.EPGSHARE, null)), failing)
+        }.exceptionOrNull()
+        assertTrue("$error", error is IOException)
+        assertEquals(setOf("old", "p1"), guide.observeChannels().first().map { it.guideId }.toSet())
+        assertEquals(listOf("Kept"), guide.observeProgrammes(setOf("old"), 0, Long.MAX_VALUE).first().map { it.title })
+        assertEquals(emptyList<GuideProgramme>(), guide.observeProgrammes(setOf("new"), 0, Long.MAX_VALUE).first())
+        assertEquals(listOf("Provider show"), guide.observeProgrammes(setOf("p1"), 0, Long.MAX_VALUE).first().map { it.title })
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.keyspaceapps.goodtv.data.guide
 
+import com.keyspaceapps.goodtv.data.repo.LibraryStore
 import com.keyspaceapps.goodtv.data.source.SourceConfig
 import com.keyspaceapps.goodtv.data.source.SourceRegistry
 import com.keyspaceapps.goodtv.data.source.SourceType
@@ -62,6 +63,8 @@ class GuideRefresherTest {
     private lateinit var refresher: GuideRefresher
     private var sourceId = 0L
     private val warnings = ArrayList<String>()
+    /** Runs as the fake epgshare01 server answers a request for a file. */
+    private var onServe: (String) -> Unit = {}
 
     private fun gz(text: String) = ByteArrayOutputStream().also { o -> GZIPOutputStream(o).use { it.write(text.toByteArray()) } }.toByteArray()
     private fun xmltvTime(ms: Long) = DateTimeFormatter.ofPattern("yyyyMMddHHmmss 'Z'").format(Instant.ofEpochMilli(ms).atOffset(ZoneOffset.UTC)).replace(" Z", " +0000")
@@ -85,6 +88,7 @@ class GuideRefresherTest {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val name = request.url.encodedPath.substringAfterLast('/')
                 hits += name
+                onServe(name)
                 return if (name in failing) MockResponse(code = 500) else MockResponse.Builder().body(Buffer().write(files.getValue(name))).build()
             }
         }
@@ -97,9 +101,13 @@ class GuideRefresherTest {
 
     private val tempDir by lazy { tmp.newFolder() }
 
-    private fun refresherWith(limits: GuideLimits = GuideLimits(), timeoutMs: Long = GuideRefresher.DOWNLOAD_TIMEOUT_MS, store: GuideStore = guide, io: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Unconfined, early: EarlyRefreshLog = MemoryEarlyRefreshLog()) = GuideRefresher(
-        store, library, SourceRegistry(listOf(channelSource)), EpgShareSource(OkHttpClient(), server.url("/epgshare01/")),
-        playback, { now }, io, tempDir, { warnings += it }, limits, timeoutMs, early,
+    private fun refresherWith(
+        limits: GuideLimits = GuideLimits(), timeoutMs: Long = GuideRefresher.DOWNLOAD_TIMEOUT_MS, store: GuideStore = guide,
+        io: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Unconfined, early: EarlyRefreshLog = MemoryEarlyRefreshLog(),
+        failures: GuideFailureLog = MemoryGuideFailureLog(), lib: LibraryStore = library,
+    ) = GuideRefresher(
+        store, lib, SourceRegistry(listOf(channelSource)), EpgShareSource(OkHttpClient(), server.url("/epgshare01/")),
+        playback, { now }, io, tempDir, { warnings += it }, limits, timeoutMs, early, failures,
     )
 
     private fun leftovers() = tempDir.listFiles().orEmpty().toList()
@@ -380,6 +388,186 @@ class GuideRefresherTest {
         } finally {
             Thread.setDefaultUncaughtExceptionHandler(previous)
         }
+    }
+
+    // --- A bad file never replaces a good guide (C1) ---
+
+    /** The guide as stored: programme ids, links and when each origin was fetched. */
+    private suspend fun snapshot() = listOf(programmeIds(), guide.observeLinks().first().toSet(), guide.fetchedAt(GuideOrigin.EPGSHARE), guide.fetchedAt(GuideOrigin.PROVIDER))
+
+    private fun assertWarned(origin: GuideOrigin, reason: String) =
+        assertTrue(warnings.toString(), warnings.any { origin.name in it && reason in it && "http" !in it })
+
+    @Test fun htmlInsteadOfGuideKeepsTheLastGuide() = runBlocking {
+        refresher.refreshIfStale()
+        val before = snapshot()
+        now += GUIDE_MAX_AGE_MS
+        files[EpgShareFiles.CABLE] = "<!DOCTYPE html><html><body>Service unavailable</body></html>".toByteArray()
+        refresher.refreshIfStale()
+        assertEquals(before, snapshot())
+        assertWarned(GuideOrigin.EPGSHARE, "not a whole guide")
+        assertTrue(leftovers().isEmpty())
+    }
+
+    @Test fun emptyGzipKeepsTheLastGuide() = runBlocking {
+        refresher.refreshIfStale()
+        val before = snapshot()
+        now += GUIDE_MAX_AGE_MS
+        files[EpgShareFiles.LOCALS] = gz("")
+        refresher.refreshIfStale()
+        assertEquals(before, snapshot())
+        assertWarned(GuideOrigin.EPGSHARE, "not a whole guide")
+    }
+
+    @Test fun fileWithNoChannelsKeepsTheLastGuide() = runBlocking {
+        refresher.refreshIfStale()
+        val before = snapshot()
+        now += GUIDE_MAX_AGE_MS
+        files[EpgShareFiles.LOCALS] = gz("<tv></tv>")
+        refresher.refreshIfStale()
+        assertEquals(before, snapshot())
+        assertWarned(GuideOrigin.EPGSHARE, "no channels")
+    }
+
+    @Test fun epgshareFileWithoutClosingTvKeepsTheLastGuide() = runBlocking {
+        refresher.refreshIfStale()
+        val before = snapshot()
+        now += GUIDE_MAX_AGE_MS
+        // Cut off cleanly after a block: everything in it parses.
+        files[EpgShareFiles.LOCALS] = gz(locals.substringBeforeLast("</tv>"))
+        refresher.refreshIfStale()
+        assertEquals(before, snapshot())
+        assertWarned(GuideOrigin.EPGSHARE, "not a whole guide")
+    }
+
+    @Test fun providerFileWithoutClosingTvKeepsTheLastGuide() = runBlocking {
+        provides(providerXml())
+        refresher.refreshIfStale()
+        val before = snapshot()
+        assertTrue("P:access.us" in programmeIds())
+        now += GUIDE_MAX_AGE_MS
+        provides(providerXml().substringBeforeLast("</tv>"))
+        refresher.refreshIfStale()
+        // epgshare01 was due too and refreshed (its fixture programmes are now outside the window); the
+        // provider's programmes, links and date are untouched.
+        assertEquals(setOf("P:access.us"), programmeIds().filter { it.startsWith("P:") }.toSet())
+        assertEquals(before[1], guide.observeLinks().first().toSet())
+        assertTrue(ChannelGuideLink(sourceId, "3", "P:access.us") in guide.observeLinks().first())
+        assertEquals(now - GUIDE_MAX_AGE_MS, guide.fetchedAt(GuideOrigin.PROVIDER))
+        assertWarned(GuideOrigin.PROVIDER, "not a whole guide")
+    }
+
+    @Test fun collapsedMatchCountKeepsTheLastGuide() = runBlocking {
+        val names = (1..120).map { "Chan $it" }
+        fun cableOf(n: Int) = gz("<tv>" + names.take(n).joinToString(" ") { channel("${it.replace(' ', '.')}.us2", it) } +
+            names.take(n).joinToString(" ") { programme("${it.replace(' ', '.')}.us2", "Show", 3_600_000) } + "</tv>")
+        library.replaceCatalog(sourceId, Catalog(listOf(Category(sourceId, ContentKind.LIVE, "c1", "US| TV")),
+            names.mapIndexed { i, n -> LiveChannel(sourceId, "${i + 1}", "c1", "US: ${n.uppercase()} HD", null, null) }, emptyList(), emptyList()))
+        files[EpgShareFiles.CABLE] = cableOf(120)
+        refresher.refreshIfStale()
+        assertEquals(120, guide.observeLinks().first().size)
+        // The epgshare01 part: programmes, links, date (the provider stage has nothing to fetch here and refreshes freely).
+        val before = snapshot().take(3)
+        now += GUIDE_MAX_AGE_MS
+        // The cable file now covers 59 of them: fewer than half of the 120 stored links.
+        files[EpgShareFiles.CABLE] = cableOf(59)
+        refresher.refreshIfStale()
+        assertEquals(before, snapshot().take(3))
+        assertWarned(GuideOrigin.EPGSHARE, "matched channels fell")
+        // Exactly half is still a real guide.
+        now += GUIDE_MAX_AGE_MS
+        files[EpgShareFiles.CABLE] = cableOf(60)
+        refresher.refreshIfStale()
+        assertEquals(60, guide.observeLinks().first().size)
+        assertEquals(now, guide.fetchedAt(GuideOrigin.EPGSHARE))
+    }
+
+    @Test fun smallGuidesMayShrink() = runBlocking {
+        refresher.refreshIfStale()
+        assertEquals(2, guide.observeLinks().first().size)
+        now += GUIDE_MAX_AGE_MS
+        files[EpgShareFiles.LOCALS] = gz("""<tv>${channel("WXYZ-DT.us_locals1", "WXYZ-DT")}</tv>""")
+        refresher.refreshIfStale()
+        // Under 100 stored links a drop is not a collapse: 1 of 2 links is kept.
+        assertEquals(1, guide.observeLinks().first().size)
+        assertEquals(now, guide.fetchedAt(GuideOrigin.EPGSHARE))
+    }
+
+    // --- Failure backoff ---
+
+    @Test fun failedOriginIsNotRetriedWithinAnHour() = runBlocking {
+        val log = MemoryGuideFailureLog()
+        refresher = refresherWith(failures = log)
+        failing += EpgShareFiles.CABLE
+        refresher.refreshIfStale()
+        val tried = hits.size
+        assertTrue(tried > 0)
+        assertEquals(now, log.lastFailure(GuideOrigin.EPGSHARE))
+        failing.clear()
+        now += 3_600_000L - 1
+        refresher.refreshIfStale()
+        // A restart within the hour (a new refresher, the same saved log) doesn't retry either.
+        refresherWith(failures = log).refreshIfStale()
+        assertEquals(tried, hits.size)
+        now += 1
+        refresher.refreshIfStale()
+        assertTrue(hits.size > tried)
+        assertEquals(now, guide.fetchedAt(GuideOrigin.EPGSHARE))
+    }
+
+    @Test fun failedProviderIsNotRetriedWithinAnHour() = runBlocking {
+        channelSource.guideResults[sourceId] = { Result.failure(IOException("down")) }
+        refresher.refreshIfStale()
+        assertEquals(1, channelSource.openGuideCalls.size)
+        provides(providerXml())
+        now += 30 * 60_000L
+        refresher.refreshIfStale()
+        assertEquals(1, channelSource.openGuideCalls.size)
+        now += 30 * 60_000L
+        refresher.refreshIfStale()
+        assertEquals(2, channelSource.openGuideCalls.size)
+        assertEquals(now, guide.fetchedAt(GuideOrigin.PROVIDER))
+    }
+
+    @Test fun playbackAbortIsNotAFailure() = runBlocking {
+        val log = MemoryGuideFailureLog()
+        refresher = refresherWith(failures = log)
+        channelSource.guideResults[sourceId] = { playback.enter(); Result.success(ByteArrayInputStream(providerXml().toByteArray())) }
+        refresher.refreshIfStale()
+        assertNull(log.lastFailure(GuideOrigin.PROVIDER))
+        playback.exit()
+        provides(providerXml())
+        refresher.refreshIfStale()
+        assertEquals(now, guide.fetchedAt(GuideOrigin.PROVIDER))
+    }
+
+    @Test fun failureFromTheFutureDoesNotBlock() = runBlocking {
+        val log = MemoryGuideFailureLog()
+        log.recordFailure(GuideOrigin.EPGSHARE, now + 3_600_000L)
+        refresherWith(failures = log).refreshIfStale()
+        assertEquals(now, guide.fetchedAt(GuideOrigin.EPGSHARE))
+    }
+
+    // --- The provider's guide never opens while playing (I1) ---
+
+    @Test fun playbackStartingDuringEpgshareOpensNoProviderGuide() = runBlocking {
+        provides(providerXml())
+        onServe = { if (it == EpgShareFiles.CABLE) playback.enter() }
+        refresher.refreshIfStale()
+        assertEquals(now, guide.fetchedAt(GuideOrigin.EPGSHARE))
+        assertTrue(channelSource.openGuideCalls.isEmpty())
+        assertNull(guide.fetchedAt(GuideOrigin.PROVIDER))
+    }
+
+    @Test fun playbackStartingJustBeforeTheProviderStageOpensNothing() = runBlocking {
+        provides(providerXml())
+        // Playback starts after the last check but before the first guide request.
+        val racing = object : LibraryStore by library {
+            override suspend fun getSources() = library.getSources().also { playback.enter() }
+        }
+        refresherWith(lib = racing).refreshIfStale()
+        assertTrue(channelSource.openGuideCalls.isEmpty())
+        assertNull(guide.fetchedAt(GuideOrigin.PROVIDER))
     }
 
     @Test fun singleByteReadsAreCheckedToo() {

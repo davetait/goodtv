@@ -4,13 +4,14 @@ import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.time.Instant
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class XmltvReaderTest {
     private fun sample(): InputStream = javaClass.classLoader!!.getResourceAsStream("live/epgshare_us2_sample.xml")!!
 
-    private class Result(val channels: List<XmltvChannel>, val programmes: List<GuideProgramme>, val count: Int)
+    private class Result(val channels: List<XmltvChannel>, val programmes: List<GuideProgramme>, val count: Int, val complete: Boolean)
 
     private fun read(
         input: InputStream,
@@ -20,8 +21,8 @@ class XmltvReaderTest {
     ): Result {
         val channels = mutableListOf<XmltvChannel>()
         val programmes = mutableListOf<GuideProgramme>()
-        val n = XmltvReader.read(input, keep, from, until, { channels += it }, { programmes += it })
-        return Result(channels, programmes, n)
+        val r = XmltvReader.read(input, keep, from, until, { channels += it }, { programmes += it })
+        return Result(channels, programmes, r.programmes, r.complete)
     }
 
     private fun read(xml: String, keep: (String) -> Boolean = { true }, from: Long = Long.MIN_VALUE, until: Long = Long.MAX_VALUE) =
@@ -86,6 +87,33 @@ class XmltvReaderTest {
         assertEquals("Tom & Jerry's \"Show\"", p.title)
         assertEquals("It's <b> A", p.description)
         assertEquals(listOf("Q&A"), p.genres)
+    }
+
+    @Test
+    fun completeOnlyWhenTheFileEndsWithClosingTv() {
+        assertTrue(read(sample()).complete)
+        assertTrue(read("<tv>$goodProgramme</tv>\n\n").complete)
+        // Cut off cleanly between blocks: everything parses, but the file is not whole.
+        val cut = read("<tv>$goodProgramme\n")
+        assertEquals(1, cut.count)
+        assertFalse(cut.complete)
+        assertFalse(read("<!DOCTYPE html><html><body>Not found</body></html>").complete)
+        assertFalse(read("").complete)
+        // A closing tag in the middle doesn't count when more blocks follow it.
+        assertFalse(read("<tv></tv>$goodProgramme").complete)
+    }
+
+    @Test
+    fun closingTvSplitAcrossReadsIsSeen() {
+        val bytes = ("<tv>$goodProgramme</tv>" + " ".repeat(20) + "\n").toByteArray()
+        val slow = object : InputStream() {
+            private val inner = ByteArrayInputStream(bytes)
+            override fun read(): Int = inner.read()
+            override fun read(b: ByteArray, off: Int, len: Int): Int = inner.read(b, off, minOf(len, 3))
+        }
+        val r = read(slow)
+        assertEquals(1, r.count)
+        assertTrue(r.complete)
     }
 
     @Test
