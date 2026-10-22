@@ -34,7 +34,6 @@ class LibraryRepository(
     val syncState: StateFlow<SyncState> = sync.state
 
     fun categories(kind: ContentKind): Flow<List<CategoryWithSource>> = store.observeCategories(kind)
-    fun liveChannels(sourceId: Long, categoryId: String): Flow<List<LiveChannel>> = store.observeLiveChannels(sourceId, categoryId)
     fun movies(sourceId: Long, categoryId: String, limit: Int): Flow<List<Movie>> = store.observeMovies(sourceId, categoryId, limit)
     fun series(sourceId: Long, categoryId: String, limit: Int): Flow<List<Series>> = store.observeSeries(sourceId, categoryId, limit)
     fun moviesByCategory(limitPerCategory: Int): Flow<Map<CategoryKey, List<Movie>>> = store.observeMoviesByCategory(limitPerCategory)

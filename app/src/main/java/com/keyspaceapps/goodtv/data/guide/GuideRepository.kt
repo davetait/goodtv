@@ -14,12 +14,18 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
@@ -160,7 +166,9 @@ class GuideRepository(
      * built once and shared. Starting it also asks the guide refresher for a daily refresh, off the first emission.
      */
     private val resolved: Flow<Pair<List<Resolved>, Set<String>>> = combine(
-        library.observeSportsCandidates(), store.observeLinks(), store.observeChannels(), store.observeFavourites(),
+        // Room re-runs a query on every write to its tables; an unchanged result rebuilds nothing.
+        library.observeSportsCandidates().distinctUntilChanged(), store.observeLinks().distinctUntilChanged(),
+        store.observeChannels().distinctUntilChanged(), store.observeFavourites().distinctUntilChanged(),
     ) { candidates, links, channels, favourites -> resolve(lineupOf(candidates), links, channels) to favourites }
         .flowOn(compute)
         // A failing lineup read keeps the last rows (the shared replay) and is tried again shortly.
@@ -199,11 +207,24 @@ class GuideRepository(
         }
     }.flowOn(compute)
 
-    /** [GuideStore.observeProgrammes] in chunks, so a long list of ids never overruns SQLite's bind-variable limit. */
+    /**
+     * [GuideStore.observeProgrammes] in chunks, so a long list of ids never overruns SQLite's bind-variable limit.
+     * A download writes the programme table many times and every chunk re-queries on each write: unchanged chunks
+     * are dropped, and after the first list the rest settle for [SETTLE_MS] so the board is rebuilt once per burst.
+     */
     private fun programmesOf(ids: Set<String>, fromMs: Long, untilMs: Long): Flow<List<GuideProgramme>> {
         if (ids.isEmpty()) return flowOf(emptyList())
-        val chunks = ids.chunked(ID_CHUNK).map { store.observeProgrammes(it.toSet(), fromMs, untilMs) }
+        val chunks = ids.chunked(ID_CHUNK).map { store.observeProgrammes(it.toSet(), fromMs, untilMs).distinctUntilChanged() }
         return combine(chunks) { parts -> parts.flatMap { it }.sortedWith(compareBy({ it.guideId }, { it.startMs })) }
+            .conflate()
+            .settled(SETTLE_MS)
+    }
+
+    /** The first value at once, later ones only after [ms] without a newer one. */
+    @OptIn(FlowPreview::class)
+    private fun <T> Flow<T>.settled(ms: Long): Flow<T> = flow {
+        var first = true
+        emitAll(debounce { if (first) { first = false; 0L } else ms })
     }
 
     private fun inFilter(b: Base, filter: GuideFilter): Boolean = when (filter) {
@@ -271,6 +292,7 @@ class GuideRepository(
         private const val SEARCH_PROGRAMMES = 50
         private const val ID_CHUNK = 500
         private const val RETRY_MS = 5_000L
+        private const val SETTLE_MS = 250L
         private val APP_PREFIXES = listOf("prime ", "roku ", "tubi ")
         private val PROVIDER_TAG = Regex("""^\s*[A-Z0-9&/+]{1,6}:\s*""")
     }

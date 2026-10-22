@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
@@ -291,5 +293,42 @@ class GuideRepositoryTest {
         val ids = nbc.rows.map { r -> r.key to ChannelIdentity.of(r.feeds.first().channel.name, r.feeds.first().categoryName) }
         for ((key, id) in ids) assertTrue("$key: ${id.displayName}", (id.callSign != null && id.market in DEFAULT_MARKETS) || (id.callSign == null && id.network == Network.NBC))
         assertFalse(nbc.rows.isEmpty())
+    }
+
+    /** A download writes programmes in many passes; the screen gets a board for the first state and a settled one, not one per write. */
+    @Test fun rapidProgrammeWritesProduceFewBoards() = runBlocking {
+        val cnn = feed("US: CNN HD", NEWS)
+        lineup.value = listOf(cnn)
+        guide.replaceLinks(listOf(link(cnn, "CNN")))
+        val boards = java.util.concurrent.CopyOnWriteArrayList<GuideBoard>()
+        val job = launch(Dispatchers.Default) { repoFor(library, Dispatchers.Default).board(GuideFilter.ALL, windowStart).collect { boards += it } }
+        while (boards.isEmpty()) delay(10)
+        for (i in 1..20) {
+            guide.replaceGuide(GuideOrigin.EPGSHARE, listOf(GuideChannel("CNN", GuideOrigin.EPGSHARE, null)), sequenceOf(programme("CNN", "Show $i", windowStart)))
+            delay(5)
+        }
+        delay(800)
+        job.cancel()
+        assertTrue("${boards.size} boards", boards.size <= 3)
+        assertEquals("Show 20", boards.last().section("News").rows.single().programmes.single().title)
+    }
+
+    /** Rough timings for the report (not a pass/fail bound beyond "seconds, not minutes"). */
+    @Test fun timeToFirstBoardOnTheFullLineup() = runBlocking {
+        lineup.value = fixture
+        var started = System.nanoTime()
+        repoFor(library, Dispatchers.Default).board(GuideFilter.ALL, windowStart).first()
+        val bare = (System.nanoTime() - started) / 1_000_000
+        val linked = fixture.take(1_000)
+        guide.replaceGuide(
+            GuideOrigin.EPGSHARE, linked.indices.map { GuideChannel("G$it", GuideOrigin.EPGSHARE, null) },
+            linked.indices.asSequence().flatMap { i -> (0 until 50).asSequence().map { k -> programme("G$i", "Show $i.$k", windowStart - 2 * hour + k * 30 * 60_000L, windowStart - 2 * hour + (k + 1) * 30 * 60_000L) } },
+        )
+        guide.replaceLinks(linked.mapIndexed { i, c -> link(c, "G$i") })
+        started = System.nanoTime()
+        repoFor(library, Dispatchers.Default).board(GuideFilter.ALL, windowStart).first()
+        val withGuide = (System.nanoTime() - started) / 1_000_000
+        println("GUIDE_TIMING first board: ${fixture.size} channels, no guide ${bare} ms; 1,000 linked x 50 programmes ${withGuide} ms")
+        assertTrue("$bare / $withGuide ms", bare < 10_000 && withGuide < 10_000)
     }
 }

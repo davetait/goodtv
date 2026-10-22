@@ -6,17 +6,20 @@ import androidx.lifecycle.viewModelScope
 import com.keyspaceapps.goodtv.data.guide.GuideBoard
 import com.keyspaceapps.goodtv.data.guide.GuideFilter
 import com.keyspaceapps.goodtv.data.guide.GuideSource
+import com.keyspaceapps.goodtv.ui.browse.BrowseEmptyState
 import com.keyspaceapps.goodtv.ui.browse.FocusMemory
 import java.util.TimeZone
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -41,10 +44,16 @@ object GuideTime {
 
 /**
  * The guide's chip, time window and expanded "More NBC" rows, and the cell focused last (kept across
- * the player, like the window). The window starts at the current half-hour and moves half an hour at a time.
+ * the player, like the window). The window starts at the current half-hour, moves half an hour at a
+ * time and never starts before the current half-hour: it moves on with the clock. [emptyState] says
+ * why a lineup is empty (no sources, everything hidden, nothing yet).
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-class GuideViewModel(private val source: GuideSource, private val clock: () -> Long) : ViewModel() {
+class GuideViewModel(
+    private val source: GuideSource,
+    private val clock: () -> Long,
+    emptyState: Flow<BrowseEmptyState> = flowOf(BrowseEmptyState.NOTHING_YET),
+) : ViewModel() {
     private val sharing = SharingStarted.WhileSubscribed(5_000)
     private val _filter = MutableStateFlow(GuideFilter.ALL)
     val filter: StateFlow<GuideFilter> = _filter
@@ -57,21 +66,40 @@ class GuideViewModel(private val source: GuideSource, private val clock: () -> L
         .flatMapLatest { (f, start) -> source.board(f, start).map { GuideView(f, it) } }
         .stateIn(viewModelScope, sharing, null)
 
-    /** The clock, re-read every 30 s for the now line and "min left". */
-    val now: StateFlow<Long> = flow { while (true) { emit(clock()); delay(30_000) } }.stateIn(viewModelScope, sharing, clock())
+    /**
+     * The clock, re-read every 30 s (and whenever the screen comes back) for the now line and "min left";
+     * each reading also moves a window left behind by the clock up to the current half-hour.
+     */
+    val now: StateFlow<Long> = flow {
+        while (true) {
+            val t = clock()
+            followClock(t)
+            emit(t)
+            delay(30_000)
+        }
+    }.stateIn(viewModelScope, sharing, clock())
 
+    val emptyState: StateFlow<BrowseEmptyState> = emptyState.stateIn(viewModelScope, sharing, BrowseEmptyState.NOTHING_YET)
+
+    /** The focused cell's id and the time it starts on screen (null on a channel or a "More" row). */
     val focus = FocusMemory()
+    @Volatile var focusTimeMs: Long? = null
+
+    private fun followClock(t: Long) = windowStart.update { maxOf(it, GuideTime.slotOf(t)) }
 
     /** A new chip starts again at now, at the top. */
     fun select(f: GuideFilter) {
         focus.key = null
+        focusTimeMs = null
         windowStart.value = GuideTime.slotOf(clock())
         _filter.value = f
     }
 
     /** Moves the window half an hour; null at either end (never before the current half-hour, never past [GuideTime.MAX_AHEAD_MS]). */
     fun page(forward: Boolean): Long? {
-        val first = GuideTime.slotOf(clock())
+        val t = clock()
+        followClock(t)
+        val first = GuideTime.slotOf(t)
         val old = windowStart.value
         val next = (old + if (forward) GuideTime.SLOT_MS else -GuideTime.SLOT_MS).coerceIn(first, first + GuideTime.MAX_AHEAD_MS)
         if (next == old) return null
@@ -79,6 +107,7 @@ class GuideViewModel(private val source: GuideSource, private val clock: () -> L
         return next
     }
 
+    /** The window the screen asked for (the board on screen may still be the previous one). */
     val window: Long get() = windowStart.value
 
     fun toggleMore(section: String) = _expanded.update { if (section in it) it - section else it + section }

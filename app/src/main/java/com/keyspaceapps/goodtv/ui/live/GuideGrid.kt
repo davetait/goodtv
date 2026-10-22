@@ -121,16 +121,62 @@ internal fun defaultTarget(lines: List<GuideLine>, windowStart: Long, now: Long)
     return cellAt(cells, if (now >= windowStart && now < windowStart + GuideTime.WINDOW_MS) now else windowStart).id
 }
 
-/** [id] if it is still on the grid (a channel, a cell or a toggle), else null. */
-internal fun presentTarget(lines: List<GuideLine>, windowStart: Long, id: String?): String? {
-    if (id == null) return null
-    val line = lines.firstOrNull { it.key == id.substringBeforeLast('|') } ?: return null
+/**
+ * Where focus belongs on [lines] after the board changed under it (a new window, the guide arriving, a row
+ * leaving). [id] when it is still there, unless it's a programme that has ended. Otherwise the same row
+ * ([lineKey]) at [timeMs], never before now: the cell showing that time (or the channel cell, when that
+ * was focused). A row that's gone gives way to the nearest row of its section in [before]; failing all
+ * that, [defaultTarget].
+ */
+internal fun refocusTarget(
+    lines: List<GuideLine>,
+    windowStart: Long,
+    now: Long,
+    lineKey: String?,
+    id: String?,
+    timeMs: Long?,
+    before: List<GuideLine> = emptyList(),
+): String? {
+    if (lineKey == null) return defaultTarget(lines, windowStart, now)
+    val byKey = lines.associateBy { it.key }
+    val line = byKey[lineKey] ?: nearestInSection(before, lineKey, byKey)
     return when (line) {
-        is ChannelLine -> id.takeIf { it == line.channelId || cellsOf(line, windowStart).any { c -> c.id == id } }
-        is MoreLine -> id.takeIf { it == line.id }
-        is SectionLine -> null
+        is ChannelLine -> {
+            if (id?.endsWith("|ch") == true) return line.channelId
+            val cells = cellsOf(line, windowStart)
+            val nowShown = now >= windowStart && now < windowStart + GuideTime.WINDOW_MS
+            cells.firstOrNull { it.id == id && (it.programme == null || it.programme.endMs > now) }?.id
+                ?: cellAt(cells, maxOf(timeMs ?: windowStart, if (nowShown) now else windowStart)).id
+        }
+        is MoreLine -> line.id
+        else -> defaultTarget(lines, windowStart, now)
     }
 }
+
+/** The row of [lineKey]'s section nearest to where it was in [before] that is still in [present]. */
+private fun nearestInSection(before: List<GuideLine>, lineKey: String, present: Map<String, GuideLine>): GuideLine? {
+    val at = before.indexOfFirst { it.key == lineKey }
+    if (at < 0) return null
+    val section = lineKey.substringBefore('/') + "/"
+    for (d in 1 until before.size) {
+        for (i in intArrayOf(at + d, at - d)) {
+            val candidate = before.getOrNull(i) ?: continue
+            if (candidate is ChannelLine && candidate.key.startsWith(section)) present[candidate.key]?.let { return it }
+        }
+    }
+    return null
+}
+
+/** Whether [id] (a channel, a cell or a toggle) is on the grid. */
+internal fun isOnGrid(lines: List<GuideLine>, windowStart: Long, id: String): Boolean =
+    when (val line = lines.firstOrNull { it.key == id.substringBeforeLast('|') }) {
+        is ChannelLine -> id == line.channelId || cellsOf(line, windowStart).any { it.id == id }
+        is MoreLine -> id == line.id
+        else -> false
+    }
+
+/** Paging asked for the cell of [lineKey] showing [timeMs] once the board for [windowStart] is on screen. */
+internal data class PendingFocus(val lineKey: String, val timeMs: Long, val windowStart: Long)
 
 /**
  * Every focusable in the grid registers here so the screen can move focus after paging or closing the
@@ -140,6 +186,14 @@ internal class GuideFocus {
     val requesters = HashMap<String, FocusRequester>()
     var initial: String? = null
     var initialDone = false
+    var pending: PendingFocus? = null
+    /** Focus left the grid for the chips: a board change then leaves it there. */
+    var outside = false
+    /** The lines before the latest board, to find a vanished row's neighbours. */
+    var before: List<GuideLine> = emptyList()
+    /** The lines and window being composed now. */
+    var lines: List<GuideLine> = emptyList()
+    var windowStart = 0L
 }
 
 @Composable

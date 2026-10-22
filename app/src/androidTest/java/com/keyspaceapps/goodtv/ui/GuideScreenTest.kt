@@ -10,6 +10,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -40,6 +41,7 @@ import kotlin.math.abs
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -101,14 +103,15 @@ class GuideScreenTest {
     private val nbc = GuideSection("NBC", Network.NBC, listOf(station("wnbc", "NBC 4 New York")), listOf(station("wral", "NBC 5 Raleigh"), station("wxia", "NBC 11 Atlanta")))
 
     /** Any filter gets [sections]; each window keeps only the programmes overlapping it. Favourite changes are recorded. */
-    private inner class FakeGuide(private val sections: List<GuideSection>) : GuideSource {
+    private inner class FakeGuide(initial: List<GuideSection>) : GuideSource {
+        val sections = MutableStateFlow(initial)
         val favourites = mutableListOf<Pair<String, Boolean>>()
         val windows = MutableStateFlow<List<Long>>(emptyList())
         override fun board(filter: GuideFilter, windowStartMs: Long): Flow<GuideBoard> {
             windows.value = windows.value + windowStartMs
             val end = windowStartMs + 3 * 3_600_000L
             fun clip(r: GuideRow) = r.copy(programmes = r.programmes.filter { it.endMs > windowStartMs && it.startMs < end })
-            return flowOf(GuideBoard(sections.map { s -> s.copy(rows = s.rows.map(::clip), more = s.more.map(::clip)) }, windowStartMs))
+            return sections.map { all -> GuideBoard(all.map { s -> s.copy(rows = s.rows.map(::clip), more = s.more.map(::clip)) }, windowStartMs) }
         }
         override fun search(query: String): Flow<List<GuideSearchHit>> = flowOf(emptyList())
         override suspend fun setFavourite(rowKey: String, favourite: Boolean) { favourites += rowKey to favourite }
@@ -295,5 +298,30 @@ class GuideScreenTest {
         assertTrue("left ${cell.positionInRoot.x} vs ${header.positionInRoot.x}", abs(cell.positionInRoot.x - header.positionInRoot.x) < 4f)
         assertTrue("width ${cell.size.width} vs column $column", abs(cell.size.width - 2 * column) < 0.1f * column)
         composeRule.onNodeWithTag("guide_now_line").assertExists()
+    }
+
+    /** The guide download lands while a "No guide info" cell has focus: focus moves to what's on now in that row. */
+    @Test fun focusSurvivesTheGuideArriving() {
+        val guide = show(FakeGuide(listOf(GuideSection("News", null, listOf(cnn.copy(programmes = emptyList()), msnbc), emptyList()))))
+        waitFocused("No guide info")
+        guide.sections.value = listOf(news)
+        waitFocused("The Situation Room")
+    }
+
+    @Test fun chipChangeResetsTheWindowAndDownGoesToNow() {
+        val guide = show()
+        waitFocused("Special Report")
+        keys("R", "R", "R")
+        firstHeader(time(18, 30))
+        waitFocused("Hannity")
+        keys("U")
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasText("Hannity") and isFocused()).fetchSemanticsNodes().isEmpty() }
+        keys("C")
+        // The chip keeps focus (flicking through chips), the window is back at now.
+        firstHeader(time(18, 0))
+        assertEquals(at(18, 0), guide.windows.value.last())
+        assertEquals(0, composeRule.onAllNodes(isFocused() and (hasText("Special Report") or hasText("Hannity"))).fetchSemanticsNodes().size)
+        keys("D")
+        waitFocused("Special Report")
     }
 }

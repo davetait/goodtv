@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -23,6 +24,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -35,12 +42,15 @@ import com.keyspaceapps.goodtv.data.guide.GuideFilter
 import com.keyspaceapps.goodtv.data.guide.GuideRow
 import com.keyspaceapps.goodtv.data.guide.GuideSource
 import com.keyspaceapps.goodtv.data.sports.ChannelCandidate
+import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.domain.label
+import com.keyspaceapps.goodtv.ui.browse.EmptyStates
+import com.keyspaceapps.goodtv.ui.browse.messageRes
 import com.keyspaceapps.goodtv.ui.goodTvViewModel
 import com.keyspaceapps.goodtv.ui.nav.PlayerKey
 import com.keyspaceapps.goodtv.ui.watchlist.WatchListDialog
 import java.util.Date
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -54,7 +64,11 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock: () -> Long = System::currentTimeMillis) {
-    val vm = goodTvViewModel { GuideViewModel(source ?: it.guide, clock) }
+    val vm = goodTvViewModel {
+        val empty = combine(it.repository.enabledSourceCount(), it.repository.hiddenCount(ContentKind.LIVE)) { n, hidden -> EmptyStates.forBrowse(n > 0, hidden) }
+        GuideViewModel(source ?: it.guide, clock, empty)
+    }
+    val emptyState by vm.emptyState.collectAsState()
     val view by vm.view.collectAsState()
     val filter by vm.filter.collectAsState()
     val expanded by vm.expanded.collectAsState()
@@ -71,15 +85,41 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
     val latestOnPlay by rememberUpdatedState(onPlay)
 
     val current = view
-    val lines = remember(current, expanded) { current?.let { linesOf(it.board, expanded) }.orEmpty() }
-    val windowStart = current?.board?.windowStartMs ?: vm.window
-    // Back from the player (or a first open): the remembered cell when it's still there, else the first row's now.
+    val board = current?.board
+    val lines = remember(board, expanded) { board?.let { linesOf(it, expanded) }.orEmpty() }
+    val windowStart = board?.windowStartMs ?: vm.window
+    focus.lines = lines
+    focus.windowStart = windowStart
+    // Back from the player (or a first open): the remembered cell, or its row at now once it has ended, else the first row's now.
     if (focus.initial == null && lines.isNotEmpty()) {
-        focus.initial = presentTarget(lines, windowStart, vm.focus.key) ?: defaultTarget(lines, windowStart, now)
+        val key = vm.focus.key
+        focus.initial = refocusTarget(lines, windowStart, now, key?.substringBeforeLast('|'), key, vm.focusTimeMs)
     }
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex = remember { (lines.indexOfFirst { it.key == focus.initial?.substringBeforeLast('|') } - 1).coerceAtLeast(0) },
     )
+
+    // A new board can drop the focused cell (a new window, the guide arriving, a favourite removed):
+    // focus moves to the cell paging asked for, else the same row at the same time (see refocusTarget).
+    LaunchedEffect(lines) {
+        val before = focus.before
+        focus.before = lines
+        if (!focus.initialDone || lines.isEmpty() || picking != null || menuFor != null) return@LaunchedEffect
+        val paged = focus.pending
+        val id = if (paged != null) {
+            if (paged.windowStart != windowStart) return@LaunchedEffect
+            focus.pending = null
+            refocusTarget(lines, windowStart, now, paged.lineKey, null, paged.timeMs, before)
+        } else {
+            val key = vm.focus.key
+            if (key == null || focus.outside || isOnGrid(lines, windowStart, key)) return@LaunchedEffect
+            refocusTarget(lines, windowStart, now, key.substringBeforeLast('|'), key, vm.focusTimeMs, before)
+        } ?: return@LaunchedEffect
+        repeat(FOCUS_FRAMES) {
+            withFrameNanos { }
+            focus.requesters[id]?.let { it.requestFocus(); return@LaunchedEffect }
+        }
+    }
 
     fun play(c: ChannelCandidate) = latestOnPlay(PlayerKey(c.channel.sourceId, PlayerKey.KIND_LIVE, c.channel.id, null, c.channel.label))
 
@@ -96,24 +136,12 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
             1 -> play(row.feeds.single())
             else -> picking = fromId to row
         }
-        var move: Job? = null
-
-        /** Once the board for [windowStart] is on screen (a frame or two after it arrives), focuses the cell [target] picks. */
-        fun focusWhenReady(windowStart: Long, target: (List<GuideLine>) -> String?) {
-            move?.cancel()
-            move = scope.launch {
-                val v = vm.view.first { it?.board?.windowStartMs == windowStart } ?: return@launch
-                val id = target(linesOf(v.board, vm.expanded.value)) ?: return@launch
-                repeat(FOCUS_FRAMES) {
-                    withFrameNanos { }
-                    focus.requesters[id]?.let { it.requestFocus(); return@launch }
-                }
-            }
-        }
 
         GuideActions(
             onFocused = { id, row, cell ->
                 vm.focus.key = id
+                vm.focusTimeMs = cell?.fromMs
+                focus.outside = false
                 if (row != null) focused.value = GuideFocused(row, cell)
             },
             onChannel = { line -> playRow(line.channelId, line.row) },
@@ -133,8 +161,7 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
                     forward
                 } else {
                     // Forward lands on what follows the old window; back on what precedes it.
-                    val t = if (forward) old + GuideTime.WINDOW_MS else old - 1
-                    focusWhenReady(next) { ls -> (ls.firstOrNull { it.key == line.key } as? ChannelLine)?.let { cellAt(cellsOf(it, next), t).id } }
+                    focus.pending = PendingFocus(line.key, if (forward) old + GuideTime.WINDOW_MS else old - 1, next)
                     true
                 }
             },
@@ -145,6 +172,10 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
         Column(Modifier.fillMaxSize().padding(horizontal = 48.dp)) {
             GuideChips(
                 selected = filter,
+                // Up from the grid, not Compose rehoming focus after the focused cell left the board.
+                onFocus = { focus.outside = vm.focus.key?.let { isOnGrid(focus.lines, focus.windowStart, it) } ?: true },
+                // Down from the chips goes to what's on now in the first row.
+                onDown = { defaultTarget(lines, windowStart, now)?.let { focus.requesters[it] }?.let { it.requestFocus(); true } ?: false },
                 onSelect = { f ->
                     vm.select(f)
                     scope.launch {
@@ -156,7 +187,13 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
             when {
                 current == null -> Message(stringResource(R.string.guide_loading), Modifier.weight(1f))
                 lines.none { it is ChannelLine || it is MoreLine } -> Message(
-                    stringResource(if (current.filter == GuideFilter.FAVOURITES) R.string.guide_no_favourites else R.string.guide_empty),
+                    stringResource(
+                        when (current.filter) {
+                            GuideFilter.FAVOURITES -> R.string.guide_no_favourites
+                            GuideFilter.ALL -> emptyState.messageRes
+                            else -> R.string.guide_empty
+                        },
+                    ),
                     Modifier.weight(1f),
                 )
                 else -> GuideGrid(lines, windowStart, now, listState, focus, actions, timeLabel, Modifier.weight(1f).fillMaxWidth())
@@ -200,8 +237,13 @@ private val Chips = listOf(
 /** The genre chips; selecting one (Select, not focus) narrows the grid. */
 @OptIn(ExperimentalTvMaterial3Api::class) // FilterChip
 @Composable
-private fun GuideChips(selected: GuideFilter, onSelect: (GuideFilter) -> Unit) {
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+private fun GuideChips(selected: GuideFilter, onFocus: () -> Unit, onDown: () -> Boolean, onSelect: (GuideFilter) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 10.dp)
+            .onFocusChanged { if (it.hasFocus) onFocus() }
+            .onPreviewKeyEvent { e -> e.key == Key.DirectionDown && e.type == KeyEventType.KeyDown && onDown() },
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         Chips.forEach { (f, label) ->
             FilterChip(
                 selected = f == selected,
