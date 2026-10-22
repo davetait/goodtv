@@ -15,6 +15,7 @@ import com.keyspaceapps.goodtv.data.db.RoomWatchListStore
 import com.keyspaceapps.goodtv.data.db.RoomWatchProgressStore
 import com.keyspaceapps.goodtv.data.guide.EpgShareSource
 import com.keyspaceapps.goodtv.data.guide.GuideRefresher
+import com.keyspaceapps.goodtv.data.guide.GuideRepository
 import com.keyspaceapps.goodtv.data.guide.GuideStore
 import com.keyspaceapps.goodtv.data.guide.PlaybackState
 import com.keyspaceapps.goodtv.data.progress.WatchProgressRepository
@@ -156,8 +157,14 @@ class AppGraph(val context: Context) {
     val sports: SportsRepository by lazy {
         val espn = EspnScoreboard(okHttp)
         val sources: Map<League, ScheduleSource> = League.entries.associateWith { if (it == League.PWHL) PwhlScorebar(okHttp) else espn }
-        SportsRepository(sources, store, LiveRefresher(store, sourceRegistry, { syncManager.state.value is SyncState.Syncing }))
+        SportsRepository(sources, store, liveRefresher)
     }
+
+    /** Re-downloads the live lists of stale sources; shared by Sports and the guide's event slots. */
+    private val liveRefresher: LiveRefresher by lazy { LiveRefresher(store, sourceRegistry, { syncManager.state.value is SyncState.Syncing }) }
+
+    /** The Live TV guide: the lineup with its programmes, favourites and search. */
+    val guide: GuideRepository by lazy { GuideRepository(store, guideStore, guideRefresher, liveRefresher, System::currentTimeMillis, Dispatchers.Default) }
 
     /** Background TMDB genre fill for movies; started on launch after stale sources refresh. */
     val genreFetcher: TmdbGenreFetcher by lazy {
