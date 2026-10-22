@@ -122,4 +122,93 @@ class XmltvReaderTest {
         assertEquals(whole.channels, r.channels)
         assertEquals(16, r.count)
     }
+
+    private val goodProgramme = """<programme channel="x" start="20261020180000 +0000" stop="20261020190000 +0000"><title>Good</title></programme>"""
+
+    @Test(timeout = 20_000)
+    fun manyUnclosedStartsFinishQuickly() {
+        val unclosed = """<programme channel="x" start="20261020180000 +0000" stop="20261020190000 +0000">"""
+        val xml = StringBuilder("<tv>")
+        while (xml.length < 5_000_000) xml.append(unclosed).append('\n')
+        xml.append(goodProgramme).append(goodProgramme).append(goodProgramme).append("</tv>")
+        val t0 = System.nanoTime()
+        val r = read(xml.toString())
+        val ms = (System.nanoTime() - t0) / 1_000_000
+        assertEquals(3, r.count)
+        assertTrue("took ${ms}ms", ms < 2_000)
+    }
+
+    @Test(timeout = 20_000)
+    fun unclosedCategoryInsideABlockDoesNotStall() {
+        val xml = StringBuilder("""<tv><programme channel="x" start="20261020180000 +0000" stop="20261020190000 +0000"><title>T</title>""")
+        while (xml.length < 1_000_000) xml.append("<category>")
+        xml.append("</programme></tv>")
+        val t0 = System.nanoTime()
+        val r = read(xml.toString())
+        val ms = (System.nanoTime() - t0) / 1_000_000
+        // The programme is kept; the unclosed category yields no genres.
+        assertEquals("T", r.programmes.single().title)
+        assertTrue(r.programmes.single().genres.size <= 32)
+        assertTrue("took ${ms}ms", ms < 1_000)
+    }
+
+    @Test
+    fun genresAndDisplayNamesAreCappedAt32() {
+        val cats = (1..40).joinToString("") { "<category>G$it</category>" }
+        val names = (1..40).joinToString("") { "<display-name>N$it</display-name>" }
+        val r = read(
+            """<tv><channel id="c">$names</channel>
+            <programme channel="x" start="20261020180000 +0000" stop="20261020190000 +0000"><title>T</title>$cats</programme></tv>""",
+        )
+        assertEquals(32, r.channels.single().names.size)
+        assertEquals(32, r.programmes.single().genres.size)
+        assertEquals("G1", r.programmes.single().genres.first())
+    }
+
+    /** One-off load check (run by removing @Ignore): ~200 MB, 200k programmes, 5% wanted. */
+    @org.junit.Ignore("manual load check")
+    @Test
+    fun largeGeneratedFileStaysFastAndSmall() {
+        val total = 200_000
+        val desc = "d".repeat(700)
+        val gen = object : InputStream() {
+            private var i = -1
+            private var cur = ByteArray(0)
+            private var at = 0
+            var bytes = 0L
+            var peak = 0L
+            private fun nextBlock(): ByteArray? {
+                i++
+                return when {
+                    i == 0 -> "<tv>".toByteArray()
+                    i <= 20 -> """<channel id="c${i - 1}"><display-name>C${i - 1}</display-name></channel>""".toByteArray()
+                    i <= 20 + total -> {
+                        val n = i - 21
+                        """<programme channel="c${n % 20}" start="20261020180000 +0000" stop="20261020190000 +0000"><title>P$n</title><desc>$desc</desc><category>A</category></programme>
+""".toByteArray()
+                    }
+                    i == 21 + total -> "</tv>".toByteArray()
+                    else -> null
+                }
+            }
+            override fun read(): Int = throw UnsupportedOperationException()
+            override fun read(b: ByteArray, off: Int, len: Int): Int {
+                if (at >= cur.size) { cur = nextBlock() ?: return -1; at = 0 }
+                val n = minOf(len, cur.size - at)
+                System.arraycopy(cur, at, b, off, n)
+                at += n; bytes += n
+                if ((bytes and 0xFFFFFF) < n) {
+                    System.gc() // live heap, not garbage
+                    val rt = Runtime.getRuntime()
+                    peak = maxOf(peak, rt.totalMemory() - rt.freeMemory())
+                }
+                return n
+            }
+        }
+        val t0 = System.nanoTime()
+        val r = read(gen, keep = { it == "c0" })
+        val ms = (System.nanoTime() - t0) / 1_000_000
+        println("XMLTV load: ${gen.bytes / 1_000_000} MB, ${r.count} programmes, ${ms} ms, peak used heap ${gen.peak / 1_000_000} MB")
+        assertEquals(total / 20, r.count)
+    }
 }

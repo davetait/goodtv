@@ -15,22 +15,36 @@ data class XmltvChannel(val id: String, val names: List<String>, val iconUrl: St
  * Not a real XML parser: it scans for `<channel>` and `<programme>` blocks and picks out the few
  * fields the guide needs, so a file that goes bad partway through still yields everything before the
  * break. A block that doesn't parse (cut off, bad time, no title) is skipped and reading carries on.
+ *
+ * Work is bounded on hostile input: every scan moves forward only, a start tag is looked at for at
+ * most [MAX_TAG_CHARS], a block for at most [MAX_BLOCK_CHARS], and a start with no end before the
+ * next start is dropped, so unclosed tags cost linear time, not quadratic.
  */
 object XmltvReader {
     private const val CHUNK_CHARS = 1 shl 20
     /** A block longer than this is garbage (real ones are a few KB); its start tag is skipped. */
     private const val MAX_BLOCK_CHARS = 4 shl 20
-    private const val CHANNEL = "channel"
-    private const val PROGRAMME = "programme"
+    /** Start tags are short (an id or two times); a '>' further away than this means it is not one. */
+    private const val MAX_TAG_CHARS = 4096
+    /** Most genres and display names kept per block. */
+    private const val MAX_LISTED = 32
+
+    private const val OPEN_CHANNEL = "<channel"
+    private const val OPEN_PROGRAMME = "<programme"
+    private const val CLOSE_CHANNEL = "</channel>"
+    private const val CLOSE_PROGRAMME = "</programme>"
+    private const val IS_CHANNEL = 1
+    private const val IS_PROGRAMME = 2
 
     private val TIME = Regex("""^\s*(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\s*(?:([+-])(\d{2}):?(\d{2}))?\s*$""")
     private val ENTITY = Regex("""&(#x[0-9a-fA-F]+|#[0-9]+|amp|lt|gt|quot|apos);""")
-    private val TITLE = Regex("""<title\b[^>]*>(.*?)</title>""", RegexOption.DOT_MATCHES_ALL)
-    private val DESC = Regex("""<desc\b[^>]*>(.*?)</desc>""", RegexOption.DOT_MATCHES_ALL)
-    private val CATEGORY = Regex("""<category\b[^>]*>(.*?)</category>""", RegexOption.DOT_MATCHES_ALL)
-    private val DISPLAY_NAME = Regex("""<display-name\b[^>]*>(.*?)</display-name>""", RegexOption.DOT_MATCHES_ALL)
-    private val ICON = Regex("""<icon\b[^>]*>""")
-    private val attributeRegexes = HashMap<String, Regex>()
+    private val ID = attributeRegex("id")
+    private val CHANNEL_ATTR = attributeRegex("channel")
+    private val START = attributeRegex("start")
+    private val STOP = attributeRegex("stop")
+    private val SRC = attributeRegex("src")
+
+    private fun attributeRegex(name: String) = Regex("""\s$name\s*=\s*(?:"([^"]*)"|'([^']*)')""")
 
     /**
      * Streams [input] (UTF-8) and returns how many programmes were passed to [onProgramme]. Never
@@ -38,7 +52,8 @@ object XmltvReader {
      *
      * [onChannel] gets every `<channel>`, wanted or not, because the channel matcher needs the whole
      * list. [keepChannel] only filters programmes, and so does the window: a programme is passed on
-     * only when it overlaps [fromMs, untilMs), and the text of one that isn't is never read.
+     * only when it overlaps [fromMs, untilMs), and its text is only taken from the buffer when it is.
+     * [keepChannel] runs inside the same guard as parsing, so one that throws skips that programme.
      */
     fun read(
         input: InputStream,
@@ -52,96 +67,169 @@ object XmltvReader {
         val chunk = CharArray(CHUNK_CHARS)
         var buf = ""
         var count = 0
-        var eof = false
 
         /** Appends the next chunk to [buf] (from [keepFrom] on); false at the end of the input. */
         fun more(keepFrom: Int): Boolean {
             val n = reader.read(chunk)
-            if (n < 0) { eof = true; return false }
+            if (n < 0) return false
             buf = buf.substring(keepFrom) + String(chunk, 0, n)
             return true
         }
 
         var pos = 0
+        // Where the end-tag search for the open start (at index 0 after a refill) may continue, so a
+        // block that arrives in many small reads is scanned once, not once per read.
+        var resume = -1
         while (true) {
             val s = nextStart(buf, pos)
             if (s < 0) {
                 // Keep a tail long enough to hold a split "<programme" so the next chunk can complete it.
-                if (!more(maxOf(pos, buf.length - PROGRAMME.length - 2))) break
+                if (!more(maxOf(pos, buf.length - OPEN_PROGRAMME.length - 2))) break
                 pos = 0
+                resume = -1
                 continue
             }
-            val kind = if (buf.startsWith("<$CHANNEL", s)) CHANNEL else PROGRAMME
-            val end = blockEnd(buf, s, kind)
-            if (end == NEED_MORE) {
-                if (buf.length - s > MAX_BLOCK_CHARS) { pos = s + 1; continue }
-                if (!more(s)) break
-                pos = 0
+            val kind = startAt(buf, s)
+
+            // The start tag: find its '>' within a short bound; a '<' first means it was cut off.
+            val tagLimit = minOf(buf.length, s + MAX_TAG_CHARS)
+            var gt = -1
+            var cutOffAt = -1
+            var i = s + 1
+            while (i < tagLimit) {
+                val c = buf[i]
+                if (c == '>') { gt = i; break }
+                if (c == '<') { cutOffAt = i; break }
+                i++
+            }
+            if (cutOffAt >= 0) { pos = cutOffAt; resume = -1; continue }
+            if (gt < 0) {
+                if (tagLimit == buf.length && buf.length - s < MAX_TAG_CHARS) {
+                    if (!more(s)) break
+                    pos = 0
+                } else pos = s + 1
+                resume = -1
                 continue
             }
-            // A start tag with another block start inside it was cut off; drop it and read from the next one.
-            val nested = nextStart(buf, s + 1)
-            if (nested in 0 until end) { pos = nested; continue }
-            val block = buf.substring(s, end)
+
+            // The end of the block: the close tag, or none if another start or the cap comes first.
+            var bodyEnd = gt + 1
+            var end = gt + 1
+            if (buf[gt - 1] != '/') {
+                val close = if (kind == IS_CHANNEL) CLOSE_CHANNEL else CLOSE_PROGRAMME
+                val scanLimit = minOf(buf.length, s + MAX_BLOCK_CHARS)
+                var j = maxOf(resume, gt + 1)
+                var closeAt = -1
+                var nextStartAt = -1
+                while (true) {
+                    j = buf.indexOf('<', j)
+                    if (j < 0 || j >= scanLimit) break
+                    if (buf.startsWith(close, j)) { closeAt = j; break }
+                    if (startAt(buf, j) != 0) { nextStartAt = j; break }
+                    j++
+                }
+                if (closeAt < 0) {
+                    resume = -1
+                    if (nextStartAt >= 0) { pos = nextStartAt; continue }
+                    if (buf.length - s >= MAX_BLOCK_CHARS) { pos = s + 1; continue }
+                    val resumeAt = maxOf(gt + 1, buf.length - CLOSE_PROGRAMME.length) - s
+                    if (!more(s)) break
+                    pos = 0
+                    resume = resumeAt
+                    continue
+                }
+                bodyEnd = closeAt
+                end = closeAt + close.length
+            }
+            resume = -1
             pos = end
-            if (kind == CHANNEL) {
-                val channel = try { parseChannel(block) } catch (_: Exception) { null }
+            val tag = buf.substring(s, gt)
+            if (kind == IS_CHANNEL) {
+                val channel = try { parseChannel(tag, buf, gt + 1, bodyEnd) } catch (_: Exception) { null }
                 if (channel != null) onChannel(channel)
             } else {
-                val programme = try { parseProgramme(block, keepChannel, fromMs, untilMs) } catch (_: Exception) { null }
+                val programme = try {
+                    parseProgramme(tag, buf, gt + 1, bodyEnd, keepChannel, fromMs, untilMs)
+                } catch (_: Exception) { null }
                 if (programme != null) { onProgramme(programme); count++ }
             }
         }
         return count
     }
 
-    private const val NEED_MORE = -1
-
-    /** Index of the next `<channel` or `<programme` tag start at or after [from], or -1 (also when it may be cut off at the end of [s]). */
+    /** Index of the next `<channel` or `<programme` tag start at or after [from], or -1. */
     private fun nextStart(s: String, from: Int): Int {
         var i = from
         while (true) {
             i = s.indexOf('<', i)
             if (i < 0) return -1
-            for (name in listOf(CHANNEL, PROGRAMME)) {
-                if (!s.startsWith("<$name", i)) continue
-                val after = i + 1 + name.length
-                if (after >= s.length) return i
-                val c = s[after]
-                if (c == '>' || c == '/' || c.isWhitespace()) return i
-            }
+            if (startAt(s, i) != 0) return i
             i++
         }
     }
 
-    /** Index just past the block starting at [s], or [NEED_MORE] if its end isn't in [buf] yet. */
-    private fun blockEnd(buf: String, s: Int, kind: String): Int {
-        val gt = buf.indexOf('>', s)
-        if (gt < 0) return NEED_MORE
-        if (buf[gt - 1] == '/') return gt + 1
-        val close = "</$kind>"
-        val at = buf.indexOf(close, gt)
-        return if (at < 0) NEED_MORE else at + close.length
+    /** [IS_CHANNEL] or [IS_PROGRAMME] if a start tag begins at [i] (or may, cut off by the end of [s]), else 0. */
+    private fun startAt(s: String, i: Int): Int {
+        val kind: Int
+        val after: Int
+        when {
+            s.startsWith(OPEN_CHANNEL, i) -> { kind = IS_CHANNEL; after = i + OPEN_CHANNEL.length }
+            s.startsWith(OPEN_PROGRAMME, i) -> { kind = IS_PROGRAMME; after = i + OPEN_PROGRAMME.length }
+            else -> return 0
+        }
+        if (after >= s.length) return kind
+        val c = s[after]
+        return if (c == '>' || c == '/' || c.isWhitespace()) kind else 0
     }
 
-    private fun parseChannel(block: String): XmltvChannel? {
-        val tag = block.substring(0, block.indexOf('>'))
-        val id = attribute(tag, "id")?.takeIf { it.isNotBlank() } ?: return null
-        val names = DISPLAY_NAME.findAll(block).map { text(it.groupValues[1]) }.filter { it.isNotEmpty() }.toList()
-        return XmltvChannel(id, names, icon(block))
+    private fun parseChannel(tag: String, buf: String, bodyStart: Int, bodyEnd: Int): XmltvChannel? {
+        val id = attribute(tag, ID)?.takeIf { it.isNotBlank() } ?: return null
+        val body = buf.substring(bodyStart, bodyEnd)
+        val names = elements(body, "display-name", MAX_LISTED)
+        return XmltvChannel(id, names, icon(body))
     }
 
-    private fun parseProgramme(block: String, keepChannel: (String) -> Boolean, fromMs: Long, untilMs: Long): GuideProgramme? {
-        val tag = block.substring(0, block.indexOf('>'))
-        val guideId = attribute(tag, "channel") ?: return null
+    private fun parseProgramme(
+        tag: String, buf: String, bodyStart: Int, bodyEnd: Int,
+        keepChannel: (String) -> Boolean, fromMs: Long, untilMs: Long,
+    ): GuideProgramme? {
+        val guideId = attribute(tag, CHANNEL_ATTR) ?: return null
         if (!keepChannel(guideId)) return null
-        val startMs = parseTime(attribute(tag, "start")) ?: return null
-        val endMs = parseTime(attribute(tag, "stop")) ?: return null
+        val startMs = parseTime(attribute(tag, START)) ?: return null
+        val endMs = parseTime(attribute(tag, STOP)) ?: return null
         if (endMs <= startMs || endMs <= fromMs || startMs >= untilMs) return null
-        val title = TITLE.find(block)?.let { text(it.groupValues[1]) }?.takeIf { it.isNotEmpty() } ?: return null
-        val description = DESC.find(block)?.let { text(it.groupValues[1]) }?.takeIf { it.isNotEmpty() }
-        val genres = CATEGORY.findAll(block).map { text(it.groupValues[1]) }.filter { it.isNotEmpty() }.toList()
-        return GuideProgramme(guideId, startMs, endMs, title, description, genres, icon(block))
+        val body = buf.substring(bodyStart, bodyEnd)
+        val title = elements(body, "title", 1).firstOrNull() ?: return null
+        val description = elements(body, "desc", 1).firstOrNull()
+        return GuideProgramme(guideId, startMs, endMs, title, description, elements(body, "category", MAX_LISTED), icon(body))
+    }
+
+    /**
+     * The non-blank, unescaped text of up to [max] `<name>…</name>` elements of [body]. An opening
+     * with no close ends the search (the rest is cut off), instead of retrying at the next opening.
+     */
+    private fun elements(body: String, name: String, max: Int): List<String> {
+        val open = "<$name"
+        val close = "</$name>"
+        val out = ArrayList<String>(1)
+        var from = 0
+        while (out.size < max) {
+            val i = body.indexOf(open, from)
+            if (i < 0) break
+            val after = i + open.length
+            if (after >= body.length) break
+            val c = body[after]
+            if (c != '>' && c != '/' && !c.isWhitespace()) { from = after; continue }
+            val gt = body.indexOf('>', after)
+            if (gt < 0) break
+            if (body[gt - 1] == '/') { from = gt + 1; continue }
+            val e = body.indexOf(close, gt + 1)
+            if (e < 0) break
+            val t = text(body.substring(gt + 1, e))
+            if (t.isNotEmpty()) out += t
+            from = e + close.length
+        }
+        return out
     }
 
     /** `yyyyMMddHHmmss ±hhmm` as epoch millis; a missing offset means UTC. Null if it isn't a time. */
@@ -157,16 +245,26 @@ object XmltvReader {
         return local.toEpochSecond(ZoneOffset.ofTotalSeconds(offsetSeconds)) * 1000
     }
 
-    private fun attribute(tag: String, name: String): String? {
-        val regex = synchronized(attributeRegexes) {
-            attributeRegexes.getOrPut(name) { Regex("""\s$name\s*=\s*(?:"([^"]*)"|'([^']*)')""") }
-        }
+    private fun attribute(tag: String, regex: Regex): String? {
         val m = regex.find(tag) ?: return null
         return unescape(m.groupValues[1].ifEmpty { m.groupValues[2] })
     }
 
-    private fun icon(block: String): String? =
-        ICON.find(block)?.let { attribute(it.value, "src") }?.takeIf { it.isNotBlank() }
+    /** The `src` of the first `<icon>` of [body]. */
+    private fun icon(body: String): String? {
+        var from = 0
+        while (true) {
+            val i = body.indexOf("<icon", from)
+            if (i < 0) return null
+            val after = i + "<icon".length
+            if (after >= body.length) return null
+            val c = body[after]
+            if (c != '>' && c != '/' && !c.isWhitespace()) { from = after; continue }
+            val gt = body.indexOf('>', after)
+            if (gt < 0) return null
+            return attribute(body.substring(i, gt), SRC)?.takeIf { it.isNotBlank() }
+        }
+    }
 
     /** Element text with CDATA unwrapped, entities unescaped and the ends trimmed. */
     private fun text(raw: String): String {
