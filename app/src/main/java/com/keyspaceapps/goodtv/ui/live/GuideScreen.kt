@@ -104,14 +104,14 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
 
     val current = view
     val board = current?.board
-    val lines = remember(board, expanded) { board?.let { linesOf(it, expanded) }.orEmpty() }
+    val awaiting = remember(board) { board != null && awaitingProgrammes(board) }
+    val lines = remember(board, expanded) { board?.let { linesOf(it, expanded, awaiting) }.orEmpty() }
     val windowStart = board?.windowStartMs ?: vm.window
-    // Downloading outlasts loading: a first download fills the board row by row.
+    // Only while the window has no programmes: a download that's filling other windows says nothing here.
     val status = when {
-        board == null -> null
+        board == null || !awaiting -> null
         board.downloading -> stringResource(R.string.guide_downloading)
-        !board.programmesLoaded -> stringResource(R.string.guide_loading)
-        else -> null
+        else -> stringResource(R.string.guide_loading)
     }
     focus.lines = lines
     focus.windowStart = windowStart

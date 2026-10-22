@@ -611,7 +611,7 @@ class GuideScreenTest {
         composeRule.waitUntil(5_000) { count("Loading guide…") == 0 }
     }
 
-    /** While the refresher downloads the guide the indicator says so, programmes or not. */
+    /** While the refresher downloads the guide and the window has no programmes yet, the indicator says so; programmes end it. */
     @Test fun downloadingSaysSo() {
         val guide = FakeGuide(listOf(news))
         guide.pending.value = setOf(at(18))
@@ -619,10 +619,30 @@ class GuideScreenTest {
         show(guide)
         waitFor("Downloading guide…")
         assertEquals(0, count("Loading guide…"))
+        // The download carries on, but this window has its programmes.
         guide.pending.value = emptySet()
         waitFor("Special Report")
-        composeRule.onNodeWithText("Downloading guide…").assertIsDisplayed()
+        composeRule.waitUntil(5_000) { count("Downloading guide…") == 0 }
+        assertEquals(0, count("Loading guide…"))
+    }
+
+    /**
+     * A first download: the window is loaded but nothing in it has programmes yet. Rows wait (no "No guide info")
+     * under "Downloading guide…"; once the download ends with still nothing, they say "No guide info".
+     */
+    @Test fun firstDownloadShowsLoadingNotNoGuide() {
+        val guide = FakeGuide(listOf(GuideSection("News", null, listOf(cnn.copy(programmes = emptyList()), silent, rock), emptyList())))
+        guide.downloading.value = true
+        show(guide)
+        waitFor("Downloading guide…")
+        waitFor("CNN")
+        waitFor("30 Rock · all day")
+        assertEquals(0, count("No guide info"))
+        loadingFocused()
         guide.downloading.value = false
+        waitFor("No guide info")
+        // Two rows say it; the first one has focus.
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasText("No guide info") and isFocused()).fetchSemanticsNodes().size == 1 }
         composeRule.waitUntil(5_000) { count("Downloading guide…") == 0 }
         assertEquals(0, count("Loading guide…"))
     }

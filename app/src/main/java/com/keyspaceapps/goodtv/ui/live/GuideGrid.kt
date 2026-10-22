@@ -74,7 +74,7 @@ private val Star = Color(0xFFF5C518)
 /** One line of the grid: a section title, a channel, or a network's "More NBC" toggle. */
 internal sealed interface GuideLine { val key: String }
 internal data class SectionLine(override val key: String, val title: String, val network: Network?) : GuideLine
-/** [loading]: the board's programmes haven't arrived yet, so an empty row is waiting, not without a guide. */
+/** [loading]: the window's programmes are still to come ([awaitingProgrammes]), so an empty row is waiting, not without a guide. */
 internal data class ChannelLine(override val key: String, val row: GuideRow, val loading: Boolean = false) : GuideLine {
     val channelId: String get() = "$key|ch"
 }
@@ -82,9 +82,18 @@ internal data class MoreLine(override val key: String, val section: String, val 
     val id: String get() = "$key|more"
 }
 
-/** A row may sit in two sections (Favourites and its own), so a line's key carries its section. An open "More" row's stations follow it. */
-internal fun linesOf(board: GuideBoard, expanded: Set<String>): List<GuideLine> = buildList {
-    val loading = !board.programmesLoaded
+/**
+ * Whether the window's programmes are still to come: not read yet, or a guide download under way while nothing in
+ * the window has any (a first download). Either way an empty row is waiting, never "No guide info".
+ */
+internal fun awaitingProgrammes(board: GuideBoard): Boolean =
+    !board.programmesLoaded || (board.downloading && board.sections.all { s -> s.rows.all { it.programmes.isEmpty() } && s.more.all { it.programmes.isEmpty() } })
+
+/**
+ * A row may sit in two sections (Favourites and its own), so a line's key carries its section. An open "More" row's
+ * stations follow it. [loading] marks every channel line as waiting for programmes ([awaitingProgrammes]).
+ */
+internal fun linesOf(board: GuideBoard, expanded: Set<String>, loading: Boolean = awaitingProgrammes(board)): List<GuideLine> = buildList {
     for (s in board.sections) {
         add(SectionLine("head|${s.title}", s.title, s.network))
         s.rows.forEach { add(ChannelLine("${s.title}/${it.key}", it, loading)) }
@@ -269,8 +278,8 @@ internal class GuideActions(
 )
 
 /**
- * Time across, channels down: a header of six half-hour columns (with [status], "Loading guide…", over the
- * channels), the rows (lazily, each composing only the window's few cells) and the red now line when now is in the window.
+ * Time across, channels down: a header of six half-hour columns (with [status], "Loading guide…" or
+ * "Downloading guide…", over the channels), the rows (lazily, each composing only the window's few cells) and the red now line when now is in the window.
  */
 @Composable
 internal fun GuideGrid(
