@@ -35,6 +35,7 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -333,6 +334,30 @@ class GuideRefresherTest {
         refresher.refreshIfStale()
         assertTrue(hits.isNotEmpty())
         assertTrue(leftovers().isEmpty())
+    }
+
+    @Test fun producerNeverThrowsWhenConsumerLeavesDuringAFailure() {
+        val uncaught = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { _, e -> uncaught += e }
+        try {
+            val programme = GuideProgramme("g", 0, 1, "t", null, emptyList(), null)
+            // Capacity 1: the first programme fills the queue, so reporting the failure blocks.
+            val stream = GuideRefresher.ProgrammeStream(null, capacity = 1) { emit, _ -> emit(programme); throw IOException("bad file") }
+            stream.sequence.iterator()
+            Thread.sleep(300)
+            stream.close()
+            assertTrue(uncaught.toString(), uncaught.isEmpty())
+        } finally {
+            Thread.setDefaultUncaughtExceptionHandler(previous)
+        }
+    }
+
+    @Test fun singleByteReadsAreCheckedToo() {
+        var checks = 0
+        val input = GuideRefresher.CappedInputStream(ByteArrayInputStream(byteArrayOf(1, 2)), 10) { checks++ }
+        input.read(); input.read()
+        assertEquals(2, checks)
     }
 
     /** Manual load check (remove @Ignore): ~500 MB of XMLTV through the real pipeline; prints time and peak live heap. */

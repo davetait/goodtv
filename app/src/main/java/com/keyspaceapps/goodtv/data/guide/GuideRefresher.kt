@@ -184,11 +184,11 @@ class GuideRefresher(
 
     private suspend fun replaceGuide(origin: GuideOrigin, channels: List<GuideChannel>, specs: List<Spec>, now: Long, abortIf: () -> Boolean) {
         timed {
-            val stream = ProgrammeStream(currentCoroutineContext()[Job]) { emit, check ->
+            val stream = ProgrammeStream(currentCoroutineContext()[Job], produce = { emit, check ->
                 for (spec in specs) {
                     read(spec.file, { it in spec.ids }, now, { check(); if (abortIf()) throw IOException("Playback started") }, {}) { emit(spec.transform(it)) }
                 }
-            }
+            })
             try {
                 store.replaceGuide(origin, channels, stream.sequence)
             } finally {
@@ -268,10 +268,11 @@ class GuideRefresher(
     }
 
     /** Throws [IOException] after more than [cap] bytes, and runs [check] before each read. */
-    private class CappedInputStream(input: InputStream, private val cap: Long, private val check: () -> Unit) : FilterInputStream(input) {
+    internal class CappedInputStream(input: InputStream, private val cap: Long, private val check: () -> Unit) : FilterInputStream(input) {
         private var total = 0L
 
         override fun read(): Int {
+            check()
             val b = super.read()
             if (b >= 0) count(1)
             return b
@@ -295,14 +296,15 @@ class GuideRefresher(
      * consumed inside the store's write transaction while memory stays at one queue. A failure of the
      * reader surfaces from the sequence, so the transaction rolls back. [close] stops the reader.
      */
-    private class ProgrammeStream(
+    internal class ProgrammeStream(
         private val job: Job?,
+        private val capacity: Int = QUEUE_CAPACITY,
         private val produce: (emit: (GuideProgramme) -> Unit, check: () -> Unit) -> Unit,
     ) : AutoCloseable {
         private object End
         private class Failed(val error: Throwable)
 
-        private val queue = ArrayBlockingQueue<Any>(QUEUE_CAPACITY)
+        private val queue = ArrayBlockingQueue<Any>(capacity)
         @Volatile private var closed = false
         private var thread: Thread? = null
 
@@ -312,12 +314,17 @@ class GuideRefresher(
             thread = Thread({ run() }, "guide-reader").apply { isDaemon = true; start() }
         }
 
+        /** Never throws: an exception escaping a thread would take the whole app down. */
         private fun run() {
             try {
                 produce(::put) { if (closed) throw IOException("Guide read stopped") }
                 put(End)
             } catch (t: Throwable) {
-                try { put(Failed(t)) } catch (_: IOException) { /* closed: nobody is listening */ }
+                try {
+                    put(Failed(t))
+                } catch (_: Throwable) {
+                    // Closed or interrupted while reporting: nobody is listening any more.
+                }
             }
         }
 
