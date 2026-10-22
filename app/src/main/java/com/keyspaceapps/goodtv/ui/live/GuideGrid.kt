@@ -97,7 +97,7 @@ internal enum class CellKind { PROGRAMME, LOOP, EVENT, NO_GUIDE }
 
 /**
  * A programme clipped to the window ([fromMs], [untilMs]); a loop or a row without a guide is one cell spanning it.
- * An event slot is one cell too (see [eventCell]); [startsMs] is set on one whose start lies outside the window.
+ * An event slot is one cell too (see [eventCell]); [startsMs] is its parsed start, when its name has one.
  */
 internal data class GuideCell(
     val id: String,
@@ -125,8 +125,9 @@ internal fun cellsOf(line: ChannelLine, windowStart: Long): List<GuideCell> {
 
 /**
  * An event slot from the start time in its name (the row's, else its first feed's) for [GuideTime.EVENT_MS],
- * clipped to the window. A slot outside the window spans it, dim, saying when it starts ([GuideCell.startsMs]);
- * one with no time spans it as if on now.
+ * clipped to the window, or spanning it when they don't overlap. Whether it plays is the clock's call
+ * ([GuideTime.eventPlayable]); one that doesn't is dim and says when it starts or started. A slot with no time
+ * spans the window and plays.
  */
 private fun eventCell(line: ChannelLine, windowStart: Long, end: Long): GuideCell {
     val row = line.row
@@ -135,17 +136,16 @@ private fun eventCell(line: ChannelLine, windowStart: Long, end: Long): GuideCel
     if (start != null) {
         val from = maxOf(start, windowStart)
         val until = minOf(start + GuideTime.EVENT_MS, end)
-        return if (until > from) GuideCell("${line.key}|$start", CellKind.EVENT, null, from, until)
+        return if (until > from) GuideCell("${line.key}|$start", CellKind.EVENT, null, from, until, startsMs = start)
         else GuideCell("${line.key}|$start", CellKind.EVENT, null, windowStart, end, startsMs = start)
     }
     return GuideCell("${line.key}|all", CellKind.EVENT, null, windowStart, end)
 }
 
-/** "Starts 11:00 PM", "Tomorrow 8:00 PM", "Started 7:00 PM": when an event slot outside the window starts. */
+/** "Starts Tomorrow 8:00 PM", "Started Today 1:10 PM": when an event slot that isn't playable starts. */
 @Composable
 internal fun eventStart(startMs: Long, now: Long, timeLabel: (Long) -> String): String =
-    if (startMs < now) stringResource(R.string.guide_event_started, timeLabel(startMs))
-    else dayAndTime(startMs, now, timeLabel, today = R.string.guide_event_starts)
+    stringResource(if (startMs > now) R.string.guide_event_starts else R.string.guide_event_started, dayAndTime(startMs, now, timeLabel))
 
 /** The cell showing [t], else the first after it, else the last. */
 internal fun cellAt(cells: List<GuideCell>, t: Long): GuideCell =
@@ -384,7 +384,9 @@ private fun ChannelCell(line: ChannelLine, focus: GuideFocus, actions: GuideActi
 
 @Composable
 private fun ProgrammeCell(cell: GuideCell, row: GuideRow, now: Long, timeLabel: (Long) -> String, onClick: () -> Unit, modifier: Modifier) {
-    val dim = cell.kind == CellKind.NO_GUIDE || cell.startsMs != null
+    // An event slot that isn't on (or about to be) only says when it starts.
+    val waiting = cell.startsMs?.takeUnless { GuideTime.eventPlayable(it, now) }
+    val dim = cell.kind == CellKind.NO_GUIDE || waiting != null
     Surface(
         onClick = onClick,
         modifier = modifier,
@@ -402,7 +404,7 @@ private fun ProgrammeCell(cell: GuideCell, row: GuideRow, now: Long, timeLabel: 
                 when (cell.kind) {
                     CellKind.PROGRAMME -> cell.programme!!.title
                     CellKind.LOOP -> stringResource(R.string.guide_all_day, row.loopShow.orEmpty())
-                    CellKind.EVENT -> cell.startsMs?.let { eventStart(it, now, timeLabel) } ?: row.name
+                    CellKind.EVENT -> waiting?.let { eventStart(it, now, timeLabel) } ?: row.name
                     CellKind.NO_GUIDE -> stringResource(R.string.guide_no_info)
                 },
                 style = MaterialTheme.typography.bodyMedium.copy(

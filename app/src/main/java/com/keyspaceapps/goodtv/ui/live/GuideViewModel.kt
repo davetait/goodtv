@@ -43,6 +43,13 @@ object GuideTime {
     const val MAX_AHEAD_MS = 48 * 3_600_000L - WINDOW_MS
     /** An event slot's assumed length: names give a start, never an end. */
     const val EVENT_MS = 3 * 3_600_000L
+    /** An event slot plays from this long before its start (pre-show feeds are fine)… */
+    const val EVENT_EARLY_MS = 30 * 60_000L
+    /** …until this long after it. */
+    const val EVENT_PLAYABLE_MS = 4 * 3_600_000L
+
+    /** Whether an event slot starting at [startMs] is on (or about to be) at [now]: decided by the clock, never the window. */
+    fun eventPlayable(startMs: Long, now: Long) = now >= startMs - EVENT_EARLY_MS && now <= startMs + EVENT_PLAYABLE_MS
 
     /** [now] floored to the local :00 or :30. */
     fun slotOf(now: Long, zone: TimeZone = TimeZone.getDefault()): Long {

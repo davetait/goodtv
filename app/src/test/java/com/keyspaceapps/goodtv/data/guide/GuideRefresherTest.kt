@@ -285,6 +285,19 @@ class GuideRefresherTest {
         assertEquals(first * 2, hits.size)
     }
 
+    /** A saved attempt in the future (the clock was set back) doesn't block the early refresh for good. */
+    @Test fun earlyRefreshFromTheFutureDoesNotBlock() = runBlocking {
+        val log = MemoryEarlyRefreshLog()
+        refresher = refresherWith(early = log)
+        refresher.refreshIfStale()
+        val first = hits.size
+        val lonely = addSource("US: NOTHING MATCHES THIS" to null)
+        log.recordEarlyRefresh(lonely, now + 3_600_000L)
+        refresher.refreshIfStale()
+        assertEquals(first * 2, hits.size)
+        assertEquals(now, log.lastEarlyRefresh(lonely))
+    }
+
     @Test fun oneMatchRunsOverBothSources() = runBlocking {
         files[EpgShareFiles.LOCALS] = gz(
             """<tv>${channel("KRQE-DT.us_locals1", "KRQE-DT")} ${channel("KRQE-DT2.us_locals1", "KRQE-DT2")}</tv>""",

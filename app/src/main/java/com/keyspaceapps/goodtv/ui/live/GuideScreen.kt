@@ -173,8 +173,10 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
             },
             onChannel = { line -> playRow(line.channelId, line.row) },
             onMenu = { row -> menuFor = row },
-            // An event slot outside the window only shows when it starts.
-            onCell = { line, cell -> if (cell.startsMs == null) playIfOnNow(cell.id, line.row, cell.programme) },
+            // An event slot that isn't on (or about to be) only shows when it starts.
+            onCell = { line, cell ->
+                if (cell.startsMs == null || GuideTime.eventPlayable(cell.startsMs, vm.now.value)) playIfOnNow(cell.id, line.row, cell.programme)
+            },
             onMore = { line -> vm.toggleMore(line.section) },
             onPage = { forward, line ->
                 val old = vm.window

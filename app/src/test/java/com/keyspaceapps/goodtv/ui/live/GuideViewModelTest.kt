@@ -123,4 +123,13 @@ class GuideViewModelTest {
         vm.select(GuideFilter.EVENTS)
         assertEquals(1, eventRefreshes)
     }
+
+    @Test fun eventSlotsPlayFromHalfAnHourBeforeToFourHoursAfter() {
+        val t = start + 5 * slot
+        val min = 60_000L
+        assertEquals(false, GuideTime.eventPlayable(t, t - 31 * min))
+        assertEquals(true, GuideTime.eventPlayable(t, t - 30 * min))
+        assertEquals(true, GuideTime.eventPlayable(t, t + 240 * min))
+        assertEquals(false, GuideTime.eventPlayable(t, t + 241 * min))
+    }
 }

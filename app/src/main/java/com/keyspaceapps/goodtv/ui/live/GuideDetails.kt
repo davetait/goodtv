@@ -49,7 +49,7 @@ internal fun GuideDetails(focusedState: State<GuideFocused?>, now: Long, timeLab
             null -> row.programmes.firstOrNull { it.startMs <= now && now < it.endMs }
             else -> null
         }
-        val starts = focused.cell?.startsMs
+        val starts = focused.cell?.startsMs?.takeUnless { GuideTime.eventPlayable(it, now) }
         val onNow = starts == null && (programme == null || (programme.startMs <= now && now < programme.endMs))
         Box(Modifier.size(width = 160.dp, height = 90.dp).clip(RoundedCornerShape(5.dp)).background(Color(0xFF2A3045))) {
             val picture = programme?.imageUrl

@@ -449,7 +449,7 @@ class GuideScreenTest {
     private fun events(vararg rows: GuideRow) = FakeGuide(listOf(news), events = listOf(GuideSection("Events", null, rows.toList(), emptyList())))
 
     @Test fun eventsChipShowsSlotsAtTheirTime() {
-        val bills = slot("event bills", "NFL Bills vs Jets", "PPV 01: NFL Bills vs Jets ${newYork.format(Instant.ofEpochMilli(at(19)))}")
+        val bills = slot("event bills", "NFL Bills vs Jets", "PPV 01: NFL Bills vs Jets ${newYork.format(Instant.ofEpochMilli(at(18, 30)))}")
         val boxing = slot("event boxing", "Boxing Undercard", "PPV 02: Boxing Undercard ${newYork.format(Instant.ofEpochMilli(at(17)))}")
         val ufc = slot("event ufc", "UFC Fight Night", "PPV 03: UFC FIGHT NIGHT")
         val guide = show(events(bills, boxing, ufc))
@@ -465,9 +465,9 @@ class GuideScreenTest {
         // The slot's cell is the one right of its channel cell.
         fun cell(name: String) = composeRule.onAllNodes(hasText(name)).fetchSemanticsNodes().maxBy { it.positionInRoot.x }
         fun near(what: String, actual: Float, expected: Float) = assertTrue("$what $actual vs $expected", abs(actual - expected) < 0.1f * column)
-        // 19:00 is the third column; the window ends at 21:00.
-        near("bills left", cell("NFL Bills vs Jets").positionInRoot.x, x0 + 2 * column)
-        near("bills width", cell("NFL Bills vs Jets").size.width.toFloat(), 4 * column)
+        // 18:30 (about to start, so playable) is the second column; the window ends at 21:00.
+        near("bills left", cell("NFL Bills vs Jets").positionInRoot.x, x0 + column)
+        near("bills width", cell("NFL Bills vs Jets").size.width.toFloat(), 5 * column)
         // 17:00 for three hours: from the window's start to 20:00.
         near("boxing left", cell("Boxing Undercard").positionInRoot.x, x0)
         near("boxing width", cell("Boxing Undercard").size.width.toFloat(), 4 * column)
@@ -487,24 +487,69 @@ class GuideScreenTest {
         assertEquals(0, composeRule.onAllNodes(hasText("hannity")).fetchSemanticsNodes().size)
     }
 
-    /** A slot starting after the window is a dim "Starts …" cell, not an on-now one; Select only shows its details. */
-    @Test fun eventAfterTheWindowSaysWhenItStarts() {
-        val late = slot("event late", "UFC Main Card", "PPV 04: UFC Main Card ${newYork.format(Instant.ofEpochMilli(at(23)))}")
-        val tomorrow = slot("event next", "Boxing Rematch", "PPV 05: Boxing Rematch ${newYork.format(Instant.ofEpochMilli(at(20) + dayMs))}")
-        show(events(late, tomorrow))
+    private fun openEvents(vararg rows: GuideRow) {
+        show(events(*rows))
         waitFocused("Special Report")
         composeRule.onNodeWithText("Events").requestFocus()
         keys("C")
-        waitFor("Starts ${time(23, 0)}")
-        composeRule.onNodeWithText("Tomorrow ${time(20, 0)}").assertIsDisplayed()
+    }
+    private fun slotAt(key: String, name: String, ms: Long) = slot(key, name, "PPV: $name ${newYork.format(Instant.ofEpochMilli(ms))}")
+    private fun focusedCount(text: String) = composeRule.onAllNodes(hasText(text) and isFocused()).fetchSemanticsNodes().size
+
+    /**
+     * Playability follows the clock: a slot that started an hour ago still plays with the window paged on to 20:30,
+     * past the three hours its cell would cover (it then spans the window).
+     */
+    @Test fun eventStartedAnHourAgoPlaysEvenWithTheWindowPagedForward() {
+        openEvents(slotAt("event a", "Rangers at Leafs", at(17, 10)))
+        waitFor("Rangers at Leafs")
         keys("D")
-        // The details panel says when it starts too; the focused one is the cell.
-        composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasText("Starts ${time(23, 0)}") and isFocused()).fetchSemanticsNodes().size == 1 }
-        waitFor("UFC Main Card")
+        composeRule.waitUntil(5_000) { focusedCount("Rangers at Leafs") == 1 }
+        keys("R", "R", "R", "R", "R")
+        firstHeader(time(20, 30))
+        composeRule.waitUntil(5_000) { focusedCount("Rangers at Leafs") == 1 }
+        keys("C")
+        composeRule.waitUntil(5_000) { played != null }
+        assertEquals("event a", played!!.refId)
+    }
+
+    /** Started five hours ago (13:10): past the four hours a slot stays playable, so a dim "Started" cell that only shows details. */
+    @Test fun eventStartedFiveHoursAgoSaysStartedYesterdayOrToday() {
+        openEvents(slotAt("event b", "Morning Match", at(13, 10)))
+        val label = "Started Today ${time(13, 10)}"
+        waitFor(label)
+        keys("D")
+        composeRule.waitUntil(5_000) { focusedCount(label) == 1 }
         keys("C")
         composeRule.waitForIdle()
         assertNull(played)
-        assertEquals(2, composeRule.onAllNodes(hasText("Starts ${time(23, 0)}")).fetchSemanticsNodes().size)
+        assertEquals(0, composeRule.onAllNodes(hasText("Select to watch")).fetchSemanticsNodes().size)
+    }
+
+    /** About to start (in 20 minutes): a normal cell at its time, and Select plays (pre-show feeds are fine). */
+    @Test fun eventStartingIn20MinutesPlays() {
+        openEvents(slotAt("event c", "Bills vs Jets", at(18, 30)))
+        waitFor("Bills vs Jets")
+        keys("D")
+        composeRule.waitUntil(5_000) { focusedCount("Bills vs Jets") == 1 }
+        keys("C")
+        composeRule.waitUntil(5_000) { played != null }
+        assertEquals("event c", played!!.refId)
+    }
+
+    /** Tomorrow (and later today, beyond half an hour away) only says when it starts; Select shows details. */
+    @Test fun eventStartingTomorrowSaysTomorrow() {
+        openEvents(slotAt("event d", "Boxing Rematch", at(20) + dayMs), slotAt("event e", "UFC Main Card", at(23)))
+        val tomorrow = "Starts Tomorrow ${time(20, 0)}"
+        waitFor(tomorrow)
+        composeRule.onNodeWithText("Starts Today ${time(23, 0)}").assertIsDisplayed()
+        keys("D")
+        composeRule.waitUntil(5_000) { focusedCount(tomorrow) == 1 }
+        keys("C")
+        composeRule.waitForIdle()
+        assertNull(played)
+        // The details panel says it too.
+        assertEquals(2, composeRule.onAllNodes(hasText(tomorrow)).fetchSemanticsNodes().size)
         assertEquals(0, composeRule.onAllNodes(hasText("Select to watch")).fetchSemanticsNodes().size)
     }
 

@@ -168,6 +168,7 @@
     <string name="guide_on_now_left">On now · %1$d min left</string>
     <string name="guide_today_at">Today %1$s</string>
     <string name="guide_tomorrow_at">Tomorrow %1$s</string>
+    <string name="guide_yesterday_at">Yesterday %1$s</string>
     <string name="guide_day_at">%1$s %2$s</string>
     <string name="guide_event_starts">Starts %1$s</string>
     <string name="guide_event_started">Started %1$s</string>

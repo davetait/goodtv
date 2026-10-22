@@ -159,14 +159,15 @@ private fun whenOf(hit: GuideSearchHit, now: Long, timeLabel: (Long) -> String):
     return dayAndTime(p.startMs, now, timeLabel)
 }
 
-/** "Today 9:00 PM" ([today] holds the time), "Tomorrow 9:00 PM", else "Fri 9:00 PM", by the device's calendar. */
+/** "Today 9:00 PM", "Tomorrow 9:00 PM", "Yesterday 9:00 PM", else "Fri 9:00 PM", by the device's calendar. */
 @Composable
-internal fun dayAndTime(t: Long, now: Long, timeLabel: (Long) -> String, today: Int = R.string.guide_today_at): String {
+internal fun dayAndTime(t: Long, now: Long, timeLabel: (Long) -> String): String {
     val zone = ZoneId.systemDefault()
     val day = Instant.ofEpochMilli(t).atZone(zone).toLocalDate()
     return when (ChronoUnit.DAYS.between(Instant.ofEpochMilli(now).atZone(zone).toLocalDate(), day)) {
-        0L -> stringResource(today, timeLabel(t))
+        0L -> stringResource(R.string.guide_today_at, timeLabel(t))
         1L -> stringResource(R.string.guide_tomorrow_at, timeLabel(t))
+        -1L -> stringResource(R.string.guide_yesterday_at, timeLabel(t))
         else -> stringResource(R.string.guide_day_at, day.dayOfWeek.getDisplayName(TextStyle.SHORT, LocalConfiguration.current.locales[0]), timeLabel(t))
     }
 }

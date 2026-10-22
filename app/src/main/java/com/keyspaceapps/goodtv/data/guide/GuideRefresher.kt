@@ -102,8 +102,9 @@ class GuideRefresher(
         val stored = store.observeLinks().first()
         val linkedSources = stored.mapTo(HashSet()) { it.sourceId }
         // A source without links gets one early refresh a day; one nothing matches would otherwise download on every start.
+        // An attempt dated in the future (the clock was set back) doesn't count.
         val unlinked = lineup.mapTo(HashSet()) { it.channel.sourceId }.filter { id ->
-            id !in linkedSources && early.lastEarlyRefresh(id)?.let { now - it < GUIDE_MAX_AGE_MS } != true
+            id !in linkedSources && early.lastEarlyRefresh(id)?.let { now - it in 0 until GUIDE_MAX_AGE_MS } != true
         }
         val epgDue = isStale(GuideOrigin.EPGSHARE, now) || unlinked.isNotEmpty()
         val providerDue = isStale(GuideOrigin.PROVIDER, now) && !playback.playing.value
