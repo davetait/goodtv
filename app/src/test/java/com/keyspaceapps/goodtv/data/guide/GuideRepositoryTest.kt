@@ -57,8 +57,9 @@ class GuideRepositoryTest {
         lib, limited,
         GuideRefresher(guide, refresherLibrary, SourceRegistry(emptyList()), EpgShareSource(OkHttpClient()), PlaybackState(), { now }, dispatcher, tmp.newFolder()),
         LiveRefresher(lib, SourceRegistry(listOf(FakeChannelSource())), { false }, { now }),
-        { now }, dispatcher,
+        { now }, dispatcher, { warnings += it },
     )
+    private val warnings = ArrayList<String>()
 
     private var nextId = 0
     private fun feed(name: String, category: String, logo: String? = null): ChannelCandidate =
@@ -249,6 +250,27 @@ class GuideRepositoryTest {
         val row = board().section("NBC").rows.single()
         assertEquals(3, row.feeds.size)
         assertEquals("NBC (WNBC) NEW YORK", row.name)
+    }
+
+    @Test fun aFailingLineupDoesNotCrashAndKeepsTheLastBoard() = runBlocking {
+        val uncaught = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { _, e -> uncaught += e }
+        try {
+            val good = listOf(feed("US: CNN HD", NEWS))
+            val failing: LibraryStore = object : LibraryStore by fake {
+                override fun observeSportsCandidates() = flow<List<ChannelCandidate>> { emit(good); throw java.io.IOException("boom") }
+            }
+            val failingRepo = repoFor(failing)
+            assertEquals(listOf("CNN"), failingRepo.board(GuideFilter.ALL, windowStart).first().section("News").rows.map { it.name })
+            Thread.sleep(200)
+            assertEquals(listOf("CNN"), failingRepo.board(GuideFilter.NEWS, windowStart).first().section("News").rows.map { it.name })
+            assertTrue(uncaught.toString(), uncaught.isEmpty())
+            assertEquals(1, warnings.size)
+            assertFalse(warnings.single().contains("boom"))
+        } finally {
+            Thread.setDefaultUncaughtExceptionHandler(previous)
+        }
     }
 
     private val fixture by lazy {

@@ -1,5 +1,6 @@
 package com.keyspaceapps.goodtv.data.guide
 
+import android.util.Log
 import com.keyspaceapps.goodtv.data.repo.LibraryStore
 import com.keyspaceapps.goodtv.data.sports.ChannelCandidate
 import com.keyspaceapps.goodtv.data.sports.ChannelOrder
@@ -7,13 +8,16 @@ import com.keyspaceapps.goodtv.data.sports.GameMatcher
 import com.keyspaceapps.goodtv.data.sports.LiveRefresher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
@@ -66,6 +70,7 @@ class GuideRepository(
     private val liveRefresher: LiveRefresher,
     private val clock: () -> Long,
     private val compute: CoroutineDispatcher,
+    private val warn: (String) -> Unit = { Log.w("GoodTV", it) },
 ) : GuideSource {
     /** A row before guide data: the part that depends on the lineup alone. */
     private class Base(
@@ -147,7 +152,8 @@ class GuideRepository(
         }
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + compute)
+    /** A failure that gets past [resolved]'s own handling is logged, never thrown at the app. */
+    private val scope = CoroutineScope(SupervisorJob() + compute + CoroutineExceptionHandler { _, e -> warn("Guide failed: ${e.javaClass.simpleName}") })
 
     /**
      * The lineup merged with guide links and favourites; the programme-free part of every board and search,
@@ -157,6 +163,13 @@ class GuideRepository(
         library.observeSportsCandidates(), store.observeLinks(), store.observeChannels(), store.observeFavourites(),
     ) { candidates, links, channels, favourites -> resolve(lineupOf(candidates), links, channels) to favourites }
         .flowOn(compute)
+        // A failing lineup read keeps the last rows (the shared replay) and is tried again shortly.
+        .retryWhen { e, _ ->
+            if (e is CancellationException) return@retryWhen false
+            warn("Guide lineup failed: ${e.javaClass.simpleName}")
+            delay(RETRY_MS)
+            true
+        }
         .onStart {
             scope.launch {
                 try {
@@ -168,7 +181,7 @@ class GuideRepository(
                 }
             }
         }
-        .shareIn(scope, SharingStarted.WhileSubscribed(5_000), replay = 1)
+        .shareIn(scope, SharingStarted.WhileSubscribed(5_000, replayExpirationMillis = 0), replay = 1)
 
     private fun row(r: Resolved, favourites: Set<String>, programmes: Map<String, List<GuideProgramme>>) = GuideRow(
         key = r.base.key, name = r.base.name, logoUrl = r.logoUrl, genre = r.base.genre, feeds = r.base.feeds,
@@ -257,6 +270,7 @@ class GuideRepository(
         private const val FAVOURITES_TITLE = "Favourites"
         private const val SEARCH_PROGRAMMES = 50
         private const val ID_CHUNK = 500
+        private const val RETRY_MS = 5_000L
         private val APP_PREFIXES = listOf("prime ", "roku ", "tubi ")
         private val PROVIDER_TAG = Regex("""^\s*[A-Z0-9&/+]{1,6}:\s*""")
     }
