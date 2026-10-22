@@ -32,20 +32,27 @@ class RoomLibraryStore(
     private val library get() = db.library()
     private val hidden get() = db.hidden()
     private val genres get() = db.genres()
+    private val lineup get() = db.lineup()
 
     override fun observeSources(): Flow<List<SourceRecord>> = sources.observeAll().map { list -> list.map { it.toRecord(json) } }
     override suspend fun getSources(): List<SourceRecord> = sources.getAll().map { it.toRecord(json) }
     override suspend fun getSource(id: Long): SourceRecord? = sources.getById(id)?.toRecord(json)
 
-    override suspend fun insertSource(record: SourceRecord): Long =
-        sources.insert(record.copy(id = 0).toEntity(json, clock()))
-
-    override suspend fun updateSource(record: SourceRecord) {
-        val existing = sources.getById(record.id) ?: return
-        sources.update(record.toEntity(json, existing.createdAt))
+    // Each library write also bumps the lineup generation, in the same transaction, so a saved lineup is never trusted past one.
+    override suspend fun insertSource(record: SourceRecord): Long = db.withTransaction {
+        sources.insert(record.copy(id = 0).toEntity(json, clock())).also { lineup.bumpGeneration() }
     }
 
-    override suspend fun deleteSource(id: Long) = sources.deleteById(id)
+    override suspend fun updateSource(record: SourceRecord) = db.withTransaction {
+        val existing = sources.getById(record.id) ?: return@withTransaction
+        sources.update(record.toEntity(json, existing.createdAt))
+        lineup.bumpGeneration()
+    }
+
+    override suspend fun deleteSource(id: Long) = db.withTransaction {
+        sources.deleteById(id)
+        lineup.bumpGeneration()
+    }
 
     override suspend fun replaceCatalog(sourceId: Long, catalog: Catalog) = db.withTransaction {
         library.deleteCategories(sourceId)
@@ -67,6 +74,7 @@ class RoomLibraryStore(
         ContentKind.entries
             .filter { kind -> catalog.categories.any { it.kind == kind } }
             .forEach { kind -> hidden.pruneMissing(sourceId, kind.name) }
+        lineup.bumpGeneration()
     }
 
     override suspend fun replaceLive(sourceId: Long, live: LiveCatalog) = db.withTransaction {
@@ -75,6 +83,7 @@ class RoomLibraryStore(
         library.insertCategories(live.categories.map { it.toEntity() })
         library.insertLive(live.live.map { it.toEntity() })
         if (live.categories.isNotEmpty()) hidden.pruneMissing(sourceId, ContentKind.LIVE.name)
+        lineup.bumpGeneration()
     }
 
     override fun observeSportsCandidates(): Flow<List<ChannelCandidate>> =
@@ -140,8 +149,11 @@ class RoomLibraryStore(
 
     override suspend fun setCategoriesHidden(sourceId: Long, kind: ContentKind, ids: Collection<String>, hidden: Boolean) {
         if (ids.isEmpty()) return
-        if (hidden) this.hidden.insertAll(ids.map { HiddenCategoryEntity(sourceId, kind.name, it) })
-        else ids.chunked(500).forEach { this.hidden.delete(sourceId, kind.name, it) }
+        db.withTransaction {
+            if (hidden) this.hidden.insertAll(ids.map { HiddenCategoryEntity(sourceId, kind.name, it) })
+            else ids.chunked(500).forEach { this.hidden.delete(sourceId, kind.name, it) }
+            lineup.bumpGeneration()
+        }
     }
 
     override suspend fun getMovie(sourceId: Long, id: String): Movie? = library.getMovie(sourceId, id)?.toDomain()

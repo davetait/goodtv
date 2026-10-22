@@ -173,4 +173,33 @@ class MigrationTest {
         db.query("SELECT COUNT(*) FROM channel_guide").use { c -> c.moveToFirst(); assertEquals(0, c.getInt(0)) }
         db.close()
     }
+
+    /** v10 → v11 adds the saved lineup tables; v10 data survives, the new tables start empty and the generation reads 0. */
+    @Test
+    fun migrate10To11AddsSavedLineup() {
+        helper.createDatabase(dbName, 10).apply {
+            execSQL("INSERT INTO sources (id, type, nickname, configJson, enabled, lastSyncAt, lastError, createdAt) VALUES (1, 'XTREAM', 'Home', '{\"type\":\"xtream\",\"server\":\"http://s\",\"username\":\"u\",\"password\":\"p\"}', 1, 1, NULL, 0)")
+            execSQL("INSERT INTO live_channels (sourceId, id, categoryId, name, logoUrl, number, epgChannelId) VALUES (1, 'l1', 'c', 'Fox News', NULL, 1, 'fox.us')")
+            execSQL("INSERT INTO favourite_channels (rowKey, addedAt) VALUES ('fox', 5)")
+            close()
+        }
+        val db = helper.runMigrationsAndValidate(dbName, 11, true, MIGRATION_10_11)
+        db.query("SELECT name, epgChannelId FROM live_channels").use { c ->
+            c.moveToFirst()
+            assertEquals("Fox News", c.getString(0))
+            assertEquals("fox.us", c.getString(1))
+        }
+        db.query("SELECT COUNT(*) FROM favourite_channels").use { c -> c.moveToFirst(); assertEquals(1, c.getInt(0)) }
+        for (t in listOf("lineup_rows", "lineup_feeds", "lineup_meta", "lineup_state")) {
+            db.query("SELECT COUNT(*) FROM $t").use { c -> c.moveToFirst(); assertEquals(0, c.getInt(0)) }
+        }
+        db.query("SELECT COALESCE(MAX(generation), 0) FROM lineup_state").use { c -> c.moveToFirst(); assertEquals(0L, c.getLong(0)) }
+        // Feeds go with their row.
+        db.execSQL("PRAGMA foreign_keys = ON")
+        db.execSQL("INSERT INTO lineup_rows (key, position, name, genre, sortKey, appCopy) VALUES ('r', 0, 'R', 'NEWS', 's', 0)")
+        db.execSQL("INSERT INTO lineup_feeds (rowKey, position, sourceId, channelId, name, title, categoryName) VALUES ('r', 0, 1, 'l1', 'Fox News', 'Fox News', 'News')")
+        db.execSQL("DELETE FROM lineup_rows")
+        db.query("SELECT COUNT(*) FROM lineup_feeds").use { c -> c.moveToFirst(); assertEquals(0, c.getInt(0)) }
+        db.close()
+    }
 }

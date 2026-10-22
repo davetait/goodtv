@@ -11,6 +11,8 @@ import com.keyspaceapps.goodtv.data.db.RoomPopularStore
 import com.keyspaceapps.goodtv.data.db.RoomTmdbCache
 import com.keyspaceapps.goodtv.data.db.RoomTmdbGenreStore
 import com.keyspaceapps.goodtv.data.db.RoomGuideStore
+import com.keyspaceapps.goodtv.data.db.RoomLineupStore
+import com.keyspaceapps.goodtv.data.guide.LineupStore
 import com.keyspaceapps.goodtv.data.db.RoomWatchListStore
 import com.keyspaceapps.goodtv.data.db.RoomWatchProgressStore
 import com.keyspaceapps.goodtv.data.guide.EpgShareSource
@@ -125,6 +127,7 @@ class AppGraph(val context: Context) {
 
     /** Guide programmes, the channel-to-guide links and favourite channels. */
     val guideStore: GuideStore by lazy { RoomGuideStore(db) }
+    val lineupStore: LineupStore by lazy { RoomLineupStore(db) }
 
     /** True while the player is on screen; the guide's provider download waits for it to end. */
     val playback = PlaybackState()
