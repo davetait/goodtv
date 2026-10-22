@@ -58,11 +58,15 @@ fun MovieDetailScreen(key: MovieDetailKey, onPlay: (PlayerKey) -> Unit, onPerson
     val tmdb by vm.tmdb.collectAsState()
     val people by vm.people.collectAsState()
     val progress by vm.progress.collectAsState()
+    val returnToPerson = remember { vm.takeOpenedPerson() }
 
     when (val s = state) {
         MovieDetailViewModel.State.Loading -> Centered(stringResource(R.string.player_loading))
         is MovieDetailViewModel.State.Error -> Centered(s.message)
-        is MovieDetailViewModel.State.Ready -> MovieDetailContent(s.detail, tmdb, people, progress, onPlay, onPerson)
+        is MovieDetailViewModel.State.Ready -> MovieDetailContent(
+            s.detail, tmdb, people, progress, onPlay, returnToPerson,
+            onPerson = { vm.openedPerson = it.personId; onPerson(it) },
+        )
     }
 }
 
@@ -78,11 +82,14 @@ private fun MovieDetailContent(
     people: List<TmdbPerson>,
     progress: Loaded<WatchProgress?>?,
     onPlay: (PlayerKey) -> Unit,
+    returnToPerson: Long?,
     onPerson: (PersonSearchKey) -> Unit,
 ) {
     val playFocus = remember { FocusRequester() }
     // Which first button got focus: if the saved spot appears or goes (finished), the new first button takes it.
     var focusedFor by remember { mutableStateOf<Boolean?>(null) }
+    // Back from a person's search: their name takes focus instead of the first button.
+    val refocusPerson = remember { returnToPerson?.takeIf { id -> people.any { it.id == id } } }
     val movie = detail.movie
     val display = DisplayTitle.parse(movie.name)
 
@@ -112,7 +119,11 @@ private fun MovieDetailContent(
                     val saved = progress.value?.takeIf { it.resumable }
                     fun key(startMs: Long) = PlayerKey(movie.sourceId, PlayerKey.KIND_MOVIE, movie.id, movie.containerExtension, display.label, startPositionMs = startMs)
                     val first = Modifier.focusRequester(playFocus).onPlaced {
-                        if (focusedFor != (saved != null)) { focusedFor = saved != null; playFocus.requestFocus() }
+                        if (focusedFor != (saved != null)) {
+                            val opening = focusedFor == null
+                            focusedFor = saved != null
+                            if (!(opening && refocusPerson != null)) playFocus.requestFocus()
+                        }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         if (saved != null) {
@@ -131,7 +142,7 @@ private fun MovieDetailContent(
                 Spacer(Modifier.height(12.dp))
                 if (people.isNotEmpty()) {
                     // TMDB's clickable people replace the provider's plain text lines.
-                    PeopleRow(people, onPerson = { onPerson(PersonSearchKey(it.id, it.name)) })
+                    PeopleRow(people, onPerson = { onPerson(PersonSearchKey(it.id, it.name)) }, focusId = refocusPerson)
                 } else {
                     detail.cast?.let { Text("Cast: $it", color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis) }
                     detail.director?.let { Text("Director: $it", color = MaterialTheme.colorScheme.onSurfaceVariant) }

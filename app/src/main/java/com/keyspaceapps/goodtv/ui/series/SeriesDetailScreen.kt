@@ -64,11 +64,15 @@ fun SeriesDetailScreen(key: SeriesDetailKey, onPlay: (PlayerKey) -> Unit, onPers
     val tmdb by vm.tmdb.collectAsState()
     val people by vm.people.collectAsState()
     val progress by vm.progress.collectAsState()
+    val returnToPerson = remember { vm.takeOpenedPerson() }
 
     when (val s = state) {
         SeriesDetailViewModel.State.Loading -> Centered(stringResource(R.string.player_loading))
         is SeriesDetailViewModel.State.Error -> Centered(s.message)
-        is SeriesDetailViewModel.State.Ready -> SeriesDetailContent(s, tmdb, people, progress, onSelectSeason = vm::selectSeason, onPlay = onPlay, onPerson = onPerson)
+        is SeriesDetailViewModel.State.Ready -> SeriesDetailContent(
+            s, tmdb, people, progress, onSelectSeason = vm::selectSeason, onPlay = onPlay, returnToPerson = returnToPerson,
+            onPerson = { vm.openedPerson = it.personId; onPerson(it) },
+        )
     }
 }
 
@@ -103,14 +107,17 @@ private fun SeriesDetailContent(
     progress: List<WatchProgress>?,
     onSelectSeason: (Int) -> Unit,
     onPlay: (PlayerKey) -> Unit,
+    returnToPerson: Long?,
     onPerson: (PersonSearchKey) -> Unit,
 ) {
     val detail = state.detail
+    // Back from a person's search: their name takes focus, so the resume button and first episode don't.
+    val refocusPerson = remember { returnToPerson?.takeIf { id -> people.any { it.id == id } } }
     val display = DisplayTitle.parse(detail.series.name)
     val episodes = state.episodes()
     val firstEpisodeFocus = remember { FocusRequester() }
     val resumeFocus = remember { FocusRequester() }
-    var focusedForSeason by remember { mutableIntStateOf(Int.MIN_VALUE) }
+    var focusedForSeason by remember { mutableIntStateOf(if (refocusPerson != null) state.selectedSeason else Int.MIN_VALUE) }
     val byEpisode = progress.orEmpty().associateBy { it.ref.itemId }
     val resume = progress?.let { SeriesResumes.of(detail.episodes, it) }
 
@@ -136,7 +143,7 @@ private fun SeriesDetailContent(
                     Text(it, maxLines = 4, overflow = TextOverflow.Ellipsis)
                 }
                 TmdbCredit(tmdb, hasPeople = people.isNotEmpty())
-                PeopleRow(people, onPerson = { onPerson(PersonSearchKey(it.id, it.name)) }, Modifier.padding(top = 16.dp))
+                PeopleRow(people, onPerson = { onPerson(PersonSearchKey(it.id, it.name)) }, Modifier.padding(top = 16.dp), focusId = refocusPerson)
                 val watchRef = WatchListRef(detail.series.sourceId, WatchListKind.SERIES, detail.series.id)
                 if (resume != null) {
                     Spacer(Modifier.height(20.dp))

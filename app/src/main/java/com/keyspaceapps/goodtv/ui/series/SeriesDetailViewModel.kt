@@ -48,6 +48,12 @@ class SeriesDetailViewModel(
     private val _tmdb = MutableStateFlow<TmdbMeta?>(null)
     val tmdb: StateFlow<TmdbMeta?> = _tmdb
 
+    /** The person last opened from this page; focus goes back to them once on returning (see [takeOpenedPerson]). */
+    var openedPerson: Long? = null
+
+    /** The person to refocus on coming back, then forgotten, so a later return (from the player) starts as usual. */
+    fun takeOpenedPerson(): Long? = openedPerson.also { openedPerson = null }
+
     private val _people = MutableStateFlow<List<TmdbPerson>>(emptyList())
     /** TMDB's people for the title; empty until loaded and when TMDB lists nobody or can't be reached. */
     val people: StateFlow<List<TmdbPerson>> = _people

@@ -25,6 +25,7 @@ import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.ui.browse.CategoryGridScreen
 import com.keyspaceapps.goodtv.ui.categories.CategoriesScreen
 import com.keyspaceapps.goodtv.ui.home.HomeScreen
+import com.keyspaceapps.goodtv.ui.home.PersonSearchScreen
 import com.keyspaceapps.goodtv.ui.movies.MovieDetailScreen
 import com.keyspaceapps.goodtv.ui.series.NextEpisode
 import com.keyspaceapps.goodtv.ui.series.NextEpisodes
@@ -85,8 +86,9 @@ fun GoodTvNavigation() {
                         )
                     }
                 }
-                entry<MovieDetailKey> { key -> MovieDetailScreen(key = key, onPlay = { backStack.add(it) }) }
-                entry<SeriesDetailKey> { key -> SeriesDetailScreen(key = key, onPlay = { backStack.add(it) }) }
+                entry<MovieDetailKey> { key -> MovieDetailScreen(key = key, onPlay = { backStack.add(it) }, onPerson = { backStack.add(it) }) }
+                entry<SeriesDetailKey> { key -> SeriesDetailScreen(key = key, onPlay = { backStack.add(it) }, onPerson = { backStack.add(it) }) }
+                entry<PersonSearchKey> { key -> PersonSearchScreen(key = key, onNavigate = { backStack.add(it) }) }
                 entry<CategoryGridKey> { key ->
                     CategoryGridScreen(key = key, onItem = { item ->
                         backStack.add(if (key.kind == ContentKind.SERIES) SeriesDetailKey(item.sourceId, item.id) else MovieDetailKey(item.sourceId, item.id))

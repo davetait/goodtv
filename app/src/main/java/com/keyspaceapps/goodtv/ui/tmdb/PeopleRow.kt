@@ -6,7 +6,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -20,16 +26,25 @@ import com.keyspaceapps.goodtv.R
 import com.keyspaceapps.goodtv.data.tmdb.PersonJob
 import com.keyspaceapps.goodtv.data.tmdb.TmdbPerson
 
-/** "People": TMDB's directors or creators and cast for a title, one button each; draws nothing when [people] is empty. */
+/**
+ * "People": TMDB's directors or creators and cast for a title, one button each; draws nothing when [people] is empty.
+ * [focusId]'s button, scrolled into view, takes focus once when placed (coming back from that person's search).
+ */
 @Composable
-fun PeopleRow(people: List<TmdbPerson>, onPerson: (TmdbPerson) -> Unit, modifier: Modifier = Modifier) {
+fun PeopleRow(people: List<TmdbPerson>, onPerson: (TmdbPerson) -> Unit, modifier: Modifier = Modifier, focusId: Long? = null) {
     if (people.isEmpty()) return
+    val requested = remember { mutableStateOf(false) }
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = people.indexOfFirst { it.id == focusId }.coerceAtLeast(0))
     Column(modifier) {
         Text(stringResource(R.string.detail_people), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(8.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        LazyRow(state = listState, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             items(people, key = { it.id }) { p ->
-                Button(onClick = { onPerson(p) }, modifier = Modifier.testTag("person-${p.id}")) {
+                val requester = remember { FocusRequester() }
+                val refocus = Modifier.focusRequester(requester).onPlaced {
+                    if (p.id == focusId && !requested.value) { requested.value = true; requester.requestFocus() }
+                }
+                Button(onClick = { onPerson(p) }, modifier = Modifier.testTag("person-${p.id}").then(refocus)) {
                     Column {
                         Text(p.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         role(p)?.let {
