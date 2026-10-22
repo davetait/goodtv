@@ -54,13 +54,22 @@ object PeopleRules {
         return byTitle.values.toList()
     }
 
-    /** At most two people whose name is exactly what was typed, so a half-typed or common name finds nobody. */
+    /**
+     * At most two people whose name is what was typed, so a half-typed or common name finds nobody.
+     * One word must be the whole name; two or more must each be a whole word of the name, so
+     * "samuel jackson" finds Samuel L. Jackson but "tom cru" finds nobody.
+     */
     fun confidentPeople(query: String, results: List<TmdbPersonResult>): List<PersonMatch> {
         val q = TitleCleaner.normalize(query)
         if (q.isEmpty()) return emptyList()
-        val oneWord = !q.contains(' ')
+        val words = q.split(' ')
+        val oneWord = words.size == 1
+        fun nameMatches(name: String): Boolean {
+            val n = TitleCleaner.normalize(name)
+            return n == q || (!oneWord && n.split(' ').toSet().containsAll(words))
+        }
         return results
-            .filter { TitleCleaner.normalize(it.name) == q && it.known_for_department in SEARCH_DEPARTMENTS }
+            .filter { nameMatches(it.name) && it.known_for_department in SEARCH_DEPARTMENTS }
             .filter { !oneWord || (it.popularity ?: 0.0) >= MIN_ONE_WORD_POPULARITY }
             .sortedByDescending { it.popularity ?: 0.0 }
             .take(MAX_MATCHES)

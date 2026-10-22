@@ -80,5 +80,18 @@ class PeopleRulesTest {
         val three = listOf(r(1, "Ann Lee", "Acting", 3.0), r(2, "Ann Lee", "Directing", 9.0), r(3, "Ann Lee", "Writing", 6.0))
         assertEquals(listOf(PersonMatch(2, "Ann Lee"), PersonMatch(3, "Ann Lee")), PeopleRules.confidentPeople("ann lee", three))
         assertEquals(emptyList<PersonMatch>(), PeopleRules.confidentPeople("  ", three))
+        // Two or more words: every typed word is a whole word of the name, so a middle initial can be left out.
+        val jackson = listOf(r(2231, "Samuel L. Jackson", "Acting", 40.0), r(9, "Samuel Jacksonville", "Acting", 50.0))
+        assertEquals(listOf(PersonMatch(2231, "Samuel L. Jackson")), PeopleRules.confidentPeople("samuel jackson", jackson))
+        assertEquals(listOf(PersonMatch(2231, "Samuel L. Jackson")), PeopleRules.confidentPeople("Jackson, Samuel", jackson))
+        assertEquals(emptyList<PersonMatch>(), PeopleRules.confidentPeople("samuel jack", jackson))
+        assertEquals(emptyList<PersonMatch>(), PeopleRules.confidentPeople("samuel l jackson jr", jackson))
+        // One word still needs the whole name and the popularity.
+        assertEquals(emptyList<PersonMatch>(), PeopleRules.confidentPeople("jackson", jackson))
+        // Word matches keep the department allow-list, popularity order and the limit of two.
+        val many = listOf(
+            r(1, "Ann Marie Lee", "Acting", 3.0), r(2, "Ann B. Lee", "Directing", 9.0), r(3, "Lee Ann", "Writing", 6.0), r(4, "Ann Lee", "Crew", 99.0),
+        )
+        assertEquals(listOf(PersonMatch(2, "Ann B. Lee"), PersonMatch(3, "Lee Ann")), PeopleRules.confidentPeople("ann lee", many))
     }
 }
