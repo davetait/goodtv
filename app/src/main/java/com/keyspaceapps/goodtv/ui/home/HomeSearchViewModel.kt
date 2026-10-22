@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import com.keyspaceapps.goodtv.domain.label
 
@@ -95,10 +96,21 @@ class HomeSearchViewModel(
             .flatMapLatest { (q, s) -> if (q.isEmpty()) flowOf(null) else search(q, s) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    /** Empty while the query is blank, nobody matches, or TMDB is off. */
+    /** The query [people] currently answers; a new one clears the old sections at once. */
+    @Volatile private var peopleQuery = ""
+
+    /**
+     * Empty while the query is blank, nobody matches, or TMDB is off. A changed query empties it
+     * straight away, so an earlier person's titles never sit under a new query while TMDB answers;
+     * coming back to the screen (same query) keeps what was shown.
+     */
     val people: StateFlow<List<PersonSection>> =
         settledQuery.map { it.trim() }.distinctUntilChanged()
-            .flatMapLatest { q -> sectionsFor(q) }
+            .flatMapLatest { q ->
+                sectionsFor(q).onStart {
+                    if (q != peopleQuery) { peopleQuery = q; emit(emptyList()) }
+                }
+            }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun setQuery(value: String) { _query.value = value }

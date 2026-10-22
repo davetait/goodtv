@@ -44,6 +44,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -323,5 +324,41 @@ class HomeSearchViewModelTest {
         vm.setScope(SearchScope.LIVE)
         advanceUntilIdle()
         assertEquals(emptyList<PersonSection>(), vm.people.value)
+    }
+
+    @Test
+    fun editingTheQueryClearsTheOldPersonAtOnce() = runTest(dispatcher) {
+        tomCruiseRoutes()
+        routes["/3/search/person?Nicole Kidman"] = MockResponse.Builder().code(200)
+            .body("""{"page":1,"results":[{"id":900,"name":"Nicole Kidman","known_for_department":"Acting","popularity":30.0}]}""")
+            .headersDelay(5, java.util.concurrent.TimeUnit.SECONDS).build()
+        routes["/3/person/900/combined_credits"] = ok(creditsJson(3002))
+        val vm = HomeSearchViewModel(repo, peopleRepo(listOf(movie("p1", 361743), movie("p3", 3002, "Moulin")), io = Dispatchers.IO))
+        collectAll(vm)
+        vm.setQuery("Tom Cruise")
+        assertEquals(500L, (vm.people.first { it.isNotEmpty() }.single() as PersonSection.Found).personId)
+
+        vm.setQuery("Nicole Kidman")
+        advanceTimeBy(SEARCH_DEBOUNCE_MS + 1)
+        runCurrent()
+        // TMDB hasn't answered for the new name: no section, and certainly not Tom Cruise's.
+        assertEquals(emptyList<PersonSection>(), vm.people.value)
+        assertEquals(900L, (vm.people.first { it.isNotEmpty() }.single() as PersonSection.Found).personId)
+    }
+
+    @Test
+    fun comingBackToTheSameQueryKeepsTheSection() = runTest(dispatcher) {
+        tomCruiseRoutes()
+        val vm = HomeSearchViewModel(repo, peopleRepo(listOf(movie("p1", 361743))), PersonSearchKey(500, "Tom Cruise"))
+        val first = backgroundScope.launch { vm.people.collect {} }
+        advanceUntilIdle()
+        assertEquals(1, vm.people.value.size)
+        // Away on a title long enough for the flow to stop, then back.
+        first.cancel()
+        advanceTimeBy(10_000)
+        val seen = mutableListOf<List<PersonSection>>()
+        backgroundScope.launch { vm.people.collect { seen += it } }
+        advanceUntilIdle()
+        assertTrue(seen.toString(), seen.all { it.isNotEmpty() })
     }
 }
