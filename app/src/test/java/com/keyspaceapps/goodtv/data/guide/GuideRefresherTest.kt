@@ -11,6 +11,11 @@ import com.keyspaceapps.goodtv.domain.SourceRecord
 import com.keyspaceapps.goodtv.testing.FakeChannelSource
 import com.keyspaceapps.goodtv.testing.FakeLibraryStore
 import com.keyspaceapps.goodtv.testing.InMemoryGuideStore
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -45,7 +50,12 @@ class GuideRefresherTest {
 
     private val library = FakeLibraryStore()
     private val channelSource = FakeChannelSource()
-    private val guide = InMemoryGuideStore()
+    private val calls = ArrayList<String>()
+    private val mem = InMemoryGuideStore()
+    private val guide: GuideStore = object : GuideStore by mem {
+        override suspend fun replaceLinks(links: List<ChannelGuideLink>) { calls += "links"; mem.replaceLinks(links) }
+        override suspend fun markFetched(origin: GuideOrigin, atMs: Long) { calls += "fetched $origin"; mem.markFetched(origin, atMs) }
+    }
     private val playback = PlaybackState()
     private var now = Instant.parse("2026-10-20T08:00:00Z").toEpochMilli()
     private lateinit var refresher: GuideRefresher
@@ -80,31 +90,37 @@ class GuideRefresherTest {
         server.start()
         files[EpgShareFiles.LOCALS] = gz(locals)
         files[EpgShareFiles.CABLE] = gz(cable)
-        refresher = GuideRefresher(
-            guide, library, SourceRegistry(listOf(channelSource)), EpgShareSource(OkHttpClient(), server.url("/epgshare01/")),
-            playback, { now }, Dispatchers.Unconfined, tmp.newFolder(), { warnings += it },
-        )
+        refresher = refresherWith()
         runBlocking { addSource() }
     }
 
+    private val tempDir by lazy { tmp.newFolder() }
+
+    private fun refresherWith(limits: GuideLimits = GuideLimits(), timeoutMs: Long = GuideRefresher.DOWNLOAD_TIMEOUT_MS, store: GuideStore = guide, io: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Unconfined) = GuideRefresher(
+        store, library, SourceRegistry(listOf(channelSource)), EpgShareSource(OkHttpClient(), server.url("/epgshare01/")),
+        playback, { now }, io, tempDir, { warnings += it }, limits, timeoutMs,
+    )
+
+    private fun leftovers() = tempDir.listFiles().orEmpty().toList()
+
     @After fun tearDown() = server.close()
 
-    private suspend fun addSource() {
-        sourceId = library.insertSource(SourceRecord(0, SourceType.XTREAM, "p", SourceConfig.Xtream("http://p", "u", "p"), true, now, null))
-        fun ch(id: String, name: String, epg: String? = null) = LiveChannel(sourceId, id, "c1", name, null, null, epgChannelId = epg)
+    private suspend fun addSource(vararg names: Pair<String, String?>): Long {
+        val id = library.insertSource(SourceRecord(0, SourceType.XTREAM, "p", SourceConfig.Xtream("http://p", "u", "p"), true, now, null))
+        val channels = if (names.isEmpty()) listOf(
+            "US: NBC 4 NEW YORK (WNBC)" to "wnbc.us", "US: FOX NEWS CHANNEL HD" to "foxnews.us",
+            "US: SOME LOCAL ACCESS CHANNEL" to "access.us", "US: NO GUIDE AT ALL" to null,
+        ) else names.toList()
         library.replaceCatalog(
-            sourceId,
+            id,
             Catalog(
-                listOf(Category(sourceId, ContentKind.LIVE, "c1", "US| TV")),
-                listOf(
-                    ch("1", "US: NBC 4 NEW YORK (WNBC)", "wnbc.us"),
-                    ch("2", "US: FOX NEWS CHANNEL HD", "foxnews.us"),
-                    ch("3", "US: SOME LOCAL ACCESS CHANNEL", "access.us"),
-                    ch("4", "US: NO GUIDE AT ALL"),
-                ),
+                listOf(Category(id, ContentKind.LIVE, "c1", "US| TV")),
+                channels.mapIndexed { i, (name, epg) -> LiveChannel(id, "${i + 1}", "c1", name, null, null, epgChannelId = epg) },
                 emptyList(), emptyList(),
             ),
         )
+        if (sourceId == 0L) sourceId = id
+        return id
     }
 
     private fun providerXml() = """<tv>
@@ -125,7 +141,7 @@ class GuideRefresherTest {
             guide.observeLinks().first().toSet(),
         )
         assertEquals(now, guide.fetchedAt(GuideOrigin.EPGSHARE))
-        assertTrue(tmp.root.walkTopDown().none { it.isFile && it.name.startsWith("guide") })
+        assertTrue(leftovers().isEmpty())
     }
 
     @Test fun notAgainWithin24Hours() = runBlocking {
@@ -153,11 +169,11 @@ class GuideRefresherTest {
 
     @Test fun providerGuideWaitsWhilePlaying() = runBlocking {
         provides(providerXml())
-        playback.playing.value = true
+        playback.enter()
         refresher.refreshIfStale()
         assertTrue(channelSource.openGuideCalls.isEmpty())
         assertNull(guide.fetchedAt(GuideOrigin.PROVIDER))
-        playback.playing.value = false
+        playback.exit()
         refresher.refreshIfStale()
         assertEquals(listOf(sourceId), channelSource.openGuideCalls)
         refresher.refreshIfStale()
@@ -190,5 +206,163 @@ class GuideRefresherTest {
         assertTrue("P:access.us" in programmeIds())
         assertTrue(ChannelGuideLink(sourceId, "3", "P:access.us") in guide.observeLinks().first())
         assertEquals(now - GUIDE_MAX_AGE_MS, guide.fetchedAt(GuideOrigin.PROVIDER))
+    }
+
+    @Test fun killedAfterEpgshareStillHasItsLinks() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        channelSource.guideResults[sourceId] = { started.complete(Unit); awaitCancellation() }
+        val job = launch { refresher.refreshIfStale() }
+        started.await()
+        job.cancelAndJoin()
+        assertEquals(2, guide.observeLinks().first().size)
+        assertEquals(now, guide.fetchedAt(GuideOrigin.EPGSHARE))
+        assertEquals(listOf("links", "fetched EPGSHARE"), calls)
+        assertNull(guide.fetchedAt(GuideOrigin.PROVIDER))
+        assertTrue(leftovers().isEmpty())
+    }
+
+    @Test fun cancellationPropagatesAndRemovesTempFiles() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        channelSource.guideResults[sourceId] = { started.complete(Unit); awaitCancellation() }
+        val job: Job = launch { refresher.refreshIfStale() }
+        started.await()
+        job.cancelAndJoin()
+        assertTrue(job.isCancelled)
+        assertTrue(leftovers().isEmpty())
+    }
+
+    @Test fun playNextKeepsPlayingTrue() {
+        playback.enter(); playback.enter(); playback.exit()
+        assertTrue(playback.playing.value)
+        playback.exit()
+        assertTrue(!playback.playing.value)
+        playback.exit()
+        assertTrue(!playback.playing.value)
+    }
+
+    @Test fun providerAbortsWhenPlaybackStarts() = runBlocking {
+        channelSource.guideResults[sourceId] = {
+            playback.enter() // a player opens while the provider's guide is being downloaded
+            Result.success(ByteArrayInputStream(providerXml().toByteArray()))
+        }
+        refresher.refreshIfStale()
+        assertEquals(setOf("WNBC-DT.us_locals1", "Fox.News.Channel.HD.us2"), guide.observeChannels().first().map { it.guideId }.toSet())
+        assertNull(guide.fetchedAt(GuideOrigin.PROVIDER))
+        assertTrue(guide.observeLinks().first().none { it.guideId.startsWith("P:") })
+        assertTrue(warnings.any { "PROVIDER" in it })
+        assertTrue(leftovers().isEmpty())
+    }
+
+    @Test fun newSourceWithoutLinksTriggersARefresh() = runBlocking {
+        refresher.refreshIfStale()
+        val first = hits.size
+        refresher.refreshIfStale()
+        assertEquals(first, hits.size)
+        val second = addSource("US: ABC 7 NEW YORK (WABC)" to null)
+        refresher.refreshIfStale()
+        assertEquals(first * 2, hits.size)
+        assertTrue(ChannelGuideLink(second, "1", "WABC-DT.us_locals1") in guide.observeLinks().first())
+        // A source nothing matches is tried once, not on every call.
+        addSource("US: NOTHING MATCHES THIS" to null)
+        refresher.refreshIfStale(); refresher.refreshIfStale()
+        assertEquals(first * 3, hits.size)
+    }
+
+    @Test fun oneMatchRunsOverBothSources() = runBlocking {
+        files[EpgShareFiles.LOCALS] = gz(
+            """<tv>${channel("KRQE-DT.us_locals1", "KRQE-DT")} ${channel("KRQE-DT2.us_locals1", "KRQE-DT2")}</tv>""",
+        )
+        library.replaceCatalog(sourceId, Catalog(emptyList(), emptyList(), emptyList(), emptyList()))
+        val a = addSource("US: CBS 13 (KRQE) ALBUQUERQUE HD" to null, "US: CBS 13 (KRQE) ALBUQUERQUE FHD" to null)
+        val b = addSource("US: FOX (KRQE) ALBUQUERQUE HD" to null)
+        refresher.refreshIfStale()
+        val links = guide.observeLinks().first().toSet()
+        // Alone, source b's FOX would be KRQE's main channel; across the whole lineup CBS is, so FOX is the subchannel.
+        assertEquals(
+            setOf(
+                ChannelGuideLink(a, "1", "KRQE-DT.us_locals1"), ChannelGuideLink(a, "2", "KRQE-DT.us_locals1"),
+                ChannelGuideLink(b, "1", "KRQE-DT2.us_locals1"),
+            ),
+            links,
+        )
+        assertEquals(2, hits.size)
+    }
+
+    @Test fun oversizeDownloadFailsThatOriginOnly() = runBlocking {
+        provides(providerXml())
+        val tiny = GuideLimits(locals = GuideCap(download = 20, unpacked = 1 shl 20))
+        refresherWith(tiny).refreshIfStale()
+        assertNull(guide.fetchedAt(GuideOrigin.EPGSHARE))
+        assertEquals(now, guide.fetchedAt(GuideOrigin.PROVIDER))
+        assertTrue(warnings.any { "EPGSHARE" in it })
+        assertTrue(leftovers().isEmpty())
+    }
+
+    @Test fun oversizeUnpackedFileFailsThatOrigin() = runBlocking {
+        val bomb = GuideLimits(cable = GuideCap(download = 1 shl 20, unpacked = 100))
+        refresherWith(bomb).refreshIfStale()
+        assertNull(guide.fetchedAt(GuideOrigin.EPGSHARE))
+        assertTrue(guide.observeChannels().first().isEmpty())
+        assertTrue(leftovers().isEmpty())
+    }
+
+    @Test fun notEnoughDiskSpaceFailsTheOrigin() = runBlocking {
+        refresherWith(GuideLimits(spaceReserve = Long.MAX_VALUE / 2)).refreshIfStale()
+        assertNull(guide.fetchedAt(GuideOrigin.EPGSHARE))
+        assertTrue(hits.isEmpty())
+    }
+
+    @Test fun stalledDownloadTimesOut() = runBlocking {
+        channelSource.guideResults[sourceId] = {
+            Result.success(object : java.io.InputStream() {
+                override fun read(): Int = throw UnsupportedOperationException()
+                override fun read(b: ByteArray, off: Int, len: Int): Int { Thread.sleep(10); b[off] = ' '.code.toByte(); return 1 }
+            })
+        }
+        val started = System.nanoTime()
+        // A real dispatcher: on the test thread the blocking read would also block the timer.
+        refresherWith(timeoutMs = 300, io = Dispatchers.IO).refreshIfStale()
+        assertTrue((System.nanoTime() - started) / 1_000_000 < 5_000)
+        assertNull(guide.fetchedAt(GuideOrigin.PROVIDER))
+        assertEquals(now, guide.fetchedAt(GuideOrigin.EPGSHARE))
+        assertTrue(leftovers().isEmpty())
+    }
+
+    @Test fun tempFilesRemovedAfterFailure() = runBlocking {
+        failing += EpgShareFiles.CABLE
+        refresher.refreshIfStale()
+        assertTrue(hits.isNotEmpty())
+        assertTrue(leftovers().isEmpty())
+    }
+
+    /** Manual load check (remove @Ignore): ~500 MB of XMLTV through the real pipeline; prints time and peak live heap. */
+    @org.junit.Ignore("manual load check")
+    @Test fun largeGuideStaysFastAndSmall() = runBlocking {
+        val big = tmp.newFile("big.xml.gz")
+        val total = 700_000
+        val desc = "d".repeat(600)
+        java.util.zip.GZIPOutputStream(big.outputStream().buffered()).bufferedWriter().use { w ->
+            w.write("<tv>" + channel("WNBC-DT.us_locals1", "WNBC-DT"))
+            for (i in 0 until total) {
+                w.write("""<programme channel="WNBC-DT.us_locals1" start="${xmltvTime(now + 3_600_000)}" stop="${xmltvTime(now + 7_200_000)}"><title>P$i</title><desc>$desc $i</desc><category>A</category></programme>""")
+                w.write("\n")
+            }
+            w.write("</tv>")
+        }
+        files[EpgShareFiles.LOCALS] = big.readBytes()
+        var count = 0L
+        var peak = 0L
+        val counting = object : GuideStore by mem {
+            override suspend fun replaceGuide(origin: GuideOrigin, channels: List<GuideChannel>, programmes: Sequence<GuideProgramme>) {
+                for (p in programmes) {
+                    if (++count % 100_000 == 0L) { System.gc(); val rt = Runtime.getRuntime(); peak = maxOf(peak, rt.totalMemory() - rt.freeMemory()) }
+                }
+            }
+        }
+        val t0 = System.nanoTime()
+        refresherWith(store = counting).refreshIfStale()
+        val ms = (System.nanoTime() - t0) / 1_000_000
+        println("GUIDE load: $count programmes, ~${count * (desc.length + 260) / 1_000_000} MB unpacked, ${ms} ms, peak live heap ${peak / 1_000_000} MB")
+        assertTrue(count >= total) // plus the cable sample's own programmes
     }
 }

@@ -69,8 +69,8 @@ fun GoodTvNavigation() {
                         val ref = key.watchRef()
                         // Guide downloads wait while the player is on screen.
                         DisposableEffect(Unit) {
-                            graph.playback.playing.value = true
-                            onDispose { graph.playback.playing.value = false }
+                            graph.playback.enter()
+                            onDispose { graph.playback.exit() }
                         }
                         PlayerScreen(
                             item = current,

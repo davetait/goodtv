@@ -175,7 +175,10 @@ class AppGraph(val context: Context) {
         }
     }
 
-    /** Refreshes the guide whenever syncing finishes: a new source or a changed lineup needs new links. Call once per process. */
+    /**
+     * Refreshes the guide whenever syncing finishes. A fresh guide is left alone, except that a source
+     * with channels but no guide links yet (just added) gets the epgshare01 files matched to it. Call once per process.
+     */
     fun startGuideRefreshAfterSyncs() {
         appScope.launch {
             syncManager.state.map { it is SyncState.Syncing }.distinctUntilChanged().drop(1).filter { syncing -> !syncing }

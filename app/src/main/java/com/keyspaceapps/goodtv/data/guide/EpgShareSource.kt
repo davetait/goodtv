@@ -23,12 +23,15 @@ class EpgShareSource(
     private val baseUrl: HttpUrl = "https://epgshare01.online/epgshare01/".toHttpUrl(),
 ) {
     /** [file] gunzipped, streamed; closing the stream releases the connection. Throws [IOException] on a failed download. */
-    suspend fun open(file: String): InputStream = withContext(Dispatchers.IO) {
+    suspend fun open(file: String): InputStream = GZIPInputStream(openCompressed(file), 1 shl 16)
+
+    /** [file] as served (gzip), streamed. Throws [IOException] on a failed download. */
+    suspend fun openCompressed(file: String): InputStream = withContext(Dispatchers.IO) {
         val request = Request.Builder().url(baseUrl.resolve(file) ?: throw IOException("Bad guide file name")).header("User-Agent", USER_AGENT).build()
         val response = http.newCall(request).execute()
         try {
             if (!response.isSuccessful) throw IOException("Guide server returned HTTP ${response.code}")
-            GZIPInputStream(response.body.byteStream(), 1 shl 16)
+            response.body.byteStream()
         } catch (e: Throwable) {
             response.close()
             throw e
