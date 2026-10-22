@@ -245,6 +245,11 @@ class MigrationTest {
         db.execSQL("PRAGMA foreign_keys = ON") // the test helper's connection leaves them off
         db.execSQL("DELETE FROM tmdb_people WHERE personId = 6384")
         db.query("SELECT COUNT(*) FROM tmdb_person_credits").use { c -> c.moveToFirst(); assertEquals(0, c.getInt(0)) }
+        // A person's series are looked up by TMDB id, as movies already are.
+        for ((table, index) in listOf("series" to "index_series_tmdbId", "movies" to "index_movies_tmdbId")) {
+            val names = db.query("PRAGMA index_list('$table')").use { c -> buildList { while (c.moveToNext()) add(c.getString(c.getColumnIndexOrThrow("name"))) } }
+            assertTrue("$index in $names", index in names)
+        }
         db.close()
     }
 }

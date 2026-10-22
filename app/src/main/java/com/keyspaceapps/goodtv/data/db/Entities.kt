@@ -55,7 +55,7 @@ data class MovieEntity(
     tableName = "series",
     primaryKeys = ["sourceId", "id"],
     foreignKeys = [ForeignKey(entity = SourceEntity::class, parentColumns = ["id"], childColumns = ["sourceId"], onDelete = ForeignKey.CASCADE)],
-    indices = [Index("sourceId", "categoryId")],
+    indices = [Index("sourceId", "categoryId"), Index("tmdbId")],
 )
 data class SeriesEntity(
     val sourceId: Long, val id: String, val categoryId: String?, val name: String, val coverUrl: String?, val plot: String?, val rating: Double?,

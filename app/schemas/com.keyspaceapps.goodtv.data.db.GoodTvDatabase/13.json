@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 13,
-    "identityHash": "fcb210e403f5157dc916431ef6d14557",
+    "identityHash": "7e39899ec6c0a365fcf64cf6da970429",
     "entities": [
       {
         "tableName": "sources",
@@ -406,6 +406,15 @@
             ],
             "orders": [],
             "createSql": "CREATE INDEX IF NOT EXISTS `index_series_sourceId_categoryId` ON `${TABLE_NAME}` (`sourceId`, `categoryId`)"
+          },
+          {
+            "name": "index_series_tmdbId",
+            "unique": false,
+            "columnNames": [
+              "tmdbId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_series_tmdbId` ON `${TABLE_NAME}` (`tmdbId`)"
           }
         ],
         "foreignKeys": [
@@ -1940,7 +1949,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'fcb210e403f5157dc916431ef6d14557')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '7e39899ec6c0a365fcf64cf6da970429')"
     ]
   }
 }

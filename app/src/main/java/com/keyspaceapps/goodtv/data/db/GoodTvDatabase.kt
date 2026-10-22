@@ -180,6 +180,8 @@ val MIGRATION_12_13 = object : Migration(12, 13) {
                 "PRIMARY KEY(`personId`, `kind`, `tmdbId`), FOREIGN KEY(`personId`) REFERENCES `tmdb_people`(`personId`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         )
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_tmdb_person_credits_personId` ON `tmdb_person_credits` (`personId`)")
+        // A person's series are looked up by TMDB id, as movies already are.
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_series_tmdbId` ON `series` (`tmdbId`)")
     }
 }
 
