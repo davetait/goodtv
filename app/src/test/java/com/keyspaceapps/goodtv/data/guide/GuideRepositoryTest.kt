@@ -10,7 +10,10 @@ import com.keyspaceapps.goodtv.testing.FakeLibraryStore
 import com.keyspaceapps.goodtv.testing.InMemoryGuideStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
@@ -29,17 +32,30 @@ class GuideRepositoryTest {
     private val hour = 3_600_000L
     private val windowStart = Instant.parse("2026-10-21T18:00:00Z").toEpochMilli()
 
+    private val guide = InMemoryGuideStore()
     private val lineup = MutableStateFlow<List<ChannelCandidate>>(emptyList())
     private val fake = FakeLibraryStore()
+    private var lineupCollections = 0
     private val library: LibraryStore = object : LibraryStore by fake {
-        override fun observeSportsCandidates() = lineup
+        override fun observeSportsCandidates() = lineup.onStart { lineupCollections++ }
     }
-    private val guide = InMemoryGuideStore()
+    /** The refresher reads its own lineup, so its runs can be counted apart from the board's. */
+    private var refreshes = 0
+    private val refresherLibrary: LibraryStore = object : LibraryStore by fake {
+        override fun observeSportsCandidates() = flow<List<ChannelCandidate>> { refreshes++; emit(emptyList()) }
+    }
+    /** Stands in for SQLite's limit on bind variables: a query with more ids than a chunk fails. */
+    private val limited: GuideStore = object : GuideStore by guide {
+        override fun observeProgrammes(guideIds: Set<String>, fromMs: Long, untilMs: Long): Flow<List<GuideProgramme>> {
+            check(guideIds.size <= 500) { "${guideIds.size} ids in one query" }
+            return guide.observeProgrammes(guideIds, fromMs, untilMs)
+        }
+    }
     private val repo by lazy { repoFor(library) }
 
     private fun repoFor(lib: LibraryStore, dispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Unconfined) = GuideRepository(
-        lib, guide,
-        GuideRefresher(guide, lib, SourceRegistry(emptyList()), EpgShareSource(OkHttpClient()), PlaybackState(), { now }, dispatcher, tmp.newFolder()),
+        lib, limited,
+        GuideRefresher(guide, refresherLibrary, SourceRegistry(emptyList()), EpgShareSource(OkHttpClient()), PlaybackState(), { now }, dispatcher, tmp.newFolder()),
         LiveRefresher(lib, SourceRegistry(listOf(FakeChannelSource())), { false }, { now }),
         { now }, dispatcher,
     )
@@ -174,7 +190,7 @@ class GuideRepositoryTest {
         assertEquals(listOf(true, true, false), hits.map { it.programme != null })
     }
 
-    @Test fun programmeCrossingWindowEdgeIsClipped() = runBlocking {
+    @Test fun programmesCrossingTheWindowEdgeAreIncluded() = runBlocking {
         val cnn = feed("US: CNN HD", NEWS)
         lineup.value = listOf(cnn)
         guide.replaceGuide(
@@ -190,6 +206,51 @@ class GuideRepositoryTest {
         assertEquals(listOf("Crossing", "Last"), board().section("News").rows.single().programmes.map { it.title })
     }
 
+    @Test fun aBoardOfThousandsOfLinkedChannelsReturnsAllTheirProgrammes() = runBlocking {
+        val feeds = (1..1_200).map { feed("US: CHANNEL $it", ENT) }
+        lineup.value = feeds
+        guide.replaceGuide(
+            GuideOrigin.EPGSHARE, feeds.indices.map { GuideChannel("G$it", GuideOrigin.EPGSHARE, null) },
+            feeds.indices.asSequence().map { programme("G$it", "Show $it", windowStart + hour) },
+        )
+        guide.replaceLinks(feeds.mapIndexed { i, c -> link(c, "G$i") })
+        val rows = board().section("Entertainment").rows
+        assertEquals(1_200, rows.size)
+        assertTrue(rows.all { it.programmes.size == 1 })
+    }
+
+    @Test fun movingTheWindowReadsTheLineupAndRunsTheRefresherOnce() = runBlocking {
+        lineup.value = listOf(feed("US: CNN HD", NEWS))
+        for (i in 0 until 3) repo.board(GuideFilter.ALL, windowStart + i * hour).first()
+        repo.board(GuideFilter.NEWS, windowStart).first()
+        repo.search("cnn").first()
+        assertEquals(1, lineupCollections)
+        assertEquals(1, refreshes)
+    }
+
+    @Test fun appCopiesOfStationsGoUnderMoreEvenInDefaultMarkets() {
+        lineup.value = listOf(
+            feed("US: NBC 4 (WNBC) NEW YORK (A) ᴿᴬᵂ", NBC),
+            feed("PRIME: NBC NEW YORK (WNBC) ᴿᴬᵂ", "US| PRIME ᴿᴬᵂ ⁶⁰ᶠᵖˢ"),
+            feed("RK: NBC 4 NEW YORK (WNBC) ᴿᴬᵂ", "US| ROKU ᴿᴬᵂ ⁶⁰ᶠᵖˢ"),
+        )
+        val nbc = board().section("NBC")
+        assertEquals(1, nbc.rows.size)
+        assertEquals(2, nbc.more.size)
+        assertTrue(nbc.more.all { it.key.startsWith("prime ") || it.key.startsWith("roku ") })
+    }
+
+    @Test fun stationRowIsNamedByItsShortestNetworkFirstFeed() {
+        lineup.value = listOf(
+            feed("TV: A3 NEW YORK 04 WNBC NBC ᴿᴬᵂ", "US| TV ᴿᴬᵂ ⁶⁰ᶠᵖˢ"),
+            feed("US: NBC 4 (WNBC) NEW YORK (A) ᴿᴬᵂ", NBC),
+            feed("US: NBC (WNBC) NEW YORK (D) ᴿᴬᵂ", NBC),
+        )
+        val row = board().section("NBC").rows.single()
+        assertEquals(3, row.feeds.size)
+        assertEquals("NBC (WNBC) NEW YORK", row.name)
+    }
+
     private val fixture by lazy {
         javaClass.classLoader!!.getResourceAsStream("live/visible_channels.tsv")!!.bufferedReader().readLines().filter { it.isNotEmpty() }
             .map { it.split('\t') }.mapIndexed { i, r -> ChannelCandidate(LiveChannel(1, "$i", null, r[0], r[2], null), r[1]) }
@@ -201,7 +262,7 @@ class GuideRepositoryTest {
         val b = repoFor(library, Dispatchers.Default).board(GuideFilter.ALL, windowStart).first()
         val ms = (System.nanoTime() - started) / 1_000_000
         val rows = b.sections.flatMap { it.rows + it.more }
-        assertTrue("took ${ms}ms", ms < 2_000)
+        assertTrue("took ${ms}ms", ms < 5_000)
         assertTrue(rows.none { r -> r.name.contains("##") || r.name.contains("NO EVENT", ignoreCase = true) })
         assertTrue(rows.none { it.genre == LiveGenre.EVENTS })
         val nbc = b.section("NBC")

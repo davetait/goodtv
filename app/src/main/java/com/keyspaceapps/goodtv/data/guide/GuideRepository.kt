@@ -5,9 +5,16 @@ import com.keyspaceapps.goodtv.data.sports.ChannelCandidate
 import com.keyspaceapps.goodtv.data.sports.ChannelOrder
 import com.keyspaceapps.goodtv.data.sports.GameMatcher
 import com.keyspaceapps.goodtv.data.sports.LiveRefresher
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -55,7 +62,7 @@ interface GuideSource {
 class GuideRepository(
     private val library: LibraryStore,
     private val store: GuideStore,
-    @Suppress("unused") private val refresher: GuideRefresher,
+    private val refresher: GuideRefresher,
     private val liveRefresher: LiveRefresher,
     private val clock: () -> Long,
     private val compute: CoroutineDispatcher,
@@ -71,6 +78,11 @@ class GuideRepository(
         val loopShow: String?,
         val feeds: List<ChannelCandidate>,
         val providerLogo: String?,
+        /** [GameMatcher.normalize] of [name] and [loopShow], computed once: sorting and search use them. */
+        val sortKey: String,
+        val loopKey: String?,
+        /** A Prime, Roku or Tubi copy of a station: its own row, never among a network's main rows. */
+        val appCopy: Boolean,
     )
 
     /** A [Base] with its guide link and logo. */
@@ -90,19 +102,38 @@ class GuideRepository(
         }
         val rows = groups.map { (key, feeds) ->
             val ids = feeds.map { it.second }
+            val network = ids.firstNotNullOfOrNull { it.network }
+            val callSign = ids.firstNotNullOfOrNull { it.callSign }
+            val name = nameOf(ids, network, callSign)
+            val loopShow = ids.firstNotNullOfOrNull { it.loopShow }
             Base(
                 key = key,
-                name = ids.first().displayName,
+                name = name,
                 genre = ids.firstOrNull { it.genre != LiveGenre.ENTERTAINMENT }?.genre ?: LiveGenre.ENTERTAINMENT,
-                network = ids.firstNotNullOfOrNull { it.network },
-                callSign = ids.firstNotNullOfOrNull { it.callSign },
+                network = network,
+                callSign = callSign,
                 market = ids.firstNotNullOfOrNull { it.market },
-                loopShow = ids.firstNotNullOfOrNull { it.loopShow },
+                loopShow = loopShow,
                 feeds = feeds.map { it.first },
                 providerLogo = feeds.firstNotNullOfOrNull { (c, _) -> c.channel.logoUrl?.takeIf { it.isNotBlank() && it !in placeholders } },
+                sortKey = GameMatcher.normalize(name),
+                loopKey = loopShow?.let(GameMatcher::normalize),
+                appCopy = network != null && APP_PREFIXES.any { key.startsWith(it) },
             )
         }
         return Lineup(candidates, rows).also { lineupCache = it }
+    }
+
+    /**
+     * A station's copies are named differently ("A3 NEW YORK 04 WNBC NBC", "NBC (WNBC) NEW YORK"): the row takes
+     * the shortest name that starts with its network, else the shortest. Other rows take their first feed's name.
+     */
+    private fun nameOf(ids: List<ChannelIdentity>, network: Network?, callSign: String?): String {
+        if (network == null || callSign == null) return ids.first().displayName
+        val word = network.name.lowercase()
+        val names = ids.map { it.displayName }
+        return names.filter { GameMatcher.normalize(PROVIDER_TAG.replaceFirst(it, "")).startsWith(word) }.minByOrNull { it.length }
+            ?: names.minBy { it.length }
     }
 
     private fun resolve(lineup: Lineup, links: List<ChannelGuideLink>, channels: List<GuideChannel>): List<Resolved> {
@@ -116,10 +147,28 @@ class GuideRepository(
         }
     }
 
-    /** The lineup merged with guide links and favourites; the programme-free part of every board and search. */
-    private fun resolved(): Flow<Pair<List<Resolved>, Set<String>>> = combine(
+    private val scope = CoroutineScope(SupervisorJob() + compute)
+
+    /**
+     * The lineup merged with guide links and favourites; the programme-free part of every board and search,
+     * built once and shared. Starting it also asks the guide refresher for a daily refresh, off the first emission.
+     */
+    private val resolved: Flow<Pair<List<Resolved>, Set<String>>> = combine(
         library.observeSportsCandidates(), store.observeLinks(), store.observeChannels(), store.observeFavourites(),
     ) { candidates, links, channels, favourites -> resolve(lineupOf(candidates), links, channels) to favourites }
+        .flowOn(compute)
+        .onStart {
+            scope.launch {
+                try {
+                    refresher.refreshIfStale()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // The guide stays as it was; the next start tries again.
+                }
+            }
+        }
+        .shareIn(scope, SharingStarted.WhileSubscribed(5_000), replay = 1)
 
     private fun row(r: Resolved, favourites: Set<String>, programmes: Map<String, List<GuideProgramme>>) = GuideRow(
         key = r.base.key, name = r.base.name, logoUrl = r.logoUrl, genre = r.base.genre, feeds = r.base.feeds,
@@ -127,15 +176,22 @@ class GuideRepository(
     )
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    override fun board(filter: GuideFilter, windowStartMs: Long): Flow<GuideBoard> = resolved().flatMapLatest { (all, favourites) ->
+    override fun board(filter: GuideFilter, windowStartMs: Long): Flow<GuideBoard> = resolved.flatMapLatest { (all, favourites) ->
         val shown = if (filter == GuideFilter.FAVOURITES) all.filter { it.base.key in favourites } else all.filter { inFilter(it.base, filter) }
         val ids = shown.mapNotNullTo(HashSet()) { it.guideId }
-        store.observeProgrammes(ids, windowStartMs, windowStartMs + WINDOW_MS).map { list ->
+        programmesOf(ids, windowStartMs, windowStartMs + WINDOW_MS).map { list ->
             val byGuide = list.groupBy { it.guideId }
             val rows = shown.map { it to row(it, favourites, byGuide) }
             GuideBoard(sections(filter, rows), windowStartMs)
         }
     }.flowOn(compute)
+
+    /** [GuideStore.observeProgrammes] in chunks, so a long list of ids never overruns SQLite's bind-variable limit. */
+    private fun programmesOf(ids: Set<String>, fromMs: Long, untilMs: Long): Flow<List<GuideProgramme>> {
+        if (ids.isEmpty()) return flowOf(emptyList())
+        val chunks = ids.chunked(ID_CHUNK).map { store.observeProgrammes(it.toSet(), fromMs, untilMs) }
+        return combine(chunks) { parts -> parts.flatMap { it }.sortedWith(compareBy({ it.guideId }, { it.startMs })) }
+    }
 
     private fun inFilter(b: Base, filter: GuideFilter): Boolean = when (filter) {
         GuideFilter.ALL -> b.genre != LiveGenre.EVENTS
@@ -146,7 +202,7 @@ class GuideRepository(
     }
 
     private fun sections(filter: GuideFilter, rows: List<Pair<Resolved, GuideRow>>): List<GuideSection> {
-        fun byName(list: List<Pair<Resolved, GuideRow>>) = list.sortedBy { GameMatcher.normalize(it.second.name) }
+        fun byName(list: List<Pair<Resolved, GuideRow>>) = list.sortedBy { it.first.base.sortKey }
         fun section(title: String, network: Network?, main: List<Pair<Resolved, GuideRow>>, more: List<Pair<Resolved, GuideRow>> = emptyList()) =
             GuideSection(title, network, main.map { it.second }, more.map { it.second })
 
@@ -155,10 +211,10 @@ class GuideRepository(
             val mine = rows.filter { it.first.base.network == n }
             // A national feed is the network's own name ("ABC (EAST)"); every other row is a local, placed by its market.
             val allowed = ChannelNames.REGIONS.keys + n.name.lowercase()
-            val (national, locals) = mine.partition { r -> r.first.base.callSign == null && ChannelNames.words(r.second.name).all { it in allowed } }
-            val (local, other) = locals.partition { it.first.base.market in DEFAULT_MARKETS }
-            val main = byName(national) + local.sortedWith(compareBy({ DEFAULT_MARKETS.indexOf(it.first.base.market) }, { GameMatcher.normalize(it.second.name) }))
-            val more = other.sortedWith(compareBy({ it.first.base.market == null }, { it.first.base.market }, { GameMatcher.normalize(it.second.name) }))
+            val (national, locals) = mine.partition { r -> !r.first.base.appCopy && r.first.base.callSign == null && ChannelNames.words(r.second.name).all { it in allowed } }
+            val (local, other) = locals.partition { it.first.base.market in DEFAULT_MARKETS && !it.first.base.appCopy }
+            val main = byName(national) + local.sortedWith(compareBy({ DEFAULT_MARKETS.indexOf(it.first.base.market) }, { it.first.base.sortKey }))
+            val more = other.sortedWith(compareBy({ it.first.base.market == null }, { it.first.base.market }, { it.first.base.sortKey }))
             if (main.isEmpty() && more.isEmpty()) null else section(n.name, n, main, more)
         }
         fun genre(g: LiveGenre, from: List<Pair<Resolved, GuideRow>>) =
@@ -178,15 +234,15 @@ class GuideRepository(
         val needle = GameMatcher.normalize(query)
         if (needle.isEmpty()) return flowOf(emptyList())
         @OptIn(ExperimentalCoroutinesApi::class)
-        return resolved().mapLatest { (all, favourites) ->
+        return resolved.mapLatest { (all, favourites) ->
             val now = clock()
             val byGuide = all.filter { it.guideId != null }.groupBy { it.guideId!! }
             val programmeHits = store.searchProgrammes(query.trim(), now, SEARCH_PROGRAMMES)
                 .sortedWith(compareBy({ !(it.startMs <= now && now < it.endMs) }, { it.startMs }))
                 .flatMap { p -> byGuide[p.guideId].orEmpty().map { GuideSearchHit(row(it, favourites, emptyMap()), p) } }
             val named = all.filter { r ->
-                GameMatcher.normalize(r.base.name).contains(needle) || r.base.loopShow?.let { GameMatcher.normalize(it).contains(needle) } == true
-            }.sortedBy { GameMatcher.normalize(it.base.name) }.map { GuideSearchHit(row(it, favourites, emptyMap()), null) }
+                needle in r.base.sortKey || r.base.loopKey?.contains(needle) == true
+            }.sortedBy { it.base.sortKey }.map { GuideSearchHit(row(it, favourites, emptyMap()), null) }
             val seen = programmeHits.mapTo(HashSet()) { it.row.key }
             programmeHits + named.filter { seen.add(it.row.key) }.take(SEARCH_PROGRAMMES)
         }.flowOn(compute)
@@ -200,5 +256,8 @@ class GuideRepository(
         const val WINDOW_MS = 3 * 3_600_000L
         private const val FAVOURITES_TITLE = "Favourites"
         private const val SEARCH_PROGRAMMES = 50
+        private const val ID_CHUNK = 500
+        private val APP_PREFIXES = listOf("prime ", "roku ", "tubi ")
+        private val PROVIDER_TAG = Regex("""^\s*[A-Z0-9&/+]{1,6}:\s*""")
     }
 }
