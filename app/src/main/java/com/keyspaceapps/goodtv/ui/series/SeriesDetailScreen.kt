@@ -42,6 +42,9 @@ import com.keyspaceapps.goodtv.data.tmdb.TmdbMeta
 import com.keyspaceapps.goodtv.data.watchlist.WatchListKind
 import com.keyspaceapps.goodtv.data.watchlist.WatchListRef
 import com.keyspaceapps.goodtv.domain.Episode
+import com.keyspaceapps.goodtv.data.tmdb.TmdbPerson
+import com.keyspaceapps.goodtv.ui.nav.PersonSearchKey
+import com.keyspaceapps.goodtv.ui.tmdb.PeopleRow
 import com.keyspaceapps.goodtv.ui.tmdb.TmdbCredit
 import com.keyspaceapps.goodtv.ui.tmdb.detailRating
 import com.keyspaceapps.goodtv.domain.SeriesDetail
@@ -55,16 +58,17 @@ import com.keyspaceapps.goodtv.data.progress.WatchProgress
 import com.keyspaceapps.goodtv.ui.watchlist.WatchListButton
 
 @Composable
-fun SeriesDetailScreen(key: SeriesDetailKey, onPlay: (PlayerKey) -> Unit) {
-    val vm = goodTvViewModel(key = "series-${key.sourceId}-${key.seriesId}") { SeriesDetailViewModel(it.repository, key, it.tmdb, it.watchProgress) }
+fun SeriesDetailScreen(key: SeriesDetailKey, onPlay: (PlayerKey) -> Unit, onPerson: (PersonSearchKey) -> Unit = {}) {
+    val vm = goodTvViewModel(key = "series-${key.sourceId}-${key.seriesId}") { SeriesDetailViewModel(it.repository, key, it.tmdb, it.watchProgress, it.people) }
     val state by vm.state.collectAsState()
     val tmdb by vm.tmdb.collectAsState()
+    val people by vm.people.collectAsState()
     val progress by vm.progress.collectAsState()
 
     when (val s = state) {
         SeriesDetailViewModel.State.Loading -> Centered(stringResource(R.string.player_loading))
         is SeriesDetailViewModel.State.Error -> Centered(s.message)
-        is SeriesDetailViewModel.State.Ready -> SeriesDetailContent(s, tmdb, progress, onSelectSeason = vm::selectSeason, onPlay = onPlay)
+        is SeriesDetailViewModel.State.Ready -> SeriesDetailContent(s, tmdb, people, progress, onSelectSeason = vm::selectSeason, onPlay = onPlay, onPerson = onPerson)
     }
 }
 
@@ -95,9 +99,11 @@ fun episodePlayerKey(detail: SeriesDetail, e: Episode, startPositionMs: Long = 0
 private fun SeriesDetailContent(
     state: SeriesDetailViewModel.State.Ready,
     tmdb: TmdbMeta?,
+    people: List<TmdbPerson>,
     progress: List<WatchProgress>?,
     onSelectSeason: (Int) -> Unit,
     onPlay: (PlayerKey) -> Unit,
+    onPerson: (PersonSearchKey) -> Unit,
 ) {
     val detail = state.detail
     val display = DisplayTitle.parse(detail.series.name)
@@ -129,7 +135,8 @@ private fun SeriesDetailContent(
                     Spacer(Modifier.height(12.dp))
                     Text(it, maxLines = 4, overflow = TextOverflow.Ellipsis)
                 }
-                TmdbCredit(tmdb)
+                TmdbCredit(tmdb, hasPeople = people.isNotEmpty())
+                PeopleRow(people, onPerson = { onPerson(PersonSearchKey(it.id, it.name)) }, Modifier.padding(top = 16.dp))
                 val watchRef = WatchListRef(detail.series.sourceId, WatchListKind.SERIES, detail.series.id)
                 if (resume != null) {
                     Spacer(Modifier.height(20.dp))

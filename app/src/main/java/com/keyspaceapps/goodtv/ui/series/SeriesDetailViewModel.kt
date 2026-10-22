@@ -3,11 +3,14 @@ package com.keyspaceapps.goodtv.ui.series
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keyspaceapps.goodtv.data.repo.LibraryRepository
+import com.keyspaceapps.goodtv.data.tmdb.PeopleRepository
 import com.keyspaceapps.goodtv.data.tmdb.TmdbKind
+import com.keyspaceapps.goodtv.data.tmdb.TmdbPerson
 import com.keyspaceapps.goodtv.data.tmdb.TmdbMeta
 import com.keyspaceapps.goodtv.data.tmdb.TmdbRepository
 import com.keyspaceapps.goodtv.domain.Episode
 import com.keyspaceapps.goodtv.domain.SeriesDetail
+import com.keyspaceapps.goodtv.ui.tmdb.detailTmdb
 import com.keyspaceapps.goodtv.ui.nav.SeriesDetailKey
 import com.keyspaceapps.goodtv.data.progress.WatchProgress
 import com.keyspaceapps.goodtv.data.progress.WatchProgressRepository
@@ -20,12 +23,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-/** Provider details first; TMDB rating and summary follow in [tmdb] when [tmdbRepo] finds the show. */
+/** Provider details first; TMDB rating and summary follow in [tmdb] when [tmdbRepo] finds the show, with its [people]. */
 class SeriesDetailViewModel(
     private val repo: LibraryRepository,
     val key: SeriesDetailKey,
     private val tmdbRepo: TmdbRepository? = null,
     progressRepo: WatchProgressRepository? = null,
+    private val peopleRepo: PeopleRepository? = null,
 ) : ViewModel() {
     sealed interface State {
         data object Loading : State
@@ -43,6 +47,10 @@ class SeriesDetailViewModel(
 
     private val _tmdb = MutableStateFlow<TmdbMeta?>(null)
     val tmdb: StateFlow<TmdbMeta?> = _tmdb
+
+    private val _people = MutableStateFlow<List<TmdbPerson>>(emptyList())
+    /** TMDB's people for the title; empty until loaded and when TMDB lists nobody or can't be reached. */
+    val people: StateFlow<List<TmdbPerson>> = _people
 
     /** Progress of this series' episodes, newest first; null until loaded. */
     val progress: StateFlow<List<WatchProgress>?> = (progressRepo?.observeSeries(key.sourceId, key.seriesId) ?: flowOf(emptyList()))
@@ -64,11 +72,12 @@ class SeriesDetailViewModel(
                 onFailure = { State.Error(it.message ?: "Could not load series") },
             )
         }
-        tmdbRepo?.let { t ->
-            viewModelScope.launch {
-                val row = repo.catalogSeries(key.sourceId, key.seriesId) ?: return@launch
-                _tmdb.value = t.lookup(TmdbKind.TV, row.tmdbId, row.name).getOrNull()
-            }
+        if (tmdbRepo != null || peopleRepo != null) viewModelScope.launch {
+            val row = repo.catalogSeries(key.sourceId, key.seriesId) ?: return@launch
+            val (meta, found) = detailTmdb(tmdbRepo, peopleRepo, TmdbKind.TV, row.tmdbId, row.name)
+            // People first, in the same frame as the meta, so the page settles once.
+            _people.value = found
+            _tmdb.value = meta
         }
     }
 

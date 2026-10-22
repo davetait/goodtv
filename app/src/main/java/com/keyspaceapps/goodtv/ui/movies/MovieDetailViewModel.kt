@@ -3,10 +3,13 @@ package com.keyspaceapps.goodtv.ui.movies
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keyspaceapps.goodtv.data.repo.LibraryRepository
+import com.keyspaceapps.goodtv.data.tmdb.PeopleRepository
 import com.keyspaceapps.goodtv.data.tmdb.TmdbKind
+import com.keyspaceapps.goodtv.data.tmdb.TmdbPerson
 import com.keyspaceapps.goodtv.data.tmdb.TmdbMeta
 import com.keyspaceapps.goodtv.data.tmdb.TmdbRepository
 import com.keyspaceapps.goodtv.domain.MovieDetail
+import com.keyspaceapps.goodtv.ui.tmdb.detailTmdb
 import com.keyspaceapps.goodtv.ui.nav.MovieDetailKey
 import com.keyspaceapps.goodtv.data.progress.Loaded
 import com.keyspaceapps.goodtv.data.progress.WatchKind
@@ -21,12 +24,13 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
-/** Provider details first; TMDB rating and summary follow in [tmdb] when [tmdbRepo] finds the title. */
+/** Provider details first; TMDB rating and summary follow in [tmdb] when [tmdbRepo] finds the title, with its [people]. */
 class MovieDetailViewModel(
     private val repo: LibraryRepository,
     val key: MovieDetailKey,
     private val tmdbRepo: TmdbRepository? = null,
     progressRepo: WatchProgressRepository? = null,
+    private val peopleRepo: PeopleRepository? = null,
 ) : ViewModel() {
     sealed interface State {
         data object Loading : State
@@ -40,6 +44,10 @@ class MovieDetailViewModel(
     private val _tmdb = MutableStateFlow<TmdbMeta?>(null)
     val tmdb: StateFlow<TmdbMeta?> = _tmdb
 
+    private val _people = MutableStateFlow<List<TmdbPerson>>(emptyList())
+    /** TMDB's people for the title; empty until loaded and when TMDB lists nobody or can't be reached. */
+    val people: StateFlow<List<TmdbPerson>> = _people
+
     /** Where the user stopped last time (null until loaded); updates live as the player saves. */
     val progress: StateFlow<Loaded<WatchProgress?>?> = (progressRepo?.observe(WatchRef(key.sourceId, WatchKind.MOVIE, key.movieId)) ?: flowOf(null))
         .map { Loaded(it) }
@@ -52,11 +60,12 @@ class MovieDetailViewModel(
                 onFailure = { State.Error(it.message ?: "Could not load movie") },
             )
         }
-        tmdbRepo?.let { t ->
-            viewModelScope.launch {
-                val row = repo.catalogMovie(key.sourceId, key.movieId) ?: return@launch
-                _tmdb.value = t.lookup(TmdbKind.MOVIE, row.tmdbId, row.name).getOrNull()
-            }
+        if (tmdbRepo != null || peopleRepo != null) viewModelScope.launch {
+            val row = repo.catalogMovie(key.sourceId, key.movieId) ?: return@launch
+            val (meta, found) = detailTmdb(tmdbRepo, peopleRepo, TmdbKind.MOVIE, row.tmdbId, row.name)
+            // People first, in the same frame as the meta, so the page settles once.
+            _people.value = found
+            _tmdb.value = meta
         }
     }
 }

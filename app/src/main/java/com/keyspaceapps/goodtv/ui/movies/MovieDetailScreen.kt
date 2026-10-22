@@ -35,6 +35,9 @@ import com.keyspaceapps.goodtv.data.tmdb.TmdbMeta
 import com.keyspaceapps.goodtv.data.watchlist.WatchListKind
 import com.keyspaceapps.goodtv.data.watchlist.WatchListRef
 import com.keyspaceapps.goodtv.domain.MovieDetail
+import com.keyspaceapps.goodtv.data.tmdb.TmdbPerson
+import com.keyspaceapps.goodtv.ui.nav.PersonSearchKey
+import com.keyspaceapps.goodtv.ui.tmdb.PeopleRow
 import com.keyspaceapps.goodtv.ui.tmdb.TmdbCredit
 import com.keyspaceapps.goodtv.ui.tmdb.detailRating
 import com.keyspaceapps.goodtv.ui.browse.Formats
@@ -49,16 +52,17 @@ import androidx.compose.foundation.layout.Arrangement
 import com.keyspaceapps.goodtv.ui.watchlist.WatchListButton
 
 @Composable
-fun MovieDetailScreen(key: MovieDetailKey, onPlay: (PlayerKey) -> Unit) {
-    val vm = goodTvViewModel(key = "movie-${key.sourceId}-${key.movieId}") { MovieDetailViewModel(it.repository, key, it.tmdb, it.watchProgress) }
+fun MovieDetailScreen(key: MovieDetailKey, onPlay: (PlayerKey) -> Unit, onPerson: (PersonSearchKey) -> Unit = {}) {
+    val vm = goodTvViewModel(key = "movie-${key.sourceId}-${key.movieId}") { MovieDetailViewModel(it.repository, key, it.tmdb, it.watchProgress, it.people) }
     val state by vm.state.collectAsState()
     val tmdb by vm.tmdb.collectAsState()
+    val people by vm.people.collectAsState()
     val progress by vm.progress.collectAsState()
 
     when (val s = state) {
         MovieDetailViewModel.State.Loading -> Centered(stringResource(R.string.player_loading))
         is MovieDetailViewModel.State.Error -> Centered(s.message)
-        is MovieDetailViewModel.State.Ready -> MovieDetailContent(s.detail, tmdb, progress, onPlay)
+        is MovieDetailViewModel.State.Ready -> MovieDetailContent(s.detail, tmdb, people, progress, onPlay, onPerson)
     }
 }
 
@@ -68,7 +72,14 @@ private fun Centered(text: String) {
 }
 
 @Composable
-private fun MovieDetailContent(detail: MovieDetail, tmdb: TmdbMeta?, progress: Loaded<WatchProgress?>?, onPlay: (PlayerKey) -> Unit) {
+private fun MovieDetailContent(
+    detail: MovieDetail,
+    tmdb: TmdbMeta?,
+    people: List<TmdbPerson>,
+    progress: Loaded<WatchProgress?>?,
+    onPlay: (PlayerKey) -> Unit,
+    onPerson: (PersonSearchKey) -> Unit,
+) {
     val playFocus = remember { FocusRequester() }
     // Which first button got focus: if the saved spot appears or goes (finished), the new first button takes it.
     var focusedFor by remember { mutableStateOf<Boolean?>(null) }
@@ -118,9 +129,14 @@ private fun MovieDetailContent(detail: MovieDetail, tmdb: TmdbMeta?, progress: L
                 Spacer(Modifier.height(20.dp))
                 (tmdb?.overview ?: detail.plot)?.let { Text(it, maxLines = 8, overflow = TextOverflow.Ellipsis) }
                 Spacer(Modifier.height(12.dp))
-                detail.cast?.let { Text("Cast: $it", color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis) }
-                detail.director?.let { Text("Director: $it", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                TmdbCredit(tmdb)
+                if (people.isNotEmpty()) {
+                    // TMDB's clickable people replace the provider's plain text lines.
+                    PeopleRow(people, onPerson = { onPerson(PersonSearchKey(it.id, it.name)) })
+                } else {
+                    detail.cast?.let { Text("Cast: $it", color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                    detail.director?.let { Text("Director: $it", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                }
+                TmdbCredit(tmdb, hasPeople = people.isNotEmpty())
             }
         }
     }

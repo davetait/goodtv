@@ -66,6 +66,9 @@
     <string name="tab_sources">Sources</string>
     <string name="see_all">See all</string>
     <string name="play">Play</string>
+    <string name="detail_people">People</string>
+    <string name="role_director">Director</string>
+    <string name="role_creator">Creator</string>
     <string name="resume_from">Resume from %1$s</string>
     <string name="start_over">Start over</string>
     <string name="watched">Watched</string>
