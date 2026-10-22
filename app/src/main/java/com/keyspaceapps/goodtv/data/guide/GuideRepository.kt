@@ -107,10 +107,12 @@ class GuideRepository(
         lineupCache?.takeIf { it.source == candidates }?.let { return it }
         val placeholders = PlaceholderLogos.of(candidates.map { it.channel })
         val groups = LinkedHashMap<String, MutableList<Pair<ChannelCandidate, ChannelIdentity>>>()
-        for (c in ChannelOrder.sort(candidates)) {
+        val sorted = ChannelOrder.sort(candidates)
+        for (c in sorted) {
             val id = ChannelIdentity.of(c.channel.name, c.categoryName)
             if (!id.hidden) groups.getOrPut(id.rowKey) { ArrayList() }.add(c to id)
         }
+        foldIntoStations(groups, sorted)
         val rows = groups.map { (key, feeds) ->
             val ids = feeds.map { it.second }
             val network = ids.firstNotNullOfOrNull { it.network }
@@ -136,13 +138,52 @@ class GuideRepository(
     }
 
     /**
+     * A network copy without a call sign ("ABC 7 NEW YORK", "AT&T: FOX 5 LOCAL NEW YORK", "ABC HD [NEW YORK]")
+     * is its market's station when that is certain: exactly one main station of the network in that market,
+     * and (when the copy has a channel number) one of the station's feeds names the same number. Its feeds
+     * then join the station's row and share its guide; otherwise it stays a row of its own. App copies never fold.
+     */
+    private fun foldIntoStations(groups: LinkedHashMap<String, MutableList<Pair<ChannelCandidate, ChannelIdentity>>>, sorted: List<ChannelCandidate>) {
+        fun isApp(key: String) = APP_PREFIXES.any { key.startsWith(it) }
+        val stations = HashMap<Pair<Network, String>, MutableList<String>>()
+        for ((key, feeds) in groups) {
+            if (isApp(key)) continue
+            val call = feeds.firstNotNullOfOrNull { it.second.callSign }?.takeIf { '-' !in it } ?: continue
+            val network = feeds.firstNotNullOfOrNull { it.second.network } ?: continue
+            val market = feeds.firstNotNullOfOrNull { it.second.market } ?: continue
+            stations.getOrPut(network to market) { ArrayList() } += key
+        }
+        if (stations.isEmpty()) return
+        var folded = false
+        for (key in groups.keys.toList()) {
+            val feeds = groups.getValue(key)
+            if (isApp(key) || feeds.any { it.second.callSign != null }) continue
+            val network = feeds.firstNotNullOfOrNull { it.second.network } ?: continue
+            val market = feeds.firstNotNullOfOrNull { it.second.market } ?: continue
+            val station = stations[network to market]?.singleOrNull() ?: continue
+            val into = groups.getValue(station)
+            val numbers = feeds.mapNotNullTo(HashSet()) { it.second.channelNumber }
+            if (numbers.isNotEmpty() && into.none { it.second.channelNumber in numbers }) continue
+            into += feeds
+            groups.remove(key)
+            folded = true
+        }
+        if (!folded) return
+        // Feeds stay in [ChannelOrder.sort]'s order.
+        val position = java.util.IdentityHashMap<ChannelCandidate, Int>(sorted.size * 2)
+        sorted.forEachIndexed { i, c -> position[c] = i }
+        for (feeds in groups.values) if (feeds.size > 1) feeds.sortBy { position[it.first] }
+    }
+
+    /**
      * A station's copies are named differently ("A3 NEW YORK 04 WNBC NBC", "NBC (WNBC) NEW YORK"): the row takes
-     * the shortest name that starts with its network, else the shortest. Other rows take their first feed's name.
+     * the shortest name that starts with its network, else the shortest; copies folded in without a call sign
+     * don't name it. Other rows take their first feed's name.
      */
     private fun nameOf(ids: List<ChannelIdentity>, network: Network?, callSign: String?): String {
         if (network == null || callSign == null) return ids.first().displayName
         val word = network.name.lowercase()
-        val names = ids.map { it.displayName }
+        val names = ids.filter { it.callSign != null }.map { it.displayName }
         return names.filter { GameMatcher.normalize(PROVIDER_TAG.replaceFirst(it, "")).startsWith(word) }.minByOrNull { it.length }
             ?: names.minBy { it.length }
     }
@@ -152,8 +193,9 @@ class GuideRepository(
         for (l in links) guideOf[l.sourceId to l.channelId] = l.guideId
         val epgLogos = channels.filter { it.origin == GuideOrigin.EPGSHARE && !it.logoUrl.isNullOrBlank() }.associate { it.guideId to it.logoUrl }
         return lineup.rows.map { b ->
-            // A looping channel has no schedule worth showing, whatever it is linked to.
-            val guideId = if (b.loopShow != null) null else b.feeds.firstNotNullOfOrNull { guideOf[it.channel.sourceId to it.channel.id] }
+            // A looping channel has no schedule worth showing, whatever it is linked to. epgshare01's guide beats the provider's.
+            val linked = if (b.loopShow != null) emptyList() else b.feeds.mapNotNull { guideOf[it.channel.sourceId to it.channel.id] }
+            val guideId = linked.firstOrNull { !it.startsWith(PROVIDER_PREFIX) } ?: linked.firstOrNull()
             Resolved(b, guideId, epgLogos[guideId] ?: b.providerLogo)
         }
     }

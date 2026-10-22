@@ -111,7 +111,57 @@ class ChannelIdentityTest {
         assertNull(id("US: NBC BRAVO (EAST) (D) ᴿᴬᵂ").network)
         assertNull(id("US: NBC BRAVO (WEST) (D) ᴿᴬᵂ").callSign)
         assertNull(id("AT&T: FOX NEWS ᴿᴬᵂ").network)
-        assertEquals(Network.ABC, id("US: ABC (EAST)").network)
+        assertEquals(Network.ABC, id("US: ABC (EAST)", "US| ABC ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ").network)
+    }
+
+    /** M3: the network's own name alone is its national feed only where the provider files it under that network. */
+    @Test fun nationalFeedNeedsItsNetworkInTheCategory() {
+        val news = id("US: ABC HD", "US| NEWS ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ")
+        assertNull(news.network)
+        assertEquals(LiveGenre.NEWS, news.genre)
+        assertNull(id("US: ABC (EAST)").network)
+        assertNull(id("US: PBS HD", "US| ENTERTAINMENT ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ").network)
+        assertEquals(Network.CBS, id("US: CBS HD", "US| CBS ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ").network)
+        assertEquals(Network.CW, id("US: CW HD", "US| CW ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ").network)
+        // A station says what it is by its number or call sign, whatever its category.
+        assertEquals(Network.NBC, id("US: NBC 4 NEW YORK (WNBC)").network)
+        assertEquals(Network.ABC, id("TV: ABC7 NEW YORK ᴿᴬᵂ").network)
+    }
+
+    /** I2: what a network row without a call sign needs to be folded into its station. */
+    @Test fun networkRowsCarryTheirChannelNumberAndBracketedCity() {
+        val ny = id("US: ABC HD [NEW YORK]", "US| ABC ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ")
+        assertEquals(Network.ABC, ny.network)
+        assertEquals("New York", ny.market)
+        assertNull(ny.callSign)
+        assertEquals(LiveGenre.NETWORK, ny.genre)
+        assertEquals(7, id("TV: ABC7 NEW YORK ᴿᴬᵂ").channelNumber)
+        assertEquals(7, id("US: ABC 7 NEW YORK", "US| ABC ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ").channelNumber)
+        assertEquals(5, id("AT&T: FOX 5 LOCAL NEW YORK ᴿᴬᵂ", "US| AT&T ᴿᴬᵂ ⁶⁰ᶠᵖˢ").channelNumber)
+        assertEquals(26, id("US: CW 26 HD [CHICAGO]", "US| CW ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ").channelNumber)
+        // A station's own feeds: next to the network word, or before the call sign ("A3 NEW YORK 07 WABC").
+        assertEquals(7, id("TV: A3 NEW YORK 07 WABC ABC ᴿᴬᵂ").channelNumber)
+        assertEquals(32, id("TV: CHICAGO, IL WFLD FOX 32 A3 HD CHICAGO ᶜᶦᵗʸ ᴿᴬᵂ").channelNumber)
+        assertNull(id("US: ABC (WABC)", "US| ABC ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ").channelNumber)
+        assertNull(id("US: A&E HD").channelNumber)
+    }
+
+    /** I3: the copies [GuideMatcher] treats as one channel ("X CHANNEL", "X EAST", "THE X") are one row; West stays apart. */
+    @Test fun copiesTheMatcherCallsOneChannelShareARow() {
+        fun key(name: String, category: String = "US| TV ᴿᴬᵂ ⁶⁰ᶠᵖˢ") = id(name, category).rowKey
+        assertEquals(key("US: FOX NEWS HD", "US| NEWS ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"), key("TV: FOX NEWS CHANNEL ᴿᴬᵂ"))
+        assertEquals(key("US: HALLMARK HD", "US| ENTERTAINMENT ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"), key("AT&T: HALLMARK CHANNEL ᴿᴬᵂ", "US| AT&T ᴿᴬᵂ ⁶⁰ᶠᵖˢ"))
+        assertEquals(key("US: TENNIS HD", "US| SPORT ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"), key("US: TENNIS CHANNEL", "US| SPORT ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"))
+        for (n in listOf("HBO", "STARZ", "CINEMAX", "TNT", "BRAVO", "USA NETWORK", "NICKELODEON")) {
+            assertEquals(n, key("TV: $n ᴿᴬᵂ"), key("TV: $n EAST ᴿᴬᵂ"))
+            assertNotEquals(n, key("TV: $n ᴿᴬᵂ"), key("TV: $n WEST ᴿᴬᵂ"))
+        }
+        assertEquals(key("US: THE MOVIE CHANNEL HD", "US| MOVIES ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"), key("TV: THE MOVIE CHANNEL EAST ᴿᴬᵂ"))
+        assertEquals(key("US: BRAVO WEST HD"), key("US: BRAVO (PACIFIC)"))
+        // Loops, event slots and stations keep their own keys.
+        assertNotEquals(key("24/7: TNT", "US| 24/7 DRAMA ᴿᴬᵂ ⁶⁰ᶠᵖˢ"), key("TV: TNT ᴿᴬᵂ"))
+        assertNotEquals(key("NCAAF 15: TNT", "US| NCAAF PPV"), key("TV: TNT ᴿᴬᵂ"))
+        assertNotEquals(key("US: ABC (EAST)", "US| ABC ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"), key("US: ABC (WEST)", "US| ABC ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"))
     }
 
     @Test fun genresFromChannelsAndCategories() {

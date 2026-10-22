@@ -105,6 +105,15 @@ class GuideMatcherTest {
         assertNull(guideOf("24/7: CNBC", "US| 24/7 REALITY ᴿᴬᵂ ⁶⁰ᶠᵖˢ"))
     }
 
+    /** M2: "Fox Sports 4K" is its own channel; only the channel's name loses its quality words. */
+    @Test fun aVariantInTheGuideNameIsNotDropped() {
+        assertNull(guideOf("RK: FOX SPORTS ᴿᴬᵂ", "US| ROKU ᴿᴬᵂ ⁶⁰ᶠᵖˢ"))
+        assertNull(guideOf("TV: FOX SPORTS ᴿᴬᵂ"))
+        // The guide's "HD" still isn't part of the name.
+        assertEquals("Fox.News.Channel.HD.us2", guideOf("TV: FOX NEWS CHANNEL ᴿᴬᵂ"))
+        assertEquals("Bravo.HD.us2", guideOf("TV: BRAVO ᴿᴬᵂ"))
+    }
+
     @Test fun ambiguousCableNameMatchesNothing() {
         val two = listOf(
             XmltvChannel("Vice.us2", listOf("Vice"), null),
@@ -151,12 +160,15 @@ class GuideMatcherTest {
         // Whatever the name style, the channels of one row agree on what the row is. Genre is left out: it
         // also comes from the category, so A&E under Entertainment and under AT&T may differ.
         val visible = lineup.map { ChannelIdentity.of(it.channel.name, it.categoryName) }.filter { !it.hidden }
+        // A cable channel's unmarked feed is its East one (the row of "HBO" and "HBO EAST"), as in matching.
+        fun region(i: ChannelIdentity) = if (i.network == null && i.region == null) Region.EAST else i.region
         val conflicts = visible.groupBy { it.rowKey }.filterValues { row ->
-            row.map { listOf(it.network, it.callSign, it.region, it.genre == LiveGenre.EVENTS) }.distinct().size > 1 ||
+            row.map { listOf(it.network, it.callSign, region(it), it.genre == LiveGenre.EVENTS) }.distinct().size > 1 ||
                 row.mapNotNull { it.market }.distinct().size > 1
         }.keys
-        // The provider files one Philadelphia station under "NBC (WCAU) LOS ANGELES, CA".
-        assertEquals(setOf("station:NBC:WCAU"), conflicts)
+        // The provider files one Philadelphia station under "NBC (WCAU) LOS ANGELES, CA"; and "US: CBS HD" is in both
+        // its CBS category (the national feed) and News (not a network row on its own), one name, one row.
+        assertEquals(setOf("station:NBC:WCAU", "cbs"), conflicts)
     }
 
     @Test fun placeholderLogosAreTheWidelySharedOnes() {

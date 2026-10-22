@@ -9,7 +9,7 @@ import com.keyspaceapps.goodtv.data.sports.ChannelCandidate
  * needs its own id, `WWAY-DT2`). Names often leave a subchannel's designation out ("FOX 22 (WSBT)" is
  * WSBT's second channel, CBS its main), so a call sign's main network is the one most of its undesignated
  * channels carry; a channel of another network takes the call sign's one subchannel id, or nothing. Anything else matches a cable channel whose name or id, without quality
- * and region words, is the channel's name, within the same region (East and an unmarked feed are one).
+ * (but 4K/8K/UHD, which name a channel of their own) and region words, is the channel's name, within the same region (East and an unmarked feed are one).
  * A station (call sign and network) with no locals id gets no guide. A name that fits several guide channels matches none: no guide is better than the wrong show. Headings,
  * event slots and 24/7 loops never match. Pure and fast enough (~12,600 channels well under a second) to
  * run over the whole lineup on a background dispatcher.
@@ -21,8 +21,9 @@ object GuideMatcher {
     fun match(channels: List<ChannelCandidate>, locals: List<XmltvChannel>, cable: List<XmltvChannel>): Map<Pair<Long, String>, String> {
         val stations = stations(locals)
         val cableIds = HashMap<Pair<String, Region?>, MutableSet<String>>()
+        // The guide's "4K" names another channel ("Fox Sports 4K" is not Fox Sports); its "HD" doesn't.
         for (c in cable) for (name in c.names + c.id.substringBeforeLast('.')) {
-            val key = ChannelNames.cableKey(name)
+            val key = ChannelNames.cableKey(name, keep = ChannelNames.VARIANTS)
             if (key.first.isNotEmpty()) cableIds.getOrPut(key) { HashSet() } += c.id
         }
         val identities = channels.map { it to ChannelIdentity.of(it.channel.name, it.categoryName) }

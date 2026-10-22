@@ -71,6 +71,10 @@ class GuideRepositoryTest {
     private val NEWS = "US| NEWS ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
     private val ENT = "US| ENTERTAINMENT ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
     private val LOOP = "US| 24/7 ACTION/ADVENTURE ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
+    private val ABC = "US| ABC ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
+    private val FOX = "US| FOX ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
+    private val TV = "US| TV ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
+    private val ATT = "US| AT&T ᴿᴬᵂ ⁶⁰ᶠᵖˢ"
 
     private fun programme(guideId: String, title: String, start: Long, end: Long = start + hour) =
         GuideProgramme(guideId, start, end, title, null, emptyList(), null)
@@ -273,6 +277,91 @@ class GuideRepositoryTest {
         } finally {
             Thread.setDefaultUncaughtExceptionHandler(previous)
         }
+    }
+
+    /** I2: every network copy of New York's one ABC station is that station's row, with its guide; the app copy stays apart. */
+    @Test fun networkCopiesWithoutCallSignFoldIntoTheirStation() = runBlocking {
+        val wabc = feed("US: ABC (WABC)", ABC)
+        val copies = listOf(
+            feed("TV: A3 NEW YORK 07 WABC ABC ᴿᴬᵂ", TV), feed("US: ABC 7 NEW YORK", ABC), feed("TV: ABC7 NEW YORK ᴿᴬᵂ", TV),
+            feed("TV: ABC7 NEW YORK NEW YORK ᶜᶦᵗʸ ᴿᴬᵂ", "US| TV ᶜᶦᵗʸ ᴿᴬᵂ ⁶⁰ᶠᵖˢ"), feed("US: ABC HD [NEW YORK]", ABC),
+        )
+        val prime = feed("PRIME: ABC7 NEW YORK ᴿᴬᵂ", "US| PRIME ᴿᴬᵂ ⁶⁰ᶠᵖˢ")
+        lineup.value = listOf(wabc) + copies + prime
+        guide.replaceGuide(GuideOrigin.EPGSHARE, listOf(GuideChannel("WABC-DT.us_locals1", GuideOrigin.EPGSHARE, null)), sequenceOf(programme("WABC-DT.us_locals1", "Eyewitness News", windowStart)))
+        guide.replaceLinks(listOf(link(wabc, "WABC-DT.us_locals1")))
+        val abc = board().section("ABC")
+        val station = abc.rows.single()
+        assertEquals("station:ABC:WABC", station.key)
+        assertEquals("ABC (WABC)", station.name)
+        assertEquals((listOf(wabc) + copies).map { it.channel.id }.toSet(), station.feeds.map { it.channel.id }.toSet())
+        assertEquals(listOf("Eyewitness News"), station.programmes.map { it.title })
+        assertEquals(listOf(prime.channel.id), abc.more.single().feeds.map { it.channel.id })
+    }
+
+    @Test fun networkCopyStaysItsOwnRowWhenItsStationIsNotCertain() = runBlocking {
+        fun foxRows(vararg feeds: ChannelCandidate): Int {
+            lineup.value = feeds.toList()
+            return runBlocking { repoFor(library).board(GuideFilter.ALL, windowStart).first() }.section("FOX").rows.size
+        }
+        // Two FOX stations in New York: which one "FOX 5 LOCAL" is can't be told.
+        assertEquals(3, foxRows(feed("US: FOX 5 (WNYW) NEW YORK HD", FOX), feed("US: FOX 9 (WWOR) NEW YORK HD", FOX), feed("AT&T: FOX 5 LOCAL NEW YORK ᴿᴬᵂ", ATT)))
+        // One station, but not on the copy's channel number.
+        assertEquals(2, foxRows(feed("US: FOX 5 (WNYW) NEW YORK HD", FOX), feed("AT&T: FOX 11 LOCAL NEW YORK ᴿᴬᵂ", ATT)))
+        // A station in another market.
+        assertEquals(2, foxRows(feed("US: FOX 11 (KTTV) LOS ANGELES HD", FOX), feed("AT&T: FOX 11 LOCAL NEW YORK ᴿᴬᵂ", ATT)))
+        // One station on the copy's number: folded.
+        assertEquals(1, foxRows(feed("US: FOX 5 (WNYW) NEW YORK HD", FOX), feed("AT&T: FOX 5 LOCAL NEW YORK ᴿᴬᵂ", ATT)))
+    }
+
+    /** M3: "US: ABC HD" in the provider's News category is a news row, not ABC's national feed. */
+    @Test fun nationalRowNeedsItsNetworkCategory() {
+        lineup.value = listOf(feed("US: ABC HD", NEWS), feed("US: ABC (EAST)", ABC))
+        val b = board()
+        assertEquals(listOf("ABC (EAST)"), b.section("ABC").rows.map { it.name })
+        assertEquals(listOf("ABC"), b.section("News").rows.map { it.name })
+    }
+
+    /** M1: a row whose feeds link to both origins shows epgshare01's guide, whichever feed comes first. */
+    @Test fun anEpgshareLinkBeatsAProviderLinkInARow() = runBlocking {
+        guide.replaceGuide(GuideOrigin.EPGSHARE, listOf(GuideChannel("AE.us2", GuideOrigin.EPGSHARE, null)), sequenceOf(programme("AE.us2", "Epg show", windowStart)))
+        guide.replaceGuide(GuideOrigin.PROVIDER, listOf(GuideChannel("P:ae", GuideOrigin.PROVIDER, null)), sequenceOf(programme("P:ae", "Provider show", windowStart)))
+        for (providerFirst in listOf(true, false)) {
+            val a = feed("US: A&E HD", ENT)
+            val b = feed("TV: A&E ᴿᴬᵂ", TV)
+            lineup.value = listOf(a, b)
+            val (p, e) = if (providerFirst) a to b else b to a
+            guide.replaceLinks(listOf(link(p, "P:ae"), link(e, "AE.us2")))
+            val row = repoFor(library).board(GuideFilter.ALL, windowStart).first().section("Entertainment").rows.single()
+            assertEquals("provider first: $providerFirst", listOf("Epg show"), row.programmes.map { it.title })
+        }
+    }
+
+    private fun xmltv(file: String) = javaClass.classLoader!!.getResourceAsStream("live/$file")!!.bufferedReader().readLines()
+        .filter { it.isNotEmpty() }.map { it.split('\t') }.map { XmltvChannel(it[0], it[1].split(" | "), it.getOrNull(2)?.ifEmpty { null }) }
+
+    /**
+     * I3 and I2 over the real lineup and epgshare01 channel lists: no two rows show the same cable guide, and
+     * New York's ABC is one row. Prints the counts for the report.
+     */
+    @Test fun fullLineupRowsDoNotShareGuides() = runBlocking {
+        val links = GuideMatcher.match(fixture, xmltv("epgshare_locals_channels.tsv"), xmltv("epgshare_us2_channels.tsv"))
+        guide.replaceLinks(links.map { (k, g) -> ChannelGuideLink(k.first, k.second, g) })
+        lineup.value = fixture
+        val b = repoFor(library, Dispatchers.Default).board(GuideFilter.ALL, windowStart).first()
+        val rows = b.sections.flatMap { it.rows + it.more }.distinctBy { it.key }
+        val guideOf = rows.associateWith { r -> r.feeds.firstNotNullOfOrNull { links[it.channel.sourceId to it.channel.id] } }
+        val shared = guideOf.entries.filter { it.value != null }.groupBy({ it.value!! }) { it.key }.filterValues { it.size > 1 }
+        val cableShared = shared.filterKeys { it.endsWith(".us2") }.mapValues { (_, rs) -> rs.map { it.name } }
+        fun main(n: String) = b.section(n).rows
+        println(
+            "GUIDE_ROWS total ${rows.size}, shared guides ${shared.size} (${shared.values.sumOf { it.size }} rows; cable ${cableShared.size}), " +
+                Network.entries.joinToString { n -> "$n ${main(n.name).size}+${b.section(n.name).more.size}" } +
+                ", main rows without call sign: " + Network.entries.joinToString { n -> "$n ${main(n.name).count { r -> r.feeds.all { ChannelIdentity.of(it.channel.name, it.categoryName).callSign == null } }}" },
+        )
+        shared.forEach { (g, rs) -> println("GUIDE_SHARED $g: ${rs.joinToString(" || ") { it.key }}") }
+        assertEquals(emptyMap<String, List<String>>(), cableShared)
+        assertEquals(listOf("station:ABC:WABC"), main("ABC").filter { r -> r.feeds.any { "NEW YORK" in it.channel.name } }.map { it.key })
     }
 
     private val fixture by lazy {

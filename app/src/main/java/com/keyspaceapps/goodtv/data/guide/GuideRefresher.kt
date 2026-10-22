@@ -28,7 +28,7 @@ import java.util.zip.GZIPInputStream
 const val GUIDE_MAX_AGE_MS = 24 * 3_600_000L
 
 /** Guide id of a provider channel; the prefix keeps it from ever colliding with an epgshare01 id. */
-private const val PROVIDER_PREFIX = "P:"
+internal const val PROVIDER_PREFIX = "P:"
 
 /** Most bytes one download may write to disk, and most it may unpack to when read. */
 data class GuideCap(val download: Long, val unpacked: Long)
