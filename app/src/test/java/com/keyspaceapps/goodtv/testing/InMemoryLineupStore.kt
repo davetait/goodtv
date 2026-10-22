@@ -14,6 +14,7 @@ class InMemoryLineupStore(visibility: Visibility = Visibility(emptySet(), emptyS
 
     override suspend fun saved(): SavedLineup? = saved.value
     override fun observeSaved(): Flow<SavedLineup?> = saved
+    override suspend fun savedStamp(): Pair<Long, Int>? = saved.value?.let { it.generation to it.rulesVersion }
     override suspend fun save(lineup: SavedLineup) { saved.value = lineup }
     override suspend fun generation(): Long = generation.value
     override fun observeGeneration(): Flow<Long> = generation

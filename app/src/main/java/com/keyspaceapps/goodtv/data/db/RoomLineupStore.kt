@@ -22,6 +22,8 @@ class RoomLineupStore(private val db: GoodTvDatabase) : LineupStore {
 
     override fun observeSaved(): Flow<SavedLineup?> = dao.observeMeta().map { meta -> db.withTransaction { read(meta) } }
 
+    override suspend fun savedStamp(): Pair<Long, Int>? = dao.meta()?.let { it.savedGeneration to it.rulesVersion }
+
     private suspend fun read(meta: LineupMetaEntity?): SavedLineup? {
         meta ?: return null
         val feeds = dao.feeds().groupBy { it.rowKey }

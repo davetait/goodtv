@@ -66,6 +66,15 @@ class LineupStoreTest {
     }
 
     @Test
+    fun savedStampIsTheLastSavesGenerationAndRulesVersion() = runBlocking {
+        assertNull(lineup.savedStamp())
+        lineup.save(SavedLineup(listOf(row("a", 0, true)), generation = 5, rulesVersion = 3))
+        assertEquals(5L to 3, lineup.savedStamp())
+        lineup.save(SavedLineup(emptyList(), generation = 6, rulesVersion = 4))
+        assertEquals(6L to 4, lineup.savedStamp())
+    }
+
+    @Test
     fun saveReplacesEverything() = runBlocking {
         lineup.save(SavedLineup(listOf(row("a", 0, true), row("b", 1, false)), 1, 1))
         val second = SavedLineup(listOf(row("c", 0, false)), 2, 2)

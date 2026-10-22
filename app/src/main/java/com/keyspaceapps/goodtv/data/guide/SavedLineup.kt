@@ -36,6 +36,8 @@ data class Visibility(val enabledSources: Set<Long>, val hiddenLiveCategories: S
 interface LineupStore {
     suspend fun saved(): SavedLineup?
     fun observeSaved(): Flow<SavedLineup?>
+    /** The saved lineup's (generation, rulesVersion) without reading its rows; null when nothing is saved. */
+    suspend fun savedStamp(): Pair<Long, Int>?
     /** Replaces the whole saved lineup in one transaction. */
     suspend fun save(lineup: SavedLineup)
     /** Counts library writes (sources, catalogs, hidden categories); 0 before the first. */

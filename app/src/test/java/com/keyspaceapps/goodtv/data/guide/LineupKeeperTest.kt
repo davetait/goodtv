@@ -6,7 +6,9 @@ import com.keyspaceapps.goodtv.domain.LiveChannel
 import com.keyspaceapps.goodtv.testing.FakeLibraryStore
 import com.keyspaceapps.goodtv.testing.InMemoryLineupStore
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -41,9 +43,24 @@ class LineupKeeperTest {
     }
     private val warnings = ArrayList<String>()
 
+    /** Counts full reads of the saved lineup: a check needs only its stamp. */
+    private var savedReads = 0
+    /** When set, saving fails (a full disk); [generationFailures] is how many generation subscriptions fail first. */
+    private var saveFailure: Exception? = null
+    private var generationFailures = 0
+    private val lineups: LineupStore = object : LineupStore by store {
+        override suspend fun saved(): SavedLineup? { savedReads++; return store.saved() }
+        override suspend fun save(lineup: SavedLineup) { saveFailure?.let { throw it }; store.save(lineup) }
+        override fun observeGeneration() = flow {
+            if (generationFailures > 0) { generationFailures--; throw java.io.IOException("database closed") }
+            emitAll(store.observeGeneration())
+        }
+    }
+
     private fun feed(name: String, category: String) = ChannelCandidate(LiveChannel(1, name, null, name, null, null), category)
 
-    private fun TestScope.keeper() = LineupKeeper(library, store, StandardTestDispatcher(testScheduler), DEBOUNCE, warn = { warnings += it }, debug = {})
+    private fun TestScope.keeper(debug: (String) -> Unit = {}) =
+        LineupKeeper(library, lineups, StandardTestDispatcher(testScheduler), DEBOUNCE, warn = { warnings += it }, debug = debug)
 
     /** The keeper runs in backgroundScope, which advanceUntilIdle ignores: move virtual time well past the debounce instead. */
     private fun TestScope.settle() {
@@ -61,13 +78,26 @@ class LineupKeeperTest {
         assertEquals(0L, saved.generation)
         assertEquals(LineupBuilder.RULES_VERSION, saved.rulesVersion)
         assertEquals(1, reads)
+        assertEquals(0, savedReads)
+    }
+
+    @Test fun firstCheckRunsAtOnce() = runTest {
+        keeper().start(backgroundScope)
+        runCurrent()
+        assertEquals(1, reads)
+        assertEquals(0L, store.saved()!!.generation)
     }
 
     @Test fun currentLineupIsLeftAlone() = runTest {
         store.save(SavedLineup(emptyList(), generation = 0, rulesVersion = LineupBuilder.RULES_VERSION))
         keeper().start(backgroundScope)
         settle()
+        store.bumpGeneration()
+        store.save(SavedLineup(emptyList(), generation = 1, rulesVersion = LineupBuilder.RULES_VERSION))
+        settle()
         assertEquals(0, reads)
+        // Deciding there is nothing to do reads the stamp, never the ~9k saved rows.
+        assertEquals(0, savedReads)
         assertEquals(emptyList<SavedRow>(), store.saved()!!.rows)
     }
 
@@ -105,7 +135,7 @@ class LineupKeeperTest {
                 emit(channels)
             }
         }
-        LineupKeeper(bumping, store, StandardTestDispatcher(testScheduler), DEBOUNCE, debug = {}).start(backgroundScope)
+        LineupKeeper(bumping, lineups, StandardTestDispatcher(testScheduler), DEBOUNCE, debug = {}).start(backgroundScope)
         settle()
         assertEquals(2, reads)
         assertEquals(1L, store.saved()!!.generation)
@@ -119,6 +149,17 @@ class LineupKeeperTest {
         assertEquals(1, reads)
         job.cancel()
         settle()
+        assertSame(old, store.saved())
+    }
+
+    /** Cancelled after the build but before the save (the app killed mid-way): the old lineup stays. */
+    @Test fun cancelledAfterTheBuildSavesNothing() = runTest {
+        store.save(old)
+        lateinit var job: Job
+        job = keeper(debug = { if (it.startsWith("rows")) job.cancel() }).start(backgroundScope)
+        settle()
+        assertEquals(1, reads)
+        assertTrue(job.isCancelled)
         assertSame(old, store.saved())
     }
 
@@ -149,6 +190,48 @@ class LineupKeeperTest {
         assertEquals(2, reads)
         assertEquals(1L, store.saved()!!.generation)
         assertTrue(store.saved()!!.rows.isNotEmpty())
+    }
+
+    @Test fun saveFailureWarnsAndRetriesOnTheNextChange() = runTest {
+        store.save(old)
+        saveFailure = IllegalStateException("disk full at /data/secret")
+        keeper().start(backgroundScope)
+        settle()
+        assertSame(old, store.saved())
+        assertEquals(listOf("Lineup build failed: IllegalStateException"), warnings)
+
+        saveFailure = null
+        store.bumpGeneration()
+        settle()
+        assertEquals(2, reads)
+        assertEquals(1L, store.saved()!!.generation)
+    }
+
+    /** An error thrown (not just an exception) by a build is survived too. */
+    @Test fun buildErrorIsSurvived() = runTest {
+        store.save(old)
+        failure = null
+        val erring: LibraryStore = object : LibraryStore by library {
+            override fun observeSportsCandidates() = flow<List<ChannelCandidate>> { reads++; if (reads == 1) throw OutOfMemoryError("big"); emit(channels) }
+        }
+        LineupKeeper(erring, lineups, StandardTestDispatcher(testScheduler), DEBOUNCE, warn = { warnings += it }, debug = {}).start(backgroundScope)
+        settle()
+        assertEquals(listOf("Lineup build failed: OutOfMemoryError"), warnings)
+        store.bumpGeneration()
+        settle()
+        assertEquals(1L, store.saved()!!.generation)
+    }
+
+    @Test fun generationFlowFailureRecovers() = runTest {
+        generationFailures = 2
+        keeper().start(backgroundScope)
+        settle()
+        settle()
+        assertEquals(listOf("Lineup generation failed: IOException", "Lineup generation failed: IOException"), warnings)
+        assertEquals(0L, store.saved()!!.generation)
+        store.bumpGeneration()
+        settle()
+        assertEquals(1L, store.saved()!!.generation)
     }
 
     private companion object {
