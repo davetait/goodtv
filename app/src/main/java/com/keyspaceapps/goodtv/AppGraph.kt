@@ -10,6 +10,7 @@ import com.keyspaceapps.goodtv.data.settings.AppSettings
 import com.keyspaceapps.goodtv.data.db.GoodTvDatabase
 import com.keyspaceapps.goodtv.data.db.RoomLibraryStore
 import com.keyspaceapps.goodtv.data.db.RoomPopularStore
+import com.keyspaceapps.goodtv.data.db.RoomPeopleCache
 import com.keyspaceapps.goodtv.data.db.RoomTmdbCache
 import com.keyspaceapps.goodtv.data.db.RoomTmdbGenreStore
 import com.keyspaceapps.goodtv.data.db.RoomGuideStore
@@ -43,6 +44,7 @@ import com.keyspaceapps.goodtv.data.sports.SportsRepository
 import com.keyspaceapps.goodtv.data.subtitles.OnlineSubtitles
 import com.keyspaceapps.goodtv.data.subtitles.OpenSubtitlesApi
 import com.keyspaceapps.goodtv.data.subtitles.OpenSubtitlesLogin
+import com.keyspaceapps.goodtv.data.tmdb.PeopleRepository
 import com.keyspaceapps.goodtv.data.tmdb.PopularMoviesQuery
 import com.keyspaceapps.goodtv.data.tmdb.PopularRepository
 import com.keyspaceapps.goodtv.data.tmdb.PopularShowsQuery
@@ -224,4 +226,10 @@ class AppGraph(val context: Context) {
     /** Instrumented tests point this at a mock TMDB server. */
     @VisibleForTesting var tmdbOverride: TmdbRepository? = null
     val tmdb: TmdbRepository get() = tmdbOverride ?: defaultTmdb
+
+    private val defaultPeople: PeopleRepository by lazy { PeopleRepository(api = tmdbApi, cache = RoomPeopleCache(db.people()), language = tmdbLanguage) }
+
+    /** Instrumented tests point this at a mock TMDB server. */
+    @VisibleForTesting var peopleOverride: PeopleRepository? = null
+    val people: PeopleRepository get() = peopleOverride ?: defaultPeople
 }
