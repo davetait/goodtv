@@ -8,15 +8,24 @@ import com.keyspaceapps.goodtv.domain.LiveChannel
 import com.keyspaceapps.goodtv.testing.FakeChannelSource
 import com.keyspaceapps.goodtv.testing.FakeLibraryStore
 import com.keyspaceapps.goodtv.testing.InMemoryGuideStore
+import com.keyspaceapps.goodtv.testing.InMemoryLineupStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -55,11 +64,17 @@ class GuideRepositoryTest {
     }
     private val repo by lazy { repoFor(library) }
 
-    private fun repoFor(lib: LibraryStore, dispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Unconfined) = GuideRepository(
-        lib, limited,
-        GuideRefresher(guide, refresherLibrary, SourceRegistry(emptyList()), EpgShareSource(OkHttpClient()), PlaybackState(), { now }, dispatcher, tmp.newFolder()),
+    private fun repoFor(
+        lib: LibraryStore,
+        dispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Unconfined,
+        lineups: LineupStore? = null,
+        refresher: GuideRefresher = GuideRefresher(guide, refresherLibrary, SourceRegistry(emptyList()), EpgShareSource(OkHttpClient()), PlaybackState(), { now }, dispatcher, tmp.newFolder()),
+        store: GuideStore = limited,
+        building: StateFlow<Boolean>? = null,
+    ) = GuideRepository(
+        lib, store, refresher,
         LiveRefresher(lib, SourceRegistry(listOf(FakeChannelSource())), { false }, { now }),
-        { now }, dispatcher, { warnings += it }, { timings += it },
+        { now }, dispatcher, { warnings += it }, { timings += it }, lineups, building,
     )
     private val warnings = ArrayList<String>()
     private val timings = java.util.concurrent.CopyOnWriteArrayList<String>()
@@ -82,7 +97,7 @@ class GuideRepositoryTest {
 
     private fun link(c: ChannelCandidate, guideId: String) = ChannelGuideLink(c.channel.sourceId, c.channel.id, guideId)
 
-    private fun board(filter: GuideFilter = GuideFilter.ALL) = runBlocking { repo.board(filter, windowStart).first() }
+    private fun board(filter: GuideFilter = GuideFilter.ALL) = runBlocking { repo.board(filter, windowStart).first { it.programmesLoaded } }
     private fun GuideBoard.section(title: String) = sections.first { it.title == title }
     private fun GuideBoard.titles() = sections.map { it.title }
 
@@ -333,7 +348,7 @@ class GuideRepositoryTest {
             lineup.value = listOf(a, b)
             val (p, e) = if (providerFirst) a to b else b to a
             guide.replaceLinks(listOf(link(p, "P:ae"), link(e, "AE.us2")))
-            val row = repoFor(library).board(GuideFilter.ALL, windowStart).first().section("Entertainment").rows.single()
+            val row = repoFor(library).board(GuideFilter.ALL, windowStart).first { it.programmesLoaded }.section("Entertainment").rows.single()
             assertEquals("provider first: $providerFirst", listOf("Epg show"), row.programmes.map { it.title })
         }
     }
@@ -379,6 +394,232 @@ class GuideRepositoryTest {
         assertTrue(timings.toString(), timings.none { "CNN" in it || "A&E" in it })
     }
 
+    // The saved lineup (cold open) and channels-first boards.
+
+    private fun feedIn(sourceId: Long, categoryId: String, name: String, category: String) =
+        ChannelCandidate(LiveChannel(sourceId, "${nextId++}", categoryId, name, null, null), category)
+
+    private fun savedOf(vararg feeds: ChannelCandidate, generation: Long = 0) =
+        SavedLineup(LineupBuilder.build(feeds.toList()), generation, LineupBuilder.RULES_VERSION)
+
+    private fun GuideBoard.names() = sections.flatMap { it.rows + it.more }.map { it.name }.distinct()
+
+    /**
+     * Collects [flow] in the background: once a board with programmes has arrived, runs [then] (once), and stops
+     * when [done] holds for the boards so far (or 5 s pass).
+     */
+    private fun boardsUntil(flow: Flow<GuideBoard>, then: suspend () -> Unit = {}, done: (List<GuideBoard>) -> Boolean): List<GuideBoard> = runBlocking {
+        val boards = java.util.concurrent.CopyOnWriteArrayList<GuideBoard>()
+        val job = launch(Dispatchers.Default) { flow.collect { boards += it } }
+        val until = System.currentTimeMillis() + 5_000
+        var changed = false
+        while (!done(boards) && System.currentTimeMillis() < until) {
+            if (!changed && boards.any { it.programmesLoaded }) { changed = true; then() }
+            delay(10)
+        }
+        job.cancel()
+        boards.toList()
+    }
+
+    @Test fun savedLineupFeedsTheBoardWithoutReadingTheLineup() = runBlocking {
+        val cnn = feed("US: CNN HD", NEWS)
+        lineup.value = listOf(feed("US: A&E HD", ENT))
+        val lineups = InMemoryLineupStore(Visibility(setOf(1L), emptySet()))
+        lineups.save(savedOf(cnn))
+        guide.replaceGuide(GuideOrigin.EPGSHARE, listOf(GuideChannel("CNN", GuideOrigin.EPGSHARE, null)), sequenceOf(programme("CNN", "Show", windowStart)))
+        guide.replaceLinks(listOf(link(cnn, "CNN")))
+        val saved = repoFor(library, lineups = lineups)
+        val b = saved.board(GuideFilter.ALL, windowStart).first { it.programmesLoaded }
+        assertEquals(listOf("News"), b.titles())
+        assertEquals(listOf("Show"), b.section("News").rows.single().programmes.map { it.title })
+        assertEquals("CNN", saved.search("cnn").first().single().row.name)
+        assertEquals(0, lineupCollections)
+        for (stage in listOf("saved lineup read", "first board (saved)")) assertTrue("$stage in $timings", timings.any { it.startsWith(stage) })
+    }
+
+    @Test fun hiddenCategoryFeedsAreFilteredFromTheSavedLineup() = runBlocking {
+        val ae = feedIn(1, "ent", "US: A&E HD", ENT)
+        val aeTv = feedIn(1, "tv", "TV: A&E ᴿᴬᵂ", TV)
+        val cnn = feedIn(1, "tv", "TV: CNN ᴿᴬᵂ", TV)
+        val lineups = InMemoryLineupStore(Visibility(setOf(1L), emptySet()))
+        lineups.save(savedOf(ae, aeTv, cnn))
+        val repo = repoFor(library, Dispatchers.Default, lineups)
+        val boards = boardsUntil(repo.board(GuideFilter.ALL, windowStart), { lineups.setVisibility(Visibility(setOf(1L), setOf(1L to "tv"))) }) { bs ->
+            bs.lastOrNull()?.names() == listOf("A&E")
+        }
+        assertEquals(2, boards.first().sections.flatMap { it.rows }.first { it.name == "A&E" }.feeds.size)
+        assertEquals(listOf("A&E"), boards.last().names())
+        assertEquals(listOf(ae.channel.id), boards.last().section("Entertainment").rows.single().feeds.map { it.channel.id })
+        assertTrue(repo.search("cnn").first().isEmpty())
+    }
+
+    @Test fun disabledSourceRowsAreDropped() = runBlocking {
+        val ae = feedIn(1, "ent", "US: A&E HD", ENT)
+        val cnn = feedIn(2, "news", "US: CNN HD", NEWS)
+        val lineups = InMemoryLineupStore(Visibility(setOf(1L, 2L), emptySet()))
+        lineups.save(savedOf(ae, cnn))
+        val repo = repoFor(library, Dispatchers.Default, lineups)
+        val boards = boardsUntil(repo.board(GuideFilter.ALL, windowStart), { lineups.setVisibility(Visibility(setOf(1L), emptySet())) }) { bs ->
+            bs.lastOrNull()?.names() == listOf("A&E")
+        }
+        assertEquals(listOf("CNN", "A&E"), boards.first().names())
+        assertEquals(listOf("A&E"), boards.last().names())
+        assertEquals(0, lineupCollections)
+    }
+
+    @Test fun staleSavedLineupShowsThenRebuilds() = runBlocking {
+        val lineups = InMemoryLineupStore(Visibility(setOf(1L), emptySet()))
+        lineups.save(savedOf(feed("US: A&E HD", ENT), generation = 1))
+        lineups.bumpGeneration()
+        lineups.bumpGeneration()
+        val repo = repoFor(library, Dispatchers.Default, lineups)
+        val boards = boardsUntil(repo.board(GuideFilter.ALL, windowStart), { lineups.save(savedOf(feed("US: A&E HD", ENT), feed("US: CNN HD", NEWS), generation = 2)) }) { bs ->
+            bs.lastOrNull()?.names()?.contains("CNN") == true
+        }
+        assertEquals(listOf("A&E"), boards.first().names())
+        assertEquals(listOf("CNN", "A&E"), boards.last().names())
+        assertEquals(0, lineupCollections)
+    }
+
+    @Test fun noSavedLineupBuildsInMemory() = runBlocking {
+        lineup.value = listOf(feed("US: CNN HD", NEWS))
+        val lineups = InMemoryLineupStore(Visibility(setOf(1L), emptySet()))
+        val repo = repoFor(library, lineups = lineups)
+        assertEquals(listOf("CNN"), repo.board(GuideFilter.ALL, windowStart).first { it.programmesLoaded }.names())
+        assertEquals(1, lineupCollections)
+        assertTrue(timings.toString(), timings.none { it.startsWith("first board (saved)") })
+    }
+
+    /** The library's lineup, read 200 ms late (a big query); every read is counted in lineupCollections. */
+    private val slowLibrary: LibraryStore = object : LibraryStore by fake {
+        override fun observeSportsCandidates() = flow { lineupCollections++; delay(200); emitAll(lineup) }
+    }
+
+    /** First launch after install: the repository waits for the keeper's save instead of building the lineup a second time. */
+    @Test fun freshInstallBuildsOnce() = runBlocking {
+        lineup.value = listOf(feed("US: CNN HD", NEWS))
+        val lineups = InMemoryLineupStore(Visibility(setOf(1L), emptySet()))
+        val keeper = LineupKeeper(slowLibrary, lineups, Dispatchers.Default, warn = { warnings += it }, debug = {}, appVersion = 1)
+        val job = keeper.start(this)
+        val repo = repoFor(slowLibrary, Dispatchers.Default, lineups, building = keeper.building)
+        val b = withTimeout(5_000) { repo.board(GuideFilter.ALL, windowStart).first { it.programmesLoaded } }
+        job.cancel()
+        assertEquals(listOf("CNN"), b.names())
+        assertEquals(1, lineupCollections)
+        assertTrue(lineups.saved() != null)
+        assertTrue(timings.toString(), timings.any { it.startsWith("first board (saved)") })
+    }
+
+    /** A keeper whose build failed (nothing saved) leaves the lineup to the repository's own build. */
+    @Test fun failedKeeperBuildFallsBackToMemory() = runBlocking {
+        lineup.value = listOf(feed("US: CNN HD", NEWS))
+        val failing: LibraryStore = object : LibraryStore by fake {
+            override fun observeSportsCandidates() = flow<List<ChannelCandidate>> { throw java.io.IOException("boom") }
+        }
+        val lineups = InMemoryLineupStore(Visibility(setOf(1L), emptySet()))
+        val keeper = LineupKeeper(failing, lineups, Dispatchers.Default, warn = { warnings += it }, debug = {}, appVersion = 1)
+        val job = keeper.start(this)
+        val repo = repoFor(library, Dispatchers.Default, lineups, building = keeper.building)
+        val b = withTimeout(5_000) { repo.board(GuideFilter.ALL, windowStart).first { it.programmesLoaded } }
+        job.cancel()
+        assertEquals(listOf("CNN"), b.names())
+        assertEquals(1, lineupCollections)
+        assertEquals(listOf("Lineup build failed: IOException"), warnings)
+    }
+
+    /** Once the saved lineup is in use, the in-memory fallback build isn't kept. */
+    @Test fun savedRowsReleaseTheFallbackBuild() {
+        lineup.value = listOf(feed("US: CNN HD", NEWS))
+        val lineups = InMemoryLineupStore(Visibility(setOf(1L), emptySet()))
+        val repo = repoFor(library, Dispatchers.Default, lineups)
+        val cache = GuideRepository::class.java.getDeclaredField("lineupCache").apply { isAccessible = true }
+        var cachedWhileInUse = false
+        val boards = boardsUntil(repo.board(GuideFilter.ALL, windowStart), {
+            cachedWhileInUse = cache.get(repo) != null
+            lineups.save(savedOf(feed("US: A&E HD", ENT)))
+        }) { bs -> bs.lastOrNull()?.names() == listOf("A&E") }
+        assertTrue("the fallback build is cached while in use", cachedWhileInUse)
+        assertEquals(listOf("A&E"), boards.last().names())
+        assertNull(cache.get(repo))
+    }
+
+    /** The guide store, with every programme query answering [ms] late (virtual time). */
+    private fun programmesAfter(ms: Long): GuideStore = object : GuideStore by limited {
+        override fun observeProgrammes(guideIds: Set<String>, fromMs: Long, untilMs: Long): Flow<List<GuideProgramme>> =
+            flow { delay(ms); emitAll(limited.observeProgrammes(guideIds, fromMs, untilMs)) }
+    }
+
+    private fun linkedCnn(): ChannelCandidate {
+        val cnn = feed("US: CNN HD", NEWS)
+        lineup.value = listOf(cnn)
+        runBlocking {
+            guide.replaceGuide(GuideOrigin.EPGSHARE, listOf(GuideChannel("CNN", GuideOrigin.EPGSHARE, null)), sequenceOf(programme("CNN", "Show", windowStart)))
+            guide.replaceLinks(listOf(link(cnn, "CNN")))
+        }
+        return cnn
+    }
+
+    /** Paging and chip switches: programmes that come within [GuideRepository.CHANNELS_FIRST_DELAY_MS] never blink a channels-only board. */
+    @Test fun fastProgrammesSkipTheChannelsOnlyBoard() = runTest {
+        linkedCnn()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val repo = repoFor(library, dispatcher, store = programmesAfter(50))
+        val boards = ArrayList<GuideBoard>()
+        backgroundScope.launch(dispatcher) { repo.board(GuideFilter.ALL, windowStart).collect { boards += it } }
+        advanceTimeBy(2_000)
+        runCurrent()
+        assertTrue(boards.toString(), boards.isNotEmpty())
+        assertTrue(boards.first().programmesLoaded)
+        assertTrue(boards.all { it.programmesLoaded })
+        assertEquals(listOf("Show"), boards.first().section("News").rows.single().programmes.map { it.title })
+    }
+
+    /** A cold open: programmes slower than [GuideRepository.CHANNELS_FIRST_DELAY_MS] show the channels first, then the full board, never back. */
+    @Test fun slowProgrammesShowChannelsFirst() = runTest {
+        val cnn = linkedCnn()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val repo = repoFor(library, dispatcher, store = programmesAfter(1_000))
+        val boards = ArrayList<GuideBoard>()
+        backgroundScope.launch(dispatcher) { repo.board(GuideFilter.ALL, windowStart).collect { boards += it } }
+        advanceTimeBy(199)
+        runCurrent()
+        assertEquals(emptyList<GuideBoard>(), boards)
+        advanceTimeBy(1)
+        runCurrent()
+        val channels = boards.single()
+        assertFalse(channels.programmesLoaded)
+        assertTrue(channels.section("News").rows.single().programmes.isEmpty())
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(2, boards.size)
+        assertTrue(boards[1].programmesLoaded)
+        assertEquals(listOf("Show"), boards[1].section("News").rows.single().programmes.map { it.title })
+        // A later change (a favourite) never drops back to channels only.
+        repo.setFavourite(ChannelIdentity.of(cnn.channel.name, cnn.categoryName).rowKey, true)
+        advanceTimeBy(2_000)
+        runCurrent()
+        assertTrue(boards.drop(1).all { it.programmesLoaded })
+        assertEquals(listOf("Show"), boards.last().section("Favourites").rows.single().programmes.map { it.title })
+    }
+
+    @Test fun downloadingFollowsTheRefresher() = runBlocking {
+        val cnn = feed("US: CNN HD", NEWS)
+        lineup.value = listOf(cnn)
+        // The epgshare01 download waits until released, then fails: no network is ever touched.
+        val release = java.util.concurrent.CountDownLatch(1)
+        val http = OkHttpClient.Builder().addInterceptor { release.await(); throw java.io.IOException("offline") }.build()
+        val refresher = GuideRefresher(guide, library, SourceRegistry(emptyList()), EpgShareSource(http), PlaybackState(), { now }, Dispatchers.Default, tmp.newFolder(), warn = {})
+        assertFalse(refresher.working.value)
+        val repo = repoFor(library, Dispatchers.Default, refresher = refresher)
+        val boards = boardsUntil(repo.board(GuideFilter.ALL, windowStart)) { bs ->
+            if (bs.lastOrNull()?.downloading == true) release.countDown()
+            bs.any { it.downloading } && bs.last().let { !it.downloading && it.programmesLoaded }
+        }
+        assertTrue(boards.toString(), boards.any { it.downloading })
+        assertFalse(boards.last().downloading)
+        assertFalse(refresher.working.value)
+    }
+
     private val fixture by lazy {
         javaClass.classLoader!!.getResourceAsStream("live/visible_channels.tsv")!!.bufferedReader().readLines().filter { it.isNotEmpty() }
             .map { it.split('\t') }.mapIndexed { i, r -> ChannelCandidate(LiveChannel(1, "$i", null, r[0], r[2], null), r[1]) }
@@ -387,7 +628,7 @@ class GuideRepositoryTest {
     @Test fun fullLineupBoardIsCleanAndFast() = runBlocking {
         lineup.value = fixture
         val started = System.nanoTime()
-        val b = repoFor(library, Dispatchers.Default).board(GuideFilter.ALL, windowStart).first()
+        val b = repoFor(library, Dispatchers.Default).board(GuideFilter.ALL, windowStart).first { it.programmesLoaded }
         val ms = (System.nanoTime() - started) / 1_000_000
         val rows = b.sections.flatMap { it.rows + it.more }
         assertTrue("took ${ms}ms", ms < 5_000)
@@ -405,7 +646,7 @@ class GuideRepositoryTest {
         lineup.value = listOf(cnn)
         guide.replaceLinks(listOf(link(cnn, "CNN")))
         val boards = java.util.concurrent.CopyOnWriteArrayList<GuideBoard>()
-        val job = launch(Dispatchers.Default) { repoFor(library, Dispatchers.Default).board(GuideFilter.ALL, windowStart).collect { boards += it } }
+        val job = launch(Dispatchers.Default) { repoFor(library, Dispatchers.Default).board(GuideFilter.ALL, windowStart).filter { it.programmesLoaded }.collect { boards += it } }
         while (boards.isEmpty()) delay(10)
         for (i in 1..20) {
             guide.replaceGuide(GuideOrigin.EPGSHARE, listOf(GuideChannel("CNN", GuideOrigin.EPGSHARE, null)), sequenceOf(programme("CNN", "Show $i", windowStart)))

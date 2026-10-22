@@ -1,6 +1,8 @@
 package com.keyspaceapps.goodtv
 
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
 import androidx.annotation.VisibleForTesting
 import androidx.datastore.preferences.preferencesDataStore
@@ -11,6 +13,9 @@ import com.keyspaceapps.goodtv.data.db.RoomPopularStore
 import com.keyspaceapps.goodtv.data.db.RoomTmdbCache
 import com.keyspaceapps.goodtv.data.db.RoomTmdbGenreStore
 import com.keyspaceapps.goodtv.data.db.RoomGuideStore
+import com.keyspaceapps.goodtv.data.db.RoomLineupStore
+import com.keyspaceapps.goodtv.data.guide.LineupKeeper
+import com.keyspaceapps.goodtv.data.guide.LineupStore
 import com.keyspaceapps.goodtv.data.db.RoomWatchListStore
 import com.keyspaceapps.goodtv.data.db.RoomWatchProgressStore
 import com.keyspaceapps.goodtv.data.guide.EpgShareSource
@@ -125,6 +130,24 @@ class AppGraph(val context: Context) {
 
     /** Guide programmes, the channel-to-guide links and favourite channels. */
     val guideStore: GuideStore by lazy { RoomGuideStore(db) }
+    val lineupStore: LineupStore by lazy { RoomLineupStore(db) }
+
+    /** Rebuilds and saves the guide lineup in the background whenever the library changes; started on first use, once per process. */
+    val lineupKeeper: LineupKeeper by lazy {
+        // Started as it's created, so whoever gets it (the guide included) sees it building before its first check.
+        LineupKeeper(store, lineupStore, Dispatchers.Default, appVersion = installedAt()).also { it.start(appScope) }
+    }
+
+    /** When this install was last installed or updated: a saved lineup from another install rebuilds. */
+    private fun installedAt(): Long {
+        val pm = context.packageManager
+        val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            pm.getPackageInfo(context.packageName, PackageManager.PackageInfoFlags.of(0))
+        } else {
+            @Suppress("DEPRECATION") pm.getPackageInfo(context.packageName, 0)
+        }
+        return info.lastUpdateTime
+    }
 
     /** True while the player is on screen; the guide's provider download waits for it to end. */
     val playback = PlaybackState()
@@ -169,7 +192,7 @@ class AppGraph(val context: Context) {
     private val liveRefresher: LiveRefresher by lazy { LiveRefresher(store, sourceRegistry, { syncManager.state.value is SyncState.Syncing }) }
 
     /** The Live TV guide: the lineup with its programmes, favourites and search. */
-    val guide: GuideRepository by lazy { GuideRepository(store, guideStore, guideRefresher, liveRefresher, System::currentTimeMillis, Dispatchers.Default) }
+    val guide: GuideRepository by lazy { GuideRepository(store, guideStore, guideRefresher, liveRefresher, System::currentTimeMillis, Dispatchers.Default, lineups = lineupStore, lineupBuilding = lineupKeeper.building) }
 
     /** Background TMDB genre fill for movies; started on launch after stale sources refresh. */
     val genreFetcher: TmdbGenreFetcher by lazy {

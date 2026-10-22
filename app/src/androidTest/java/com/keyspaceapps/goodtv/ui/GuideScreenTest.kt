@@ -10,6 +10,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.isRoot
@@ -23,16 +24,29 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.printToLog
+import androidx.test.core.app.ApplicationProvider
+import com.keyspaceapps.goodtv.appGraph
+import com.keyspaceapps.goodtv.data.guide.ChannelGuideLink
 import com.keyspaceapps.goodtv.data.guide.GuideBoard
+import com.keyspaceapps.goodtv.data.guide.GuideChannel
 import com.keyspaceapps.goodtv.data.guide.GuideFilter
 import com.keyspaceapps.goodtv.data.guide.GuideProgramme
+import com.keyspaceapps.goodtv.data.guide.GuideRepository
 import com.keyspaceapps.goodtv.data.guide.GuideRow
 import com.keyspaceapps.goodtv.data.guide.GuideSearchHit
 import com.keyspaceapps.goodtv.data.guide.GuideSection
 import com.keyspaceapps.goodtv.data.guide.GuideSource
+import com.keyspaceapps.goodtv.data.guide.GuideStore
+import com.keyspaceapps.goodtv.data.guide.LineupStore
 import com.keyspaceapps.goodtv.data.guide.LiveGenre
 import com.keyspaceapps.goodtv.data.guide.Network
+import com.keyspaceapps.goodtv.data.guide.SavedFeed
+import com.keyspaceapps.goodtv.data.guide.SavedLineup
+import com.keyspaceapps.goodtv.data.guide.SavedRow
+import com.keyspaceapps.goodtv.data.guide.Visibility
+import com.keyspaceapps.goodtv.data.source.SourceRegistry
 import com.keyspaceapps.goodtv.data.sports.ChannelCandidate
+import com.keyspaceapps.goodtv.data.sports.LiveRefresher
 import com.keyspaceapps.goodtv.domain.LiveChannel
 import com.keyspaceapps.goodtv.domain.label
 import com.keyspaceapps.goodtv.ui.live.GuideScreen
@@ -44,11 +58,16 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.math.abs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -110,6 +129,8 @@ class GuideScreenTest {
 
     /**
      * Any filter gets [sections] (Events gets [events]); each window keeps only the programmes overlapping it.
+     * A window in [pending] has its channels but no programmes yet, like the repository's first board; [downloading]
+     * stands for the guide refresher at work.
      * A search answers from [hits] by its trimmed, lower-case query. Favourite changes and event refreshes are recorded.
      */
     private inner class FakeGuide(
@@ -118,6 +139,8 @@ class GuideScreenTest {
         private val hits: Map<String, List<GuideSearchHit>> = emptyMap(),
     ) : GuideSource {
         val sections = MutableStateFlow(initial)
+        val pending = MutableStateFlow(emptySet<Long>())
+        val downloading = MutableStateFlow(false)
         val favourites = mutableListOf<Pair<String, Boolean>>()
         val windows = MutableStateFlow<List<Long>>(emptyList())
         val queries = mutableListOf<String>()
@@ -126,9 +149,11 @@ class GuideScreenTest {
             windows.value = windows.value + windowStartMs
             val end = windowStartMs + 3 * 3_600_000L
             fun clip(r: GuideRow) = r.copy(programmes = r.programmes.filter { it.endMs > windowStartMs && it.startMs < end })
-            return sections.map { all ->
+            return combine(sections, pending, downloading) { all, waiting, working ->
                 val shown = if (filter == GuideFilter.EVENTS) events else all
-                GuideBoard(shown.map { s -> s.copy(rows = s.rows.map(::clip), more = s.more.map(::clip)) }, windowStartMs)
+                val loaded = windowStartMs !in waiting
+                fun rowOf(r: GuideRow) = if (loaded) clip(r) else r.copy(programmes = emptyList())
+                GuideBoard(shown.map { s -> s.copy(rows = s.rows.map(::rowOf), more = s.more.map(::rowOf)) }, windowStartMs, loaded, working)
             }
         }
         override fun search(query: String): Flow<List<GuideSearchHit>> {
@@ -164,6 +189,46 @@ class GuideScreenTest {
     private fun show(guide: FakeGuide = FakeGuide(listOf(news, nbc))): FakeGuide {
         composeRule.setContent { GoodTvTheme { GuideScreen(onPlay = { played = it }, source = guide, clock = { now }) } }
         return guide
+    }
+
+    /**
+     * The real [GuideRepository] over [news]'s rows as a saved lineup, with their programmes and links held in memory
+     * and every programme query answering [programmeMs] late (a quick Room read on the TV). The app's tables are
+     * emptied first so its guide refresher has no source to download for.
+     */
+    private fun realGuide(programmeMs: Long): GuideSource {
+        val graph = ApplicationProvider.getApplicationContext<android.content.Context>().appGraph()
+        runBlocking { graph.db.clearAllTables() }
+        val rows = news.rows
+        val programmes = rows.flatMap { it.programmes }
+        val links = listOf(ChannelGuideLink(7, "fx", "fn"), ChannelGuideLink(7, "cn1", "cn"), ChannelGuideLink(7, "ms", "ms"))
+        val store = object : GuideStore by graph.guideStore {
+            override fun observeLinks() = flowOf(links)
+            override fun observeChannels() = flowOf(programmes.map { it.guideId }.distinct().map { GuideChannel(it, com.keyspaceapps.goodtv.data.guide.GuideOrigin.EPGSHARE, null) })
+            override fun observeFavourites() = flowOf(emptySet<String>())
+            override fun observeProgrammes(guideIds: Set<String>, fromMs: Long, untilMs: Long) = flow {
+                delay(programmeMs)
+                emit(programmes.filter { it.guideId in guideIds && it.endMs > fromMs && it.startMs < untilMs }.sortedWith(compareBy({ it.guideId }, { it.startMs })))
+            }
+        }
+        // Sort keys keep the rows in [news]'s order: Fox News first.
+        val saved = SavedLineup(
+            rows.mapIndexed { i, r -> SavedRow(r.key, i, r.name, r.genre, null, null, null, null, null, "$i ${r.key}", null, false, r.feeds.map { SavedFeed(it.channel, it.categoryName) }) },
+            generation = 0, rulesVersion = 1,
+        )
+        val lineups = object : LineupStore {
+            override suspend fun saved() = saved
+            override fun observeSaved() = flowOf(saved)
+            override suspend fun savedStamp(): com.keyspaceapps.goodtv.data.guide.LineupStamp? = null
+            override suspend fun save(lineup: SavedLineup) = Unit
+            override suspend fun generation() = 0L
+            override fun observeGeneration() = flowOf(0L)
+            override fun observeVisibility() = flowOf(Visibility(setOf(7L), emptySet()))
+        }
+        return GuideRepository(
+            graph.store, store, graph.guideRefresher, LiveRefresher(graph.store, SourceRegistry(emptyList()), { false }),
+            { now }, Dispatchers.Default, lineups = lineups,
+        )
     }
 
     private fun time(h: Int, m: Int) = SportsFormats.startTime(composeRule.activity, Instant.ofEpochMilli(at(h, m)))
@@ -570,5 +635,163 @@ class GuideScreenTest {
         assertEquals(0, composeRule.onAllNodes(isFocused() and (hasText("Special Report") or hasText("Hannity"))).fetchSemanticsNodes().size)
         keys("D")
         waitFocused("Special Report")
+    }
+
+    private fun loadingFocused() = try {
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasTestTag("guide_loading_cell") and isFocused()).fetchSemanticsNodes().size == 1 }
+    } catch (e: Throwable) {
+        composeRule.onRoot(useUnmergedTree = true).printToLog("GoodTvTree"); throw e
+    }
+    private fun count(text: String) = composeRule.onAllNodes(hasText(text)).fetchSemanticsNodes().size
+
+    /** The first board has channels but no programmes yet: rows and a loading indicator, never "No guide info". */
+    @Test fun channelsShowWhileProgrammesLoad() {
+        val guide = FakeGuide(listOf(news, GuideSection("Entertainment", null, listOf(silent, rock), emptyList())))
+        guide.pending.value = setOf(at(18))
+        show(guide)
+        waitFor("Fox News")
+        composeRule.onNodeWithText("Some Channel").assertIsDisplayed()
+        composeRule.onNodeWithText("Loading guide…").assertIsDisplayed()
+        assertEquals(0, count("No guide info"))
+        assertEquals(0, count("Special Report"))
+        // A loop doesn't wait for programmes.
+        waitFor("30 Rock · all day")
+        // The first row's loading cell has focus; the details name the channel, and Select plays it.
+        loadingFocused()
+        waitFor("Select to watch")
+        keys("C")
+        composeRule.waitUntil(5_000) { played != null }
+        assertEquals("fx", played!!.refId)
+        // Once the programmes are in, a row without any says so and the indicator goes.
+        guide.pending.value = emptySet()
+        waitFor("Special Report")
+        waitFor("No guide info")
+        composeRule.waitUntil(5_000) { count("Loading guide…") == 0 }
+    }
+
+    /** While the refresher downloads the guide and the window has no programmes yet, the indicator says so; programmes end it. */
+    @Test fun downloadingSaysSo() {
+        val guide = FakeGuide(listOf(news))
+        guide.pending.value = setOf(at(18))
+        guide.downloading.value = true
+        show(guide)
+        waitFor("Downloading guide…")
+        assertEquals(0, count("Loading guide…"))
+        // The download carries on, but this window has its programmes.
+        guide.pending.value = emptySet()
+        waitFor("Special Report")
+        composeRule.waitUntil(5_000) { count("Downloading guide…") == 0 }
+        assertEquals(0, count("Loading guide…"))
+    }
+
+    /**
+     * A first download: the window is loaded but nothing in it has programmes yet. Rows wait (no "No guide info")
+     * under "Downloading guide…"; once the download ends with still nothing, they say "No guide info".
+     */
+    @Test fun firstDownloadShowsLoadingNotNoGuide() {
+        val guide = FakeGuide(listOf(GuideSection("News", null, listOf(cnn.copy(programmes = emptyList()), silent, rock), emptyList())))
+        guide.downloading.value = true
+        show(guide)
+        waitFor("Downloading guide…")
+        waitFor("CNN")
+        waitFor("30 Rock · all day")
+        assertEquals(0, count("No guide info"))
+        loadingFocused()
+        guide.downloading.value = false
+        waitFor("No guide info")
+        // Two rows say it; the first one has focus.
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasText("No guide info") and isFocused()).fetchSemanticsNodes().size == 1 }
+        composeRule.waitUntil(5_000) { count("Downloading guide…") == 0 }
+        assertEquals(0, count("Loading guide…"))
+    }
+
+    /**
+     * The programmes arrive as a second board with the same rows (the rebuilt rows): focus stays on its row,
+     * moving from the loading cell to what's on now.
+     */
+    @Test fun programmesFillInWithoutMovingFocus() {
+        val guide = FakeGuide(listOf(news, nbc))
+        guide.pending.value = setOf(at(18))
+        show(guide)
+        loadingFocused()
+        keys("D")
+        loadingFocused()
+        focusedInRowOf("CNN")
+        guide.pending.value = emptySet()
+        waitFocused("The Situation Room")
+        waitFor("The Situation Room · CNN")
+    }
+
+    /** Waits until the focused cell sits in [channel]'s row: level with that channel's name cell, to its right. */
+    private fun focusedInRowOf(channel: String) = try {
+        composeRule.waitUntil(5_000) {
+            val focused = composeRule.onAllNodes(isFocused()).fetchSemanticsNodes().singleOrNull() ?: return@waitUntil false
+            val top = focused.positionInRoot.y
+            val bottom = top + focused.size.height
+            composeRule.onAllNodes(hasText(channel)).fetchSemanticsNodes().any { n ->
+                val middle = n.positionInRoot.y + n.size.height / 2
+                middle in top..bottom && n.positionInRoot.x < focused.positionInRoot.x
+            }
+        }
+    } catch (e: Throwable) {
+        composeRule.onRoot(useUnmergedTree = true).printToLog("GoodTvTree"); throw e
+    }
+
+    /** Whether a loading cell shows at any moment within [ms]: polled as fast as the tree can be read. */
+    private fun loadingCellWithin(ms: Long): Boolean {
+        val until = System.currentTimeMillis() + ms
+        while (System.currentTimeMillis() < until) {
+            if (composeRule.onAllNodes(hasTestTag("guide_loading_cell"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()) return true
+        }
+        return false
+    }
+
+    /** The real repository with programmes that answer quickly: paging never shows loading cells, even for a frame. */
+    @Test fun pagingDoesNotBlinkLoadingCells() {
+        val guide = realGuide(programmeMs = 100)
+        composeRule.setContent { GoodTvTheme { GuideScreen(onPlay = { played = it }, source = guide, clock = { now }) } }
+        waitFocused("Special Report")
+        keys("R", "R")
+        waitFocused("Jesse Watters Primetime")
+        keys("R")
+        assertFalse("a loading cell showed while paging", loadingCellWithin(1_500))
+        firstHeader(time(18, 30))
+        waitFocused("Hannity")
+        // And back.
+        keys("L", "L", "L", "L")
+        assertFalse("a loading cell showed while paging back", loadingCellWithin(1_500))
+        firstHeader(time(18, 0))
+    }
+
+    /** Focus on a channel's name while its programmes load stays on that name when they arrive. */
+    @Test fun focusStaysOnTheChannelCellWhenProgrammesArrive() {
+        val guide = FakeGuide(listOf(news, nbc))
+        guide.pending.value = setOf(at(18))
+        show(guide)
+        loadingFocused()
+        keys("D", "L")
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasText("CNN") and isFocused()).fetchSemanticsNodes().size == 1 }
+        guide.pending.value = emptySet()
+        waitFor("The Situation Room")
+        // Long enough for any retarget to land.
+        repeat(10) {
+            Thread.sleep(100)
+            assertEquals(1, composeRule.onAllNodes(hasText("CNN") and isFocused()).fetchSemanticsNodes().size)
+        }
+        assertEquals(0, composeRule.onAllNodes(hasTestTag("guide_loading_cell")).fetchSemanticsNodes().size)
+    }
+
+    /** Paging lands on what follows the old window even when the new window's programmes come a moment later. */
+    @Test fun pagingWhileProgrammesLoadKeepsTheTime() {
+        val guide = show()
+        waitFocused("Special Report")
+        keys("R", "R")
+        waitFocused("Jesse Watters Primetime")
+        guide.pending.value = setOf(at(18, 30))
+        keys("R")
+        firstHeader(time(18, 30))
+        loadingFocused()
+        guide.pending.value = emptySet()
+        waitFocused("Hannity")
     }
 }

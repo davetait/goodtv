@@ -10,6 +10,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -107,6 +110,11 @@ class GuideRefresher(
 ) {
     private val lock = Mutex()
 
+    private val _working = MutableStateFlow(false)
+
+    /** True while a refresh is downloading and storing a guide; a call that finds nothing due never sets it. */
+    val working: StateFlow<Boolean> = _working.asStateFlow()
+
     suspend fun refreshIfStale(): Unit = lock.withLock { withContext(io) { refresh() } }
 
     private suspend fun refresh() {
@@ -132,6 +140,16 @@ class GuideRefresher(
         val unlinked = unlinkedSources.filter { it in inLineup }
         val epgDue = epgStale || unlinked.isNotEmpty()
         if (!epgDue && !providerDue) return
+        _working.value = true
+        try {
+            refreshDue(lineup, unlinked, epgDue, providerDue, now)
+        } finally {
+            _working.value = false
+        }
+    }
+
+    /** The refresh itself, once [refresh] has found what is due. */
+    private suspend fun refreshDue(lineup: List<ChannelCandidate>, unlinked: List<Long>, epgDue: Boolean, providerDue: Boolean, now: Long) {
         if (epgDue) unlinked.forEach { early.recordEarlyRefresh(it, now) }
         val stored = store.observeLinks().first()
 

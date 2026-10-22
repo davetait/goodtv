@@ -143,6 +143,33 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
     }
 }
 
+/** v10 → v11: the saved guide lineup and the library generation it is checked against. DDL matches schemas/11.json. */
+val MIGRATION_10_11 = object : Migration(10, 11) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `lineup_rows` (`key` TEXT NOT NULL, `position` INTEGER NOT NULL, `name` TEXT NOT NULL, `genre` TEXT NOT NULL, " +
+                "`network` TEXT, `callSign` TEXT, `market` TEXT, `loopShow` TEXT, `providerLogo` TEXT, `sortKey` TEXT NOT NULL, `loopKey` TEXT, " +
+                "`appCopy` INTEGER NOT NULL, PRIMARY KEY(`key`))",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_lineup_rows_position` ON `lineup_rows` (`position`)")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `lineup_feeds` (`rowKey` TEXT NOT NULL, `position` INTEGER NOT NULL, `sourceId` INTEGER NOT NULL, " +
+                "`channelId` TEXT NOT NULL, `categoryId` TEXT, `name` TEXT NOT NULL, `logoUrl` TEXT, `number` INTEGER, `title` TEXT NOT NULL, " +
+                "`language` TEXT, `quality` TEXT, `epgChannelId` TEXT, `categoryName` TEXT NOT NULL, PRIMARY KEY(`rowKey`, `position`), " +
+                "FOREIGN KEY(`rowKey`) REFERENCES `lineup_rows`(`key`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        )
+        db.execSQL("CREATE TABLE IF NOT EXISTS `lineup_meta` (`id` INTEGER NOT NULL, `savedGeneration` INTEGER NOT NULL, `rulesVersion` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `lineup_state` (`id` INTEGER NOT NULL, `generation` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+    }
+}
+
+/** v11 → v12: the saved lineup also records the app install that built it; a lineup from before reads 0 and rebuilds once. */
+val MIGRATION_11_12 = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `lineup_meta` ADD COLUMN `appVersion` INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
 @Database(
     entities = [
         SourceEntity::class, CategoryEntity::class, LiveChannelEntity::class, MovieEntity::class, SeriesEntity::class,
@@ -151,8 +178,9 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
         SeriesGenreEntity::class, TmdbGenreEntity::class, TmdbGenreStatusEntity::class, WatchProgressEntity::class,
         TmdbListEntity::class, TmdbListItemEntity::class, WatchListEntity::class,
         GuideChannelEntity::class, GuideProgrammeEntity::class, ChannelGuideEntity::class, FavouriteChannelEntity::class, GuideMetaEntity::class,
+        LineupRowEntity::class, LineupFeedEntity::class, LineupMetaEntity::class, LineupStateEntity::class,
     ],
-    version = 10,
+    version = 12,
     exportSchema = true, // schemas/ holds the baseline every future migration is written against
 )
 abstract class GoodTvDatabase : RoomDatabase() {
@@ -165,11 +193,12 @@ abstract class GoodTvDatabase : RoomDatabase() {
     abstract fun popular(): PopularDao
     abstract fun watchList(): WatchListDao
     abstract fun guide(): GuideDao
+    abstract fun lineup(): LineupDao
 
     companion object {
         fun create(context: Context): GoodTvDatabase =
             Room.databaseBuilder(context, GoodTvDatabase::class.java, "goodtv.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                 .fallbackToDestructiveMigration(dropAllTables = true) // last resort for an unknown version only
                 .build()
     }

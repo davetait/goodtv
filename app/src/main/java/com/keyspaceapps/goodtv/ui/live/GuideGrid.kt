@@ -46,6 +46,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.ClickableSurfaceDefaults
+import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
@@ -73,30 +74,42 @@ private val Star = Color(0xFFF5C518)
 /** One line of the grid: a section title, a channel, or a network's "More NBC" toggle. */
 internal sealed interface GuideLine { val key: String }
 internal data class SectionLine(override val key: String, val title: String, val network: Network?) : GuideLine
-internal data class ChannelLine(override val key: String, val row: GuideRow) : GuideLine {
+/** [loading]: the window's programmes are still to come ([awaitingProgrammes]), so an empty row is waiting, not without a guide. */
+internal data class ChannelLine(override val key: String, val row: GuideRow, val loading: Boolean = false) : GuideLine {
     val channelId: String get() = "$key|ch"
 }
 internal data class MoreLine(override val key: String, val section: String, val count: Int, val open: Boolean) : GuideLine {
     val id: String get() = "$key|more"
 }
 
-/** A row may sit in two sections (Favourites and its own), so a line's key carries its section. An open "More" row's stations follow it. */
-internal fun linesOf(board: GuideBoard, expanded: Set<String>): List<GuideLine> = buildList {
+/**
+ * Whether the window's programmes are still to come: not read yet, or a guide download under way while nothing in
+ * the window has any (a first download). Either way an empty row is waiting, never "No guide info".
+ */
+internal fun awaitingProgrammes(board: GuideBoard): Boolean =
+    !board.programmesLoaded || (board.downloading && board.sections.all { s -> s.rows.all { it.programmes.isEmpty() } && s.more.all { it.programmes.isEmpty() } })
+
+/**
+ * A row may sit in two sections (Favourites and its own), so a line's key carries its section. An open "More" row's
+ * stations follow it. [loading] marks every channel line as waiting for programmes ([awaitingProgrammes]).
+ */
+internal fun linesOf(board: GuideBoard, expanded: Set<String>, loading: Boolean = awaitingProgrammes(board)): List<GuideLine> = buildList {
     for (s in board.sections) {
         add(SectionLine("head|${s.title}", s.title, s.network))
-        s.rows.forEach { add(ChannelLine("${s.title}/${it.key}", it)) }
+        s.rows.forEach { add(ChannelLine("${s.title}/${it.key}", it, loading)) }
         if (s.network != null && s.more.isNotEmpty()) {
             val open = s.title in expanded
             add(MoreLine("more/${s.title}", s.title, s.more.size, open))
-            if (open) s.more.forEach { add(ChannelLine("${s.title}/${it.key}", it)) }
+            if (open) s.more.forEach { add(ChannelLine("${s.title}/${it.key}", it, loading)) }
         }
     }
 }
 
-internal enum class CellKind { PROGRAMME, LOOP, EVENT, NO_GUIDE }
+internal enum class CellKind { PROGRAMME, LOOP, EVENT, NO_GUIDE, LOADING }
 
 /**
- * A programme clipped to the window ([fromMs], [untilMs]); a loop or a row without a guide is one cell spanning it.
+ * A programme clipped to the window ([fromMs], [untilMs]); a loop, a row without a guide or a row whose programmes
+ * are still loading is one cell spanning it.
  * An event slot is one cell too (see [eventCell]); [startsMs] is its parsed start, when its name has one.
  */
 internal data class GuideCell(
@@ -120,6 +133,8 @@ internal fun cellsOf(line: ChannelLine, windowStart: Long): List<GuideCell> {
         val until = minOf(p.endMs, end)
         if (until <= from) null else GuideCell("${line.key}|${p.startMs}", CellKind.PROGRAMME, p, from, until).also { cursor = until }
     }
+    // Its own id, so focus on it moves on (to what's on now) once the programmes arrive.
+    if (cells.isEmpty() && line.loading) return listOf(GuideCell("${line.key}|loading", CellKind.LOADING, null, windowStart, end))
     return cells.ifEmpty { listOf(GuideCell("${line.key}|all", CellKind.NO_GUIDE, null, windowStart, end)) }
 }
 
@@ -263,8 +278,8 @@ internal class GuideActions(
 )
 
 /**
- * Time across, channels down: a header of six half-hour columns, the rows (lazily, each composing only the
- * window's few cells) and the red now line when now is in the window.
+ * Time across, channels down: a header of six half-hour columns (with [status], "Loading guide…" or
+ * "Downloading guide…", over the channels), the rows (lazily, each composing only the window's few cells) and the red now line when now is in the window.
  */
 @Composable
 internal fun GuideGrid(
@@ -275,13 +290,18 @@ internal fun GuideGrid(
     focus: GuideFocus,
     actions: GuideActions,
     timeLabel: (Long) -> String,
+    status: String?,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier) {
         val column = (maxWidth - ChannelWidth) / GuideTime.COLUMNS
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.height(24.dp)) {
-                Spacer(Modifier.width(ChannelWidth))
+                Box(Modifier.width(ChannelWidth)) {
+                    status?.let {
+                        Text(it, style = MaterialTheme.typography.labelMedium.copy(fontStyle = FontStyle.Italic), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 4.dp))
+                    }
+                }
                 repeat(GuideTime.COLUMNS) { i ->
                     val start = windowStart + i * GuideTime.SLOT_MS
                     Text(
@@ -337,6 +357,7 @@ private fun ChannelRow(line: ChannelLine, windowStart: Long, now: Long, column: 
                         timeLabel,
                         onClick = { actions.onCell(line, cell) },
                         modifier = Modifier.offset(x = left).width(width).fillMaxHeight()
+                            .then(if (cell.kind == CellKind.LOADING) Modifier.testTag("guide_loading_cell") else Modifier)
                             .guideFocusable(focus, cell.id) { actions.onFocused(cell.id, line.row, cell) }
                             // Right from the last cell and Left from the first move the window; Compose moves between cells.
                             .onPreviewKeyEvent { e ->
@@ -386,7 +407,7 @@ private fun ChannelCell(line: ChannelLine, focus: GuideFocus, actions: GuideActi
 private fun ProgrammeCell(cell: GuideCell, row: GuideRow, now: Long, timeLabel: (Long) -> String, onClick: () -> Unit, modifier: Modifier) {
     // An event slot that isn't on (or about to be) only says when it starts.
     val waiting = cell.startsMs?.takeUnless { GuideTime.eventPlayable(it, now) }
-    val dim = cell.kind == CellKind.NO_GUIDE || waiting != null
+    val dim = cell.kind == CellKind.NO_GUIDE || cell.kind == CellKind.LOADING || waiting != null
     Surface(
         onClick = onClick,
         modifier = modifier,
@@ -400,20 +421,27 @@ private fun ProgrammeCell(cell: GuideCell, row: GuideRow, now: Long, timeLabel: 
         scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
     ) {
         Box(Modifier.fillMaxSize().padding(horizontal = 8.dp), contentAlignment = Alignment.CenterStart) {
-            Text(
-                when (cell.kind) {
-                    CellKind.PROGRAMME -> cell.programme!!.title
-                    CellKind.LOOP -> stringResource(R.string.guide_all_day, row.loopShow.orEmpty())
-                    CellKind.EVENT -> waiting?.let { eventStart(it, now, timeLabel) } ?: row.name
-                    CellKind.NO_GUIDE -> stringResource(R.string.guide_no_info)
-                },
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = if (dim) FontWeight.Normal else FontWeight.Medium,
-                    fontStyle = if (dim) FontStyle.Italic else FontStyle.Normal,
-                ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            val label = when (cell.kind) {
+                CellKind.PROGRAMME -> cell.programme!!.title
+                CellKind.LOOP -> stringResource(R.string.guide_all_day, row.loopShow.orEmpty())
+                CellKind.EVENT -> waiting?.let { eventStart(it, now, timeLabel) } ?: row.name
+                CellKind.NO_GUIDE -> stringResource(R.string.guide_no_info)
+                CellKind.LOADING -> null
+            }
+            if (label == null) {
+                // Still loading: a faint bar where the title will be, no words (the header says "Loading guide…").
+                Box(Modifier.fillMaxWidth(0.35f).height(8.dp).background(LocalContentColor.current.copy(alpha = 0.18f), RoundedCornerShape(4.dp)))
+            } else {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = if (dim) FontWeight.Normal else FontWeight.Medium,
+                        fontStyle = if (dim) FontStyle.Italic else FontStyle.Normal,
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

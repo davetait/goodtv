@@ -104,8 +104,15 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
 
     val current = view
     val board = current?.board
-    val lines = remember(board, expanded) { board?.let { linesOf(it, expanded) }.orEmpty() }
+    val awaiting = remember(board) { board != null && awaitingProgrammes(board) }
+    val lines = remember(board, expanded) { board?.let { linesOf(it, expanded, awaiting) }.orEmpty() }
     val windowStart = board?.windowStartMs ?: vm.window
+    // Only while the window has no programmes: a download that's filling other windows says nothing here.
+    val status = when {
+        board == null || !awaiting -> null
+        board.downloading -> stringResource(R.string.guide_downloading)
+        else -> stringResource(R.string.guide_loading)
+    }
     focus.lines = lines
     focus.windowStart = windowStart
     // A grid that appears when a search is cleared never pulls focus from the field.
@@ -129,6 +136,8 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
         val id = if (paged != null) {
             if (paged.windowStart != windowStart) return@LaunchedEffect
             focus.pending = null
+            // Kept for when this board is still loading (see onFocused).
+            vm.focusTimeMs = paged.timeMs
             refocusTarget(lines, windowStart, now, paged.lineKey, null, paged.timeMs, before)
         } else {
             val key = vm.focus.key
@@ -167,7 +176,8 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
         GuideActions(
             onFocused = { id, row, cell ->
                 vm.focus.key = id
-                vm.focusTimeMs = cell?.fromMs
+                // A loading cell spans the window: keep the time focus came for, where it lands once the programmes arrive.
+                if (cell?.kind != CellKind.LOADING) vm.focusTimeMs = cell?.fromMs
                 focus.outside = false
                 if (row != null) focused.value = GuideFocused(row, cell)
             },
@@ -260,7 +270,7 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
                     ),
                     Modifier.weight(1f),
                 )
-                else -> GuideGrid(lines, windowStart, now, listState, focus, actions, timeLabel, Modifier.weight(1f).fillMaxWidth())
+                else -> GuideGrid(lines, windowStart, now, listState, focus, actions, timeLabel, status, Modifier.weight(1f).fillMaxWidth())
             }
             GuideDetails(focused, now, timeLabel, Modifier.padding(top = 8.dp, bottom = 24.dp).height(114.dp))
         }

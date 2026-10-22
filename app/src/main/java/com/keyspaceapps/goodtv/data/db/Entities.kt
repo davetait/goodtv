@@ -1,5 +1,6 @@
 package com.keyspaceapps.goodtv.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -223,3 +224,35 @@ data class FavouriteChannelEntity(@PrimaryKey val rowKey: String, val addedAt: L
 /** When each guide origin was last fetched ([origin] is a GuideOrigin name). */
 @Entity(tableName = "guide_meta")
 data class GuideMetaEntity(@PrimaryKey val origin: String, val fetchedAt: Long)
+
+/** One saved guide row (see SavedRow); [genre] and [network] are enum names. */
+@Entity(tableName = "lineup_rows", indices = [Index("position")])
+data class LineupRowEntity(
+    @PrimaryKey val key: String, val position: Int, val name: String, val genre: String, val network: String?,
+    val callSign: String?, val market: String?, val loopShow: String?, val providerLogo: String?,
+    val sortKey: String, val loopKey: String?, val appCopy: Boolean,
+)
+
+/** A provider channel of a saved row, in play order: every LiveChannel field plus its category's name. */
+@Entity(
+    tableName = "lineup_feeds",
+    primaryKeys = ["rowKey", "position"],
+    foreignKeys = [ForeignKey(entity = LineupRowEntity::class, parentColumns = ["key"], childColumns = ["rowKey"], onDelete = ForeignKey.CASCADE)],
+)
+data class LineupFeedEntity(
+    val rowKey: String, val position: Int, val sourceId: Long, val channelId: String, val categoryId: String?, val name: String,
+    val logoUrl: String?, val number: Int?, val title: String, val language: String?, val quality: String?, val epgChannelId: String?,
+    val categoryName: String,
+)
+
+/** Which library generation, identity rules and app install the saved lineup was built from; a single row (id 0). */
+@Entity(tableName = "lineup_meta")
+data class LineupMetaEntity(
+    @PrimaryKey val id: Int = 0, val savedGeneration: Long, val rulesVersion: Int,
+    /** PackageInfo.lastUpdateTime of the install that built it; 0 for a lineup saved before v12 (rebuilt once). */
+    @ColumnInfo(defaultValue = "0") val appVersion: Long,
+)
+
+/** The library generation, bumped by every library write; a single row (id 0), absent until the first bump. */
+@Entity(tableName = "lineup_state")
+data class LineupStateEntity(@PrimaryKey val id: Int = 0, val generation: Long)

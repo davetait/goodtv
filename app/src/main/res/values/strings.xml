@@ -141,7 +141,8 @@
     <string name="sports_none_today">No games on today</string>
     <string name="sports_failed">Couldn’t load %1$s schedule</string>
 
-    <string name="guide_loading">Loading the guide…</string>
+    <string name="guide_loading">Loading guide…</string>
+    <string name="guide_downloading">Downloading guide…</string>
     <string name="guide_empty">No channels here</string>
     <string name="guide_no_favourites">No favourites yet. Hold Select (or press Menu) on a channel to add it.</string>
     <string name="guide_no_info">No guide info</string>

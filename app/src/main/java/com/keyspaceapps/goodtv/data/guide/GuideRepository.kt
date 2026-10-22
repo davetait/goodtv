@@ -17,6 +17,8 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.shareIn
@@ -31,6 +33,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.merge
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Which rows the guide shows: everything (but event slots), favourites, one network's stations, or a genre. */
 enum class GuideFilter { ALL, FAVOURITES, NETWORK, NEWS, SPORTS, ENTERTAINMENT, COMEDY, MOVIES, KIDS, DOCUMENTARY, EVENTS }
@@ -50,7 +54,16 @@ data class GuideRow(
 /** [more] holds a network's stations in the markets that aren't default; empty for other sections. */
 data class GuideSection(val title: String, val network: Network?, val rows: List<GuideRow>, val more: List<GuideRow>)
 
-data class GuideBoard(val sections: List<GuideSection>, val windowStartMs: Long)
+/**
+ * [programmesLoaded] is false while the window's programmes are still being read (the rows have none yet);
+ * [downloading] is true while the guide refresher is downloading a guide.
+ */
+data class GuideBoard(
+    val sections: List<GuideSection>,
+    val windowStartMs: Long,
+    val programmesLoaded: Boolean = true,
+    val downloading: Boolean = false,
+)
 
 /** [programme] is null when the row matched by its name or the show it loops. */
 data class GuideSearchHit(val row: GuideRow, val programme: GuideProgramme?)
@@ -64,10 +77,12 @@ interface GuideSource {
 }
 
 /**
- * Turns the visible lineup, the stored guide links and programmes and the favourites into the guide
- * screen's board. All of a lineup's merging (identities of ~12.6k channels, grouping, placeholder
- * logos) runs on [compute], once per lineup; moving the window or switching filters only re-queries
- * programmes.
+ * Turns the lineup, the stored guide links and programmes and the favourites into the guide screen's board.
+ * The rows come from the lineup the [LineupKeeper] saved in [lineups], filtered by the current [Visibility];
+ * only when nothing is saved and the keeper isn't building (or there is no [lineups]) is the visible lineup merged here ([LineupBuilder]:
+ * identities of ~12.6k channels, grouping, placeholder logos), on [compute], once per lineup. Moving the window
+ * or switching filters only re-queries programmes. A board whose programmes take longer than
+ * [CHANNELS_FIRST_DELAY_MS] comes channels first: the rows without programmes, then the same rows once they are read.
  */
 class GuideRepository(
     private val library: LibraryStore,
@@ -78,6 +93,9 @@ class GuideRepository(
     private val compute: CoroutineDispatcher,
     private val warn: (String) -> Unit = { Log.w("GoodTV", it) },
     private val debug: (String) -> Unit = { Log.d("GoodTvGuide", it) },
+    private val lineups: LineupStore? = null,
+    /** [LineupKeeper.building]: while it's true and nothing is saved, the rows wait for the keeper's save. */
+    private val lineupBuilding: StateFlow<Boolean>? = null,
 ) : GuideSource {
     /** A row before guide data: the part that depends on the lineup alone. */
     private class Base(
@@ -102,113 +120,84 @@ class GuideRepository(
 
     private class Lineup(val source: List<ChannelCandidate>, val rows: List<Base>)
 
+    /** The lineup's rows, and whether they came from the saved lineup (for the timing log). */
+    private class Rows(val rows: List<Base>, val fromSaved: Boolean)
+
+    /** What every board and search shares: the resolved rows and the favourites. */
+    private class Shared(val rows: List<Resolved>, val favourites: Set<String>, val fromSaved: Boolean)
+
     @Volatile private var lineupCache: Lineup? = null
 
     private fun lineupOf(candidates: List<ChannelCandidate>): Lineup {
         lineupCache?.takeIf { it.source == candidates }?.let { return it }
-        var started = System.nanoTime()
-        val placeholders = PlaceholderLogos.of(candidates.map { it.channel })
-        val groups = LinkedHashMap<String, MutableList<Pair<ChannelCandidate, ChannelIdentity>>>()
-        val sorted = ChannelOrder.sort(candidates)
-        debug("sort ${msSince(started)} ms, ${candidates.size} channels")
-        started = System.nanoTime()
-        for (c in sorted) {
-            val id = ChannelIdentity.of(c.channel.name, c.categoryName)
-            if (!id.hidden) groups.getOrPut(id.rowKey) { ArrayList() }.add(c to id)
-        }
-        foldIntoStations(groups, sorted)
-        debug("identities ${msSince(started)} ms, ${groups.size} rows")
-        started = System.nanoTime()
-        val rows = groups.map { (key, feeds) ->
-            val ids = feeds.map { it.second }
-            val network = ids.firstNotNullOfOrNull { it.network }
-            val callSign = ids.firstNotNullOfOrNull { it.callSign }
-            val name = nameOf(ids, network, callSign)
-            val loopShow = ids.firstNotNullOfOrNull { it.loopShow }
-            Base(
-                key = key,
-                name = name,
-                genre = ids.firstOrNull { it.genre != LiveGenre.ENTERTAINMENT }?.genre ?: LiveGenre.ENTERTAINMENT,
-                network = network,
-                callSign = callSign,
-                market = ids.firstNotNullOfOrNull { it.market },
-                loopShow = loopShow,
-                feeds = feeds.map { it.first },
-                providerLogo = feeds.firstNotNullOfOrNull { (c, _) -> c.channel.logoUrl?.takeIf { it.isNotBlank() && it !in placeholders } },
-                sortKey = GameMatcher.normalize(name),
-                loopKey = loopShow?.let(GameMatcher::normalize),
-                appCopy = network != null && APP_PREFIXES.any { key.startsWith(it) },
-            )
-        }
-        debug("rows ${msSince(started)} ms")
+        val rows = LineupBuilder.build(candidates, debug).map { baseOf(it, it.feeds) }
         return Lineup(candidates, rows).also { lineupCache = it }
     }
 
-    /**
-     * A network copy without a call sign ("ABC 7 NEW YORK", "AT&T: FOX 5 LOCAL NEW YORK", "ABC HD [NEW YORK]")
-     * is its market's station when that is certain: exactly one main station of the network in that market,
-     * and (when the copy has a channel number) one of the station's feeds names the same number. Its feeds
-     * then join the station's row and share its guide; otherwise it stays a row of its own. App copies never fold.
-     */
-    private fun foldIntoStations(groups: LinkedHashMap<String, MutableList<Pair<ChannelCandidate, ChannelIdentity>>>, sorted: List<ChannelCandidate>) {
-        fun isApp(key: String) = APP_PREFIXES.any { key.startsWith(it) }
-        val stations = HashMap<Pair<Network, String>, MutableList<String>>()
-        for ((key, feeds) in groups) {
-            if (isApp(key)) continue
-            val call = feeds.firstNotNullOfOrNull { it.second.callSign }?.takeIf { '-' !in it } ?: continue
-            val network = feeds.firstNotNullOfOrNull { it.second.network } ?: continue
-            val market = feeds.firstNotNullOfOrNull { it.second.market } ?: continue
-            stations.getOrPut(network to market) { ArrayList() } += key
-        }
-        if (stations.isEmpty()) return
-        var folded = false
-        for (key in groups.keys.toList()) {
-            val feeds = groups.getValue(key)
-            if (isApp(key) || feeds.any { it.second.callSign != null }) continue
-            val network = feeds.firstNotNullOfOrNull { it.second.network } ?: continue
-            val market = feeds.firstNotNullOfOrNull { it.second.market } ?: continue
-            val station = stations[network to market]?.singleOrNull() ?: continue
-            val into = groups.getValue(station)
-            val numbers = feeds.mapNotNullTo(HashSet()) { it.second.channelNumber }
-            if (numbers.isNotEmpty() && into.none { it.second.channelNumber in numbers }) continue
-            into += feeds
-            groups.remove(key)
-            folded = true
-        }
-        if (!folded) return
-        // Feeds stay in [ChannelOrder.sort]'s order.
-        val position = java.util.IdentityHashMap<ChannelCandidate, Int>(sorted.size * 2)
-        sorted.forEachIndexed { i, c -> position[c] = i }
-        for (feeds in groups.values) if (feeds.size > 1) feeds.sortBy { position[it.first] }
-    }
+    private fun baseOf(r: SavedRow, feeds: List<SavedFeed>) = Base(
+        key = r.key, name = r.name, genre = r.genre, network = r.network, callSign = r.callSign, market = r.market,
+        loopShow = r.loopShow, feeds = feeds.map { ChannelCandidate(it.channel, it.categoryName) }, providerLogo = r.providerLogo,
+        sortKey = r.sortKey, loopKey = r.loopKey, appCopy = r.appCopy,
+    )
 
     /**
-     * A station's copies are named differently ("A3 NEW YORK 04 WNBC NBC", "NBC (WNBC) NEW YORK"): the row takes
-     * the shortest name that starts with its network, else the shortest; copies folded in without a call sign
-     * don't name it. Other rows take their first feed's name.
+     * The saved rows the guide may show now: a feed of a disabled source or a hidden category is dropped, and a row left
+     * without feeds goes. The rest of a row stays as saved; the keeper's rebuild tidies its name and grouping.
      */
-    private fun nameOf(ids: List<ChannelIdentity>, network: Network?, callSign: String?): String {
-        if (network == null || callSign == null) return ids.first().displayName
-        val word = network.name.lowercase()
-        val names = ids.filter { it.callSign != null }.map { it.displayName }
-        return names.filter { GameMatcher.normalize(PROVIDER_TAG.replaceFirst(it, "")).startsWith(word) }.minByOrNull { it.length }
-            ?: names.minBy { it.length }
+    private fun visibleRows(saved: SavedLineup, visibility: Visibility): List<Base> = saved.rows.mapNotNull { r ->
+        val feeds = r.feeds.filter { f ->
+            f.channel.sourceId in visibility.enabledSources && (f.channel.sourceId to f.channel.categoryId) !in visibility.hiddenLiveCategories
+        }
+        if (feeds.isEmpty()) null else baseOf(r, feeds)
     }
 
-    private fun resolve(lineup: Lineup, links: List<ChannelGuideLink>, channels: List<GuideChannel>): List<Resolved> {
+    /** Today's path: the visible lineup read and merged here. */
+    private fun builtRows(): Flow<Rows> =
+        // Room re-runs a query on every write to its tables; an unchanged result rebuilds nothing.
+        library.observeSportsCandidates().timedFirst("lineup query") { ", ${it.size} channels" }.distinctUntilChanged()
+            .map { Rows(lineupOf(it).rows, fromSaved = false) }
+
+    /**
+     * The saved lineup filtered by the current visibility; [unsavedRows] only while nothing is saved, never both.
+     * Room re-emits an equal [Visibility] on every sync, and an equal lineup converts nothing.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun rows(): Flow<Rows> = if (lineups == null) builtRows() else combine(
+        lineups.observeSaved().timedFirst("saved lineup read") { ", ${it?.rows?.size ?: 0} rows" },
+        lineups.observeVisibility().distinctUntilChanged(),
+    ) { saved, visibility -> saved?.let { it to visibility } }
+        .distinctUntilChanged()
+        .flatMapLatest { shown ->
+            if (shown == null) return@flatMapLatest unsavedRows(lineups)
+            // The fallback build is never used again once a lineup is saved.
+            lineupCache = null
+            flowOf(Rows(visibleRows(shown.first, shown.second), fromSaved = true))
+        }
+
+    /**
+     * Nothing saved yet: while the keeper builds (the first launch after install), nothing until its save arrives,
+     * so the lineup is built once; [builtRows] only when the keeper is idle or its build failed. A save that has
+     * landed but not yet reached [LineupStore.observeSaved] is waited for too.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun unsavedRows(lineups: LineupStore): Flow<Rows> = lineupBuilding?.flatMapLatest { building ->
+        if (building || lineups.savedStamp() != null) emptyFlow() else builtRows()
+    } ?: builtRows()
+
+    private fun resolve(rows: List<Base>, links: List<ChannelGuideLink>, channels: List<GuideChannel>): List<Resolved> {
         val started = System.nanoTime()
         try {
-            return resolveRows(lineup, links, channels)
+            return resolveRows(rows, links, channels)
         } finally {
             debug("resolve ${msSince(started)} ms, ${links.size} links")
         }
     }
 
-    private fun resolveRows(lineup: Lineup, links: List<ChannelGuideLink>, channels: List<GuideChannel>): List<Resolved> {
+    private fun resolveRows(rows: List<Base>, links: List<ChannelGuideLink>, channels: List<GuideChannel>): List<Resolved> {
         val guideOf = HashMap<Pair<Long, String>, String>(links.size * 2)
         for (l in links) guideOf[l.sourceId to l.channelId] = l.guideId
         val epgLogos = channels.filter { it.origin == GuideOrigin.EPGSHARE && !it.logoUrl.isNullOrBlank() }.associate { it.guideId to it.logoUrl }
-        return lineup.rows.map { b ->
+        return rows.map { b ->
             // A looping channel has no schedule worth showing, whatever it is linked to. epgshare01's guide beats the provider's.
             val linked = if (b.loopShow != null) emptyList() else b.feeds.mapNotNull { guideOf[it.channel.sourceId to it.channel.id] }
             val guideId = linked.firstOrNull { !it.startsWith(PROVIDER_PREFIX) } ?: linked.firstOrNull()
@@ -223,11 +212,10 @@ class GuideRepository(
      * The lineup merged with guide links and favourites; the programme-free part of every board and search,
      * built once and shared. Starting it also asks the guide refresher for a daily refresh, off the first emission.
      */
-    private val resolved: Flow<Pair<List<Resolved>, Set<String>>> = combine(
-        // Room re-runs a query on every write to its tables; an unchanged result rebuilds nothing.
-        library.observeSportsCandidates().timedFirst("lineup query") { ", ${it.size} channels" }.distinctUntilChanged(), store.observeLinks().distinctUntilChanged(),
+    private val resolved: Flow<Shared> = combine(
+        rows(), store.observeLinks().distinctUntilChanged(),
         store.observeChannels().distinctUntilChanged(), store.observeFavourites().distinctUntilChanged(),
-    ) { candidates, links, channels, favourites -> resolve(lineupOf(candidates), links, channels) to favourites }
+    ) { rows, links, channels, favourites -> Shared(resolve(rows.rows, links, channels), favourites, rows.fromSaved) }
         .flowOn(compute)
         // A failing lineup read keeps the last rows (the shared replay) and is tried again shortly.
         .retryWhen { e, _ ->
@@ -255,16 +243,74 @@ class GuideRepository(
         programmes = r.guideId?.let { programmes[it] }.orEmpty(), loopShow = r.base.loopShow, favourite = r.base.key in favourites,
     )
 
+    /** A board and whether its rows came from the saved lineup. */
+    private class Built(val board: GuideBoard, val fromSaved: Boolean)
+
+    /** [CHANNELS_FIRST_DELAY_MS] have passed since the board was asked for. */
+    private object ChannelsDue
+
+    /**
+     * Until this collection's first programmes arrive, each board is built first without them ([GuideBoard.programmesLoaded]
+     * false); that board is shown only if the full one hasn't come within [CHANNELS_FIRST_DELAY_MS] of collection (a cold
+     * open), never after it, so paging and switching chips never blink. After that a change (a favourite, new links) keeps
+     * the last board until the new one is whole. [GuideBoard.downloading] follows [GuideRefresher.working].
+     */
     @OptIn(ExperimentalCoroutinesApi::class)
-    override fun board(filter: GuideFilter, windowStartMs: Long): Flow<GuideBoard> = resolved.flatMapLatest { (all, favourites) ->
-        val shown = if (filter == GuideFilter.FAVOURITES) all.filter { it.base.key in favourites } else all.filter { inFilter(it.base, filter) }
-        val ids = shown.mapNotNullTo(HashSet()) { it.guideId }
-        programmesOf(ids, windowStartMs, windowStartMs + WINDOW_MS).map { list ->
-            val byGuide = list.groupBy { it.guideId }
-            val rows = shown.map { it to row(it, favourites, byGuide) }
-            GuideBoard(sections(filter, rows), windowStartMs)
+    override fun board(filter: GuideFilter, windowStartMs: Long): Flow<GuideBoard> = flow {
+        val started = System.nanoTime()
+        val loaded = AtomicBoolean(false)
+        val boards = resolved.flatMapLatest { s ->
+            val shown = if (filter == GuideFilter.FAVOURITES) s.rows.filter { it.base.key in s.favourites } else s.rows.filter { inFilter(it.base, filter) }
+            val ids = shown.mapNotNullTo(HashSet()) { it.guideId }
+            val whole = programmesOf(ids, windowStartMs, windowStartMs + WINDOW_MS).map { list ->
+                val byGuide = list.groupBy { it.guideId }
+                val rows = shown.map { it to row(it, s.favourites, byGuide) }
+                loaded.set(true)
+                Built(GuideBoard(sections(filter, rows), windowStartMs), s.fromSaved)
+            }
+            if (loaded.get()) whole else whole.onStart {
+                val channels = GuideBoard(sections(filter, shown.map { it to row(it, s.favourites, emptyMap()) }), windowStartMs, programmesLoaded = false)
+                emit(Built(channels, s.fromSaved))
+            }
         }
-    }.timedFirst("first board") { ", ${it.sections.sumOf { s -> s.rows.size + s.more.size }} rows" }.flowOn(compute)
+        val due = flow { delay(CHANNELS_FIRST_DELAY_MS); emit(ChannelsDue) }
+        // One collector decides what shows, so a channels-only board can never follow the full one.
+        var last: GuideBoard? = null
+        var held: Built? = null
+        var channelsDue = false
+        var downloading = refresher.working.value
+        var logged = false
+        fun show(built: Built) {
+            last = built.board
+            if (!built.board.programmesLoaded) {
+                debug("${if (built.fromSaved) "channels board (saved)" else "channels board"} ${msSince(started)} ms")
+            } else if (!logged) {
+                logged = true
+                val rows = built.board.sections.sumOf { it.rows.size + it.more.size }
+                debug("${if (built.fromSaved) "first board (saved)" else "first board"} ${msSince(started)} ms, $rows rows")
+            }
+        }
+        merge(boards, refresher.working, due).collect { event ->
+            when (event) {
+                is Built -> when {
+                    event.board.programmesLoaded -> { held = null; show(event) }
+                    last?.programmesLoaded == true -> return@collect
+                    !channelsDue -> { held = event; return@collect }
+                    else -> show(event)
+                }
+                is ChannelsDue -> {
+                    channelsDue = true
+                    show(held ?: return@collect)
+                    held = null
+                }
+                is Boolean -> {
+                    if (event == downloading) return@collect
+                    downloading = event
+                }
+            }
+            last?.let { emit(it.copy(downloading = downloading)) }
+        }
+    }.flowOn(compute)
 
     /**
      * [GuideStore.observeProgrammes] in chunks, so a long list of ids never overruns SQLite's bind-variable limit.
@@ -343,7 +389,9 @@ class GuideRepository(
         val needle = GameMatcher.normalize(query)
         if (needle.isEmpty()) return flowOf(emptyList())
         @OptIn(ExperimentalCoroutinesApi::class)
-        return resolved.mapLatest { (all, favourites) ->
+        return resolved.mapLatest { shared ->
+            val all = shared.rows
+            val favourites = shared.favourites
             val now = clock()
             val byGuide = all.filter { it.guideId != null }.groupBy { it.guideId!! }
             val programmeHits = store.searchProgrammes(query.trim(), now, SEARCH_PROGRAMMES)
@@ -363,13 +411,13 @@ class GuideRepository(
 
     companion object {
         const val WINDOW_MS = 3 * 3_600_000L
+        /** How long a board waits for its programmes before showing its channels alone. */
+        const val CHANNELS_FIRST_DELAY_MS = 200L
         private const val FAVOURITES_TITLE = "Favourites"
         private const val SEARCH_PROGRAMMES = 50
         private const val ID_CHUNK = 500
         private const val RETRY_MS = 5_000L
         private const val SETTLE_MS = 250L
         private const val KEEP_MS = 5 * 60_000L
-        private val APP_PREFIXES = listOf("prime ", "roku ", "tubi ")
-        private val PROVIDER_TAG = Regex("""^\s*[A-Z0-9&/+]{1,6}:\s*""")
     }
 }

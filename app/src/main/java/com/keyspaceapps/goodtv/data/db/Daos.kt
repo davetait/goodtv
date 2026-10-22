@@ -431,3 +431,28 @@ interface GuideDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun addFavourite(row: FavouriteChannelEntity)
     @Query("DELETE FROM favourite_channels WHERE rowKey = :rowKey") suspend fun removeFavourite(rowKey: String)
 }
+
+data class HiddenLiveRow(val sourceId: Long, val categoryId: String)
+
+@Dao
+interface LineupDao {
+    @Query("DELETE FROM lineup_feeds") suspend fun deleteFeeds()
+    @Query("DELETE FROM lineup_rows") suspend fun deleteRows()
+    @Query("DELETE FROM lineup_meta") suspend fun deleteMeta()
+    @Insert suspend fun insertRows(rows: List<LineupRowEntity>)
+    @Insert suspend fun insertFeeds(rows: List<LineupFeedEntity>)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertMeta(row: LineupMetaEntity)
+
+    @Query("SELECT * FROM lineup_meta WHERE id = 0") suspend fun meta(): LineupMetaEntity?
+    @Query("SELECT * FROM lineup_meta WHERE id = 0") fun observeMeta(): Flow<LineupMetaEntity?>
+    @Query("SELECT * FROM lineup_rows ORDER BY position") suspend fun rows(): List<LineupRowEntity>
+    @Query("SELECT * FROM lineup_feeds ORDER BY rowKey, position") suspend fun feeds(): List<LineupFeedEntity>
+
+    @Query("SELECT COALESCE(MAX(generation), 0) FROM lineup_state") suspend fun generation(): Long
+    @Query("SELECT COALESCE(MAX(generation), 0) FROM lineup_state") fun observeGeneration(): Flow<Long>
+    @Query("INSERT OR IGNORE INTO lineup_state (id, generation) VALUES (0, 0)") suspend fun seedState()
+    @Query("UPDATE lineup_state SET generation = generation + 1 WHERE id = 0") suspend fun increment()
+
+    @Query("SELECT id FROM sources WHERE enabled = 1") fun observeEnabledSources(): Flow<List<Long>>
+    @Query("SELECT sourceId, categoryId FROM hidden_categories WHERE kind = 'LIVE'") fun observeHiddenLive(): Flow<List<HiddenLiveRow>>
+}
