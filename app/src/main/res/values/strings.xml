@@ -140,4 +140,28 @@
     <string name="sports_loading">Loading today’s games…</string>
     <string name="sports_none_today">No games on today</string>
     <string name="sports_failed">Couldn’t load %1$s schedule</string>
+
+    <string name="guide_loading">Loading the guide…</string>
+    <string name="guide_empty">No channels here</string>
+    <string name="guide_no_favourites">No favourites yet. Hold Select (or press Menu) on a channel to add it.</string>
+    <string name="guide_no_info">No guide info</string>
+    <string name="guide_all_day">%1$s · all day</string>
+    <string name="guide_more">More %1$s</string>
+    <string name="guide_fewer">Fewer %1$s</string>
+    <string name="guide_with_count">%1$s · %2$d</string>
+    <string name="guide_network_section">Network · %1$s</string>
+    <string name="guide_select_to_watch">Select to watch</string>
+    <string name="guide_add_favourite">Add to favourites</string>
+    <string name="guide_remove_favourite">Remove from favourites</string>
+    <string name="guide_chip_all">All</string>
+    <string name="guide_chip_favourites">Favourites</string>
+    <string name="guide_chip_network">Network</string>
+    <string name="guide_chip_news">News</string>
+    <string name="guide_chip_sports">Sports</string>
+    <string name="guide_chip_entertainment">Entertainment</string>
+    <string name="guide_chip_comedy">Comedy</string>
+    <string name="guide_chip_movies">Movies</string>
+    <string name="guide_chip_kids">Kids</string>
+    <string name="guide_chip_documentary">Documentary</string>
+    <string name="guide_chip_events">Events</string>
 </resources>

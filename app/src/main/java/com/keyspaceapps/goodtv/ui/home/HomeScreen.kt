@@ -21,7 +21,7 @@ import com.keyspaceapps.goodtv.R
 import com.keyspaceapps.goodtv.data.repo.LibraryRepository
 import com.keyspaceapps.goodtv.data.settings.AppSettings
 import com.keyspaceapps.goodtv.ui.goodTvViewModel
-import com.keyspaceapps.goodtv.ui.live.LiveScreen
+import com.keyspaceapps.goodtv.ui.live.GuideScreen
 import com.keyspaceapps.goodtv.ui.movies.MoviesScreen
 import com.keyspaceapps.goodtv.ui.series.SeriesScreen
 import com.keyspaceapps.goodtv.ui.sports.SportsScreen
@@ -84,7 +84,7 @@ fun HomeScreen(onNavigate: (GoodTvKey) -> Unit) {
         Box(Modifier.fillMaxSize()) {
             when (current) {
                 HomeTab.HOME -> HomeTabScreen(onNavigate = onNavigate)
-                HomeTab.LIVE -> LiveScreen(onPlay = onNavigate)
+                HomeTab.LIVE -> GuideScreen(onPlay = onNavigate)
                 HomeTab.SPORTS -> SportsScreen(onPlay = onNavigate)
                 HomeTab.MOVIES -> MoviesScreen(onMovie = onNavigate, onSeeAll = onNavigate)
                 HomeTab.SERIES -> SeriesScreen(onSeries = onNavigate, onSeeAll = onNavigate)

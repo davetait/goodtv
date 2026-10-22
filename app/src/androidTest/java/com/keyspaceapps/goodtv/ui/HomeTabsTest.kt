@@ -9,6 +9,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ActivityScenario
 import androidx.compose.ui.test.onNodeWithText
@@ -65,6 +66,19 @@ class HomeTabsTest {
         )
     }
 
+    private fun tab(label: String) = hasText(label) and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab)
+
+    private fun hasAnyChipLabel() = listOf("All", "Favourites", "Network", "News", "Sports", "Entertainment", "Comedy", "Movies", "Kids", "Documentary", "Events")
+        .map { hasText(it) and !tab(it) }.reduce { a, b -> a or b }
+
+    private fun waitFocused(matcher: SemanticsMatcher) {
+        try {
+            composeRule.waitUntil(5_000) { composeRule.onAllNodes(matcher and isFocused()).fetchSemanticsNodes().isNotEmpty() }
+        } catch (e: Throwable) {
+            composeRule.onRoot(useUnmergedTree = true).printToLog("GoodTvTree"); throw e
+        }
+    }
+
     private fun waitFor(text: String) {
         try {
             composeRule.waitUntil(10_000) { composeRule.onAllNodes(hasText(text)).fetchSemanticsNodes().isNotEmpty() }
@@ -74,17 +88,20 @@ class HomeTabsTest {
     }
 
     /**
-     * UP from the channel list lands on the tab whose horizontal span overlaps the list ("Sources"),
-     * not on the selected tab. LEFT then walks along the tabs and Select switches.
+     * The Live tab is the guide: focus starts on the first row's cell ("No guide info" here). UP goes to the
+     * genre chips, UP again to the tab whose horizontal span overlaps the chip ("Sources"), not the
+     * selected tab. LEFT then walks along the tabs and Select switches.
      */
     @Test
-    fun upFromChannelLandsOnNearestTabAndLeftWalksTabs() {
+    fun upFromTheGuideReachesTheTabsAndLeftWalksTabs() {
         seedAndLaunch()
         waitFor("Channel One")
-        composeRule.onNodeWithText("Channel One").assertIsFocused()
+        waitFocused(hasText("No guide info"))
 
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionUp) }
-        composeRule.onNodeWithText("Sources").assertIsFocused()
+        waitFocused(hasAnyChipLabel())
+        composeRule.onRoot().performKeyInput { pressKey(Key.DirectionUp) }
+        waitFocused(hasText("Sources"))
         composeRule.onNodeWithText("Live").assertIsSelected()
 
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionLeft) }
@@ -102,9 +119,10 @@ class HomeTabsTest {
         composeRule.onNodeWithText("Live").assertIsFocused()
 
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionRight) }
-        composeRule.onNode(hasText("Sports") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab)).assertIsFocused()
+        // The guide's chips share names with tabs ("Sports", "Movies").
+        composeRule.onNode(tab("Sports")).assertIsFocused()
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionRight) }
-        composeRule.onNodeWithText("Movies").assertIsFocused()
+        composeRule.onNode(tab("Movies")).assertIsFocused()
 
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionCenter) }
         waitFor("Movie One")

@@ -57,6 +57,7 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import java.io.File
 import java.util.Locale
@@ -128,10 +129,14 @@ class AppGraph(val context: Context) {
     /** True while the player is on screen; the guide's provider download waits for it to end. */
     val playback = PlaybackState()
 
-    /** Downloads the guide once a day: epgshare01 first, the provider's own for what it lacks. */
+    /**
+     * Downloads the guide once a day: epgshare01 first, the provider's own for what it lacks. Under
+     * [GoodTvApp.disableGuideDownloads] epgshare01 is a closed local port, so its refresh fails at once.
+     */
     val guideRefresher: GuideRefresher by lazy {
+        val epgShare = if (GoodTvApp.disableGuideDownloads) EpgShareSource(okHttp, "http://127.0.0.1:9/".toHttpUrl()) else EpgShareSource(okHttp)
         GuideRefresher(
-            guideStore, store, sourceRegistry, EpgShareSource(okHttp), playback,
+            guideStore, store, sourceRegistry, epgShare, playback,
             System::currentTimeMillis, Dispatchers.IO, File(context.cacheDir, "guide"),
         )
     }

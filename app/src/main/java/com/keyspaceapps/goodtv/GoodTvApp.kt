@@ -29,6 +29,8 @@ class GoodTvApp : Application() {
         @Volatile var disableTmdb: Boolean = false
         /** Instrumented tests turn OpenSubtitles off so they never spend the real account's downloads. */
         @Volatile var disableOpenSubtitles: Boolean = false
+        /** Instrumented tests open the guide on test data; this keeps them from downloading epgshare01's files. */
+        @Volatile var disableGuideDownloads: Boolean = false
     }
 }
 

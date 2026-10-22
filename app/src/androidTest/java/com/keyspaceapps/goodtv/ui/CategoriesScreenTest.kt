@@ -96,9 +96,10 @@ class CategoriesScreenTest {
 
         scenario!!.onActivity { it.onBackPressedDispatcher.onBackPressed() }
         waitFor("1 categories hidden", substring = true)
+        // The Live tab's guide lists the channels of visible categories only.
         tvClick("Live")
-        waitFor("AR| News")
-        assertEquals(0, composeRule.onAllNodes(hasText("AR| Sports")).fetchSemanticsNodes().size)
+        waitFor("Channel of AR| News", substring = true)
+        assertEquals(0, composeRule.onAllNodes(hasText("Channel of AR| Sports", substring = true)).fetchSemanticsNodes().size)
     }
 
     @Test

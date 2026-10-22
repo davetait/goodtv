@@ -4,6 +4,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -63,20 +64,27 @@ class FocusRestoreTest {
         composeRule.waitForIdle()
     }
 
+    /** In the guide, each channel here is one "No guide info" cell; the details panel names the focused row. */
     @Test
     fun backFromLivePlayerRefocusesTheChannelThatWasPlayed() {
         seedAndLaunch("LIVE")
         waitFor("Channel 1")
-        composeRule.onNodeWithText("Channel 1").assertIsFocused()
+        waitFocusedIn("Channel 1")
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionDown); pressKey(Key.DirectionDown) }
-        composeRule.onNodeWithText("Channel 3").assertIsFocused()
+        waitFocusedIn("Channel 3")
 
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionCenter) }
         waitFor("LIVE")
         pressBack()
 
         waitFor("Channel 3")
-        composeRule.onNodeWithText("Channel 3").assertIsFocused()
+        waitFocusedIn("Channel 3")
+    }
+
+    /** A "No guide info" cell has focus and the details panel (the second "Channel N") describes [channel]'s row. */
+    private fun waitFocusedIn(channel: String) = composeRule.waitUntil(5_000) {
+        composeRule.onAllNodes(hasText("No guide info") and isFocused()).fetchSemanticsNodes().size == 1 &&
+            composeRule.onAllNodes(hasText(channel)).fetchSemanticsNodes().size == 2
     }
 
     @Test
