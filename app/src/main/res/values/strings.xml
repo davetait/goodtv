@@ -23,7 +23,7 @@
     <string name="person_offline">Searching by person needs the internet</string>
     <string name="tmdb_rating">%1$s TMDB</string>
     <string name="tmdb_logo_description">TMDB</string>
-    <string name="tmdb_credit">Rating and summary from TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.</string>
+    <string name="tmdb_credit">Details from TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.</string>
     <string name="genre_action">Action</string>
     <string name="genre_adventure">Adventure</string>
     <string name="genre_animation">Animation</string>

@@ -114,7 +114,7 @@ class TmdbUiTest {
         waitFor("TMDB summary of The Matrix.")
         composeRule.onNodeWithText("★ 8.2 TMDB", substring = true).assertIsDisplayed()
         composeRule.onAllNodesWithText("Provider plot in German.").assertCountEquals(0)
-        composeRule.onNodeWithText("Rating and summary from TMDB", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Details from TMDB", substring = true).assertIsDisplayed()
         composeRule.onNodeWithContentDescription("TMDB").assertIsDisplayed()
     }
 
