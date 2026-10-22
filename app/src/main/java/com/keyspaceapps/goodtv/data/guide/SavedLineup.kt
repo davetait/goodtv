@@ -25,9 +25,13 @@ data class SavedRow(
 
 /**
  * The guide lineup as last built, so opening Live TV reads it instead of recomputing ~12.6k identities.
- * [generation] is the library generation it was built from; [rulesVersion] the identity rules that built it.
+ * [generation] is the library generation it was built from; [rulesVersion] the identity rules that built it;
+ * [appVersion] the app install that built it (its PackageInfo.lastUpdateTime; 0 when unknown).
  */
-data class SavedLineup(val rows: List<SavedRow>, val generation: Long, val rulesVersion: Int)
+data class SavedLineup(val rows: List<SavedRow>, val generation: Long, val rulesVersion: Int, val appVersion: Long = 0)
+
+/** What a saved lineup was built from, read without its rows: the keeper rebuilds when any of it moves. */
+data class LineupStamp(val generation: Long, val rulesVersion: Int, val appVersion: Long)
 
 /** What the user lets the guide show: the enabled sources and the hidden Live categories as (sourceId, categoryId). */
 data class Visibility(val enabledSources: Set<Long>, val hiddenLiveCategories: Set<Pair<Long, String>>)
@@ -36,8 +40,8 @@ data class Visibility(val enabledSources: Set<Long>, val hiddenLiveCategories: S
 interface LineupStore {
     suspend fun saved(): SavedLineup?
     fun observeSaved(): Flow<SavedLineup?>
-    /** The saved lineup's (generation, rulesVersion) without reading its rows; null when nothing is saved. */
-    suspend fun savedStamp(): Pair<Long, Int>?
+    /** The saved lineup's stamp without reading its rows; null when nothing is saved. */
+    suspend fun savedStamp(): LineupStamp?
     /** Replaces the whole saved lineup in one transaction. */
     suspend fun save(lineup: SavedLineup)
     /** Counts library writes (sources, catalogs, hidden categories); 0 before the first. */

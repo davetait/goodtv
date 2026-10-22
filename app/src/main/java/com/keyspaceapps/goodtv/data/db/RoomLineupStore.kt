@@ -1,6 +1,7 @@
 package com.keyspaceapps.goodtv.data.db
 
 import androidx.room.withTransaction
+import com.keyspaceapps.goodtv.data.guide.LineupStamp
 import com.keyspaceapps.goodtv.data.guide.LineupStore
 import com.keyspaceapps.goodtv.data.guide.LiveGenre
 import com.keyspaceapps.goodtv.data.guide.Network
@@ -22,13 +23,13 @@ class RoomLineupStore(private val db: GoodTvDatabase) : LineupStore {
 
     override fun observeSaved(): Flow<SavedLineup?> = dao.observeMeta().map { meta -> db.withTransaction { read(meta) } }
 
-    override suspend fun savedStamp(): Pair<Long, Int>? = dao.meta()?.let { it.savedGeneration to it.rulesVersion }
+    override suspend fun savedStamp(): LineupStamp? = dao.meta()?.let { LineupStamp(it.savedGeneration, it.rulesVersion, it.appVersion) }
 
     private suspend fun read(meta: LineupMetaEntity?): SavedLineup? {
         meta ?: return null
         val feeds = dao.feeds().groupBy { it.rowKey }
         val rows = dao.rows().map { r -> r.toDomain(feeds[r.key].orEmpty().map { it.toDomain() }) }
-        return SavedLineup(rows, meta.savedGeneration, meta.rulesVersion)
+        return SavedLineup(rows, meta.savedGeneration, meta.rulesVersion, meta.appVersion)
     }
 
     override suspend fun save(lineup: SavedLineup) = db.withTransaction {
@@ -39,7 +40,7 @@ class RoomLineupStore(private val db: GoodTvDatabase) : LineupStore {
             .flatMap { row -> row.feeds.asSequence().mapIndexed { i, feed -> feed.toEntity(row.key, i) } }
             .chunked(BATCH)
             .forEach { dao.insertFeeds(it) }
-        dao.upsertMeta(LineupMetaEntity(0, lineup.generation, lineup.rulesVersion))
+        dao.upsertMeta(LineupMetaEntity(0, lineup.generation, lineup.rulesVersion, lineup.appVersion))
     }
 
     override suspend fun generation(): Long = dao.generation()

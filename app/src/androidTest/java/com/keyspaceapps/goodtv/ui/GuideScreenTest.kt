@@ -219,7 +219,7 @@ class GuideScreenTest {
         val lineups = object : LineupStore {
             override suspend fun saved() = saved
             override fun observeSaved() = flowOf(saved)
-            override suspend fun savedStamp() = null
+            override suspend fun savedStamp(): com.keyspaceapps.goodtv.data.guide.LineupStamp? = null
             override suspend fun save(lineup: SavedLineup) = Unit
             override suspend fun generation() = 0L
             override fun observeGeneration() = flowOf(0L)

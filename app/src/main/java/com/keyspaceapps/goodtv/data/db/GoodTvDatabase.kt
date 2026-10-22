@@ -163,6 +163,13 @@ val MIGRATION_10_11 = object : Migration(10, 11) {
     }
 }
 
+/** v11 → v12: the saved lineup also records the app install that built it; a lineup from before reads 0 and rebuilds once. */
+val MIGRATION_11_12 = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `lineup_meta` ADD COLUMN `appVersion` INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
 @Database(
     entities = [
         SourceEntity::class, CategoryEntity::class, LiveChannelEntity::class, MovieEntity::class, SeriesEntity::class,
@@ -173,7 +180,7 @@ val MIGRATION_10_11 = object : Migration(10, 11) {
         GuideChannelEntity::class, GuideProgrammeEntity::class, ChannelGuideEntity::class, FavouriteChannelEntity::class, GuideMetaEntity::class,
         LineupRowEntity::class, LineupFeedEntity::class, LineupMetaEntity::class, LineupStateEntity::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = true, // schemas/ holds the baseline every future migration is written against
 )
 abstract class GoodTvDatabase : RoomDatabase() {
@@ -191,7 +198,7 @@ abstract class GoodTvDatabase : RoomDatabase() {
     companion object {
         fun create(context: Context): GoodTvDatabase =
             Room.databaseBuilder(context, GoodTvDatabase::class.java, "goodtv.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                 .fallbackToDestructiveMigration(dropAllTables = true) // last resort for an unknown version only
                 .build()
     }

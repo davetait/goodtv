@@ -202,4 +202,27 @@ class MigrationTest {
         db.query("SELECT COUNT(*) FROM lineup_feeds").use { c -> c.moveToFirst(); assertEquals(0, c.getInt(0)) }
         db.close()
     }
+
+    /** v11 → v12 records the app install that built the saved lineup; the lineup survives and reads 0, so it rebuilds once. */
+    @Test
+    fun migrate11To12AddsTheAppVersionStamp() {
+        helper.createDatabase(dbName, 11).apply {
+            execSQL("INSERT INTO lineup_rows (key, position, name, genre, sortKey, appCopy) VALUES ('r', 0, 'R', 'NEWS', 's', 0)")
+            execSQL("INSERT INTO lineup_feeds (rowKey, position, sourceId, channelId, name, title, categoryName) VALUES ('r', 0, 1, 'l1', 'Fox News', 'Fox News', 'News')")
+            execSQL("INSERT INTO lineup_meta (id, savedGeneration, rulesVersion) VALUES (0, 4, 1)")
+            execSQL("INSERT INTO lineup_state (id, generation) VALUES (0, 4)")
+            close()
+        }
+        val db = helper.runMigrationsAndValidate(dbName, 12, true, MIGRATION_11_12)
+        db.query("SELECT savedGeneration, rulesVersion, appVersion FROM lineup_meta WHERE id = 0").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals(4L, c.getLong(0))
+            assertEquals(1, c.getInt(1))
+            assertEquals(0L, c.getLong(2))
+        }
+        for (t in listOf("lineup_rows", "lineup_feeds", "lineup_state")) {
+            db.query("SELECT COUNT(*) FROM $t").use { c -> c.moveToFirst(); assertEquals(1, c.getInt(0)) }
+        }
+        db.close()
+    }
 }

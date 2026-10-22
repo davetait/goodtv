@@ -60,7 +60,7 @@ class LineupKeeperTest {
     private fun feed(name: String, category: String) = ChannelCandidate(LiveChannel(1, name, null, name, null, null), category)
 
     private fun TestScope.keeper(debug: (String) -> Unit = {}) =
-        LineupKeeper(library, lineups, StandardTestDispatcher(testScheduler), DEBOUNCE, warn = { warnings += it }, debug = debug)
+        LineupKeeper(library, lineups, StandardTestDispatcher(testScheduler), DEBOUNCE, warn = { warnings += it }, debug = debug, appVersion = APP)
 
     /** The keeper runs in backgroundScope, which advanceUntilIdle ignores: move virtual time well past the debounce instead. */
     private fun TestScope.settle() {
@@ -68,7 +68,7 @@ class LineupKeeperTest {
         runCurrent()
     }
 
-    private val old = SavedLineup(emptyList(), generation = -1, rulesVersion = LineupBuilder.RULES_VERSION)
+    private val old = SavedLineup(emptyList(), generation = -1, rulesVersion = LineupBuilder.RULES_VERSION, appVersion = APP)
 
     @Test fun keeperSavesOnFirstStart() = runTest {
         keeper().start(backgroundScope)
@@ -77,6 +77,7 @@ class LineupKeeperTest {
         assertEquals(LineupBuilder.build(channels), saved.rows)
         assertEquals(0L, saved.generation)
         assertEquals(LineupBuilder.RULES_VERSION, saved.rulesVersion)
+        assertEquals(APP, saved.appVersion)
         assertEquals(1, reads)
         assertEquals(0, savedReads)
     }
@@ -89,11 +90,11 @@ class LineupKeeperTest {
     }
 
     @Test fun currentLineupIsLeftAlone() = runTest {
-        store.save(SavedLineup(emptyList(), generation = 0, rulesVersion = LineupBuilder.RULES_VERSION))
+        store.save(SavedLineup(emptyList(), generation = 0, rulesVersion = LineupBuilder.RULES_VERSION, appVersion = APP))
         keeper().start(backgroundScope)
         settle()
         store.bumpGeneration()
-        store.save(SavedLineup(emptyList(), generation = 1, rulesVersion = LineupBuilder.RULES_VERSION))
+        store.save(SavedLineup(emptyList(), generation = 1, rulesVersion = LineupBuilder.RULES_VERSION, appVersion = APP))
         settle()
         assertEquals(0, reads)
         // Deciding there is nothing to do reads the stamp, never the ~9k saved rows.
@@ -117,12 +118,25 @@ class LineupKeeperTest {
     }
 
     @Test fun newRulesVersionRebuilds() = runTest {
-        store.save(SavedLineup(emptyList(), generation = 0, rulesVersion = LineupBuilder.RULES_VERSION - 1))
+        store.save(SavedLineup(emptyList(), generation = 0, rulesVersion = LineupBuilder.RULES_VERSION - 1, appVersion = APP))
         keeper().start(backgroundScope)
         settle()
         assertEquals(1, reads)
         assertEquals(LineupBuilder.RULES_VERSION, store.saved()!!.rulesVersion)
         assertEquals(LineupBuilder.build(channels), store.saved()!!.rows)
+    }
+
+    /** An install or update (a new PackageInfo.lastUpdateTime) rebuilds once, even with the same rules version; the next start doesn't. */
+    @Test fun appUpdateRebuildsOnce() = runTest {
+        store.save(SavedLineup(emptyList(), generation = 0, rulesVersion = LineupBuilder.RULES_VERSION, appVersion = APP - 1))
+        keeper().start(backgroundScope)
+        settle()
+        assertEquals(1, reads)
+        assertEquals(APP, store.saved()!!.appVersion)
+        assertEquals(LineupBuilder.build(channels), store.saved()!!.rows)
+        keeper().start(backgroundScope)
+        settle()
+        assertEquals(1, reads)
     }
 
     @Test fun generationMovedDuringTheBuildBuildsAgain() = runTest {
@@ -135,7 +149,7 @@ class LineupKeeperTest {
                 emit(channels)
             }
         }
-        LineupKeeper(bumping, lineups, StandardTestDispatcher(testScheduler), DEBOUNCE, debug = {}).start(backgroundScope)
+        LineupKeeper(bumping, lineups, StandardTestDispatcher(testScheduler), DEBOUNCE, debug = {}, appVersion = APP).start(backgroundScope)
         settle()
         assertEquals(2, reads)
         assertEquals(1L, store.saved()!!.generation)
@@ -214,7 +228,7 @@ class LineupKeeperTest {
         val erring: LibraryStore = object : LibraryStore by library {
             override fun observeSportsCandidates() = flow<List<ChannelCandidate>> { reads++; if (reads == 1) throw OutOfMemoryError("big"); emit(channels) }
         }
-        LineupKeeper(erring, lineups, StandardTestDispatcher(testScheduler), DEBOUNCE, warn = { warnings += it }, debug = {}).start(backgroundScope)
+        LineupKeeper(erring, lineups, StandardTestDispatcher(testScheduler), DEBOUNCE, warn = { warnings += it }, debug = {}, appVersion = APP).start(backgroundScope)
         settle()
         assertEquals(listOf("Lineup build failed: OutOfMemoryError"), warnings)
         store.bumpGeneration()
@@ -236,5 +250,7 @@ class LineupKeeperTest {
 
     private companion object {
         const val DEBOUNCE = 2_000L
+        /** The install's PackageInfo.lastUpdateTime, as AppGraph passes it. */
+        const val APP = 1_761_000_000_000L
     }
 }

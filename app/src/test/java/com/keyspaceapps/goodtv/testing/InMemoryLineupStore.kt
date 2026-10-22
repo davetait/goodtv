@@ -1,5 +1,6 @@
 package com.keyspaceapps.goodtv.testing
 
+import com.keyspaceapps.goodtv.data.guide.LineupStamp
 import com.keyspaceapps.goodtv.data.guide.LineupStore
 import com.keyspaceapps.goodtv.data.guide.SavedLineup
 import com.keyspaceapps.goodtv.data.guide.Visibility
@@ -14,7 +15,7 @@ class InMemoryLineupStore(visibility: Visibility = Visibility(emptySet(), emptyS
 
     override suspend fun saved(): SavedLineup? = saved.value
     override fun observeSaved(): Flow<SavedLineup?> = saved
-    override suspend fun savedStamp(): Pair<Long, Int>? = saved.value?.let { it.generation to it.rulesVersion }
+    override suspend fun savedStamp(): LineupStamp? = saved.value?.let { LineupStamp(it.generation, it.rulesVersion, it.appVersion) }
     override suspend fun save(lineup: SavedLineup) { saved.value = lineup }
     override suspend fun generation(): Long = generation.value
     override fun observeGeneration(): Flow<Long> = generation

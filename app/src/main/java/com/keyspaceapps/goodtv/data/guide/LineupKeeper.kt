@@ -19,8 +19,9 @@ import kotlinx.coroutines.launch
 
 /**
  * Keeps the saved lineup current: whenever the library generation moves past the saved one, the rules
- * version changes or nothing is saved, it runs [LineupBuilder] on [compute] and saves the rows stamped with
- * the generation read before building. A sync's burst of writes settles for [debounceMs] first, so it
+ * version or the app install ([appVersion], so every install and update rebuilds once even if a rules change
+ * forgot its bump) changes or nothing is saved, it runs [LineupBuilder] on [compute] and saves the rows stamped
+ * with the generation read before building. A sync's burst of writes settles for [debounceMs] first, so it
  * builds once; a write during a build is caught by the next check, which builds again. A failed check
  * (build or store) keeps the old lineup and waits for the next generation; a failing generation query is
  * retried after [RETRY_MS]; a cancelled build saves nothing.
@@ -32,6 +33,8 @@ class LineupKeeper(
     private val debounceMs: Long = 2_000,
     private val warn: (String) -> Unit = { Log.w("GoodTV", it) },
     private val debug: (String) -> Unit = { Log.d("GoodTvGuide", it) },
+    /** The install's PackageInfo.lastUpdateTime (AppGraph reads it; tests pass their own). */
+    private val appVersion: Long,
 ) {
     /** Call once per process. The first generation is checked at once, later ones after [debounceMs] without a newer one. */
     @OptIn(FlowPreview::class)
@@ -67,10 +70,10 @@ class LineupKeeper(
         // The stamp alone: a current lineup is never read just to be compared.
         val stamp = lineups.savedStamp()
         val generation = lineups.generation()
-        if (stamp == generation to LineupBuilder.RULES_VERSION) return
+        if (stamp == LineupStamp(generation, LineupBuilder.RULES_VERSION, appVersion)) return
         val rows = LineupBuilder.build(library.observeSportsCandidates().first(), debug)
         currentCoroutineContext().ensureActive()
-        lineups.save(SavedLineup(rows, generation, LineupBuilder.RULES_VERSION))
+        lineups.save(SavedLineup(rows, generation, LineupBuilder.RULES_VERSION, appVersion))
     }
 
     private companion object {

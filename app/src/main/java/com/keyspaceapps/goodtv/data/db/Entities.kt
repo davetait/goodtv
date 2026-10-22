@@ -1,5 +1,6 @@
 package com.keyspaceapps.goodtv.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -244,9 +245,13 @@ data class LineupFeedEntity(
     val categoryName: String,
 )
 
-/** Which library generation and identity rules the saved lineup was built from; a single row (id 0). */
+/** Which library generation, identity rules and app install the saved lineup was built from; a single row (id 0). */
 @Entity(tableName = "lineup_meta")
-data class LineupMetaEntity(@PrimaryKey val id: Int = 0, val savedGeneration: Long, val rulesVersion: Int)
+data class LineupMetaEntity(
+    @PrimaryKey val id: Int = 0, val savedGeneration: Long, val rulesVersion: Int,
+    /** PackageInfo.lastUpdateTime of the install that built it; 0 for a lineup saved before v12 (rebuilt once). */
+    @ColumnInfo(defaultValue = "0") val appVersion: Long,
+)
 
 /** The library generation, bumped by every library write; a single row (id 0), absent until the first bump. */
 @Entity(tableName = "lineup_state")

@@ -1,6 +1,8 @@
 package com.keyspaceapps.goodtv
 
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
 import androidx.annotation.VisibleForTesting
 import androidx.datastore.preferences.preferencesDataStore
@@ -131,7 +133,18 @@ class AppGraph(val context: Context) {
     val lineupStore: LineupStore by lazy { RoomLineupStore(db) }
 
     /** Rebuilds and saves the guide lineup in the background whenever the library changes; started once per process. */
-    val lineupKeeper: LineupKeeper by lazy { LineupKeeper(store, lineupStore, Dispatchers.Default) }
+    val lineupKeeper: LineupKeeper by lazy { LineupKeeper(store, lineupStore, Dispatchers.Default, appVersion = installedAt()) }
+
+    /** When this install was last installed or updated: a saved lineup from another install rebuilds. */
+    private fun installedAt(): Long {
+        val pm = context.packageManager
+        val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            pm.getPackageInfo(context.packageName, PackageManager.PackageInfoFlags.of(0))
+        } else {
+            @Suppress("DEPRECATION") pm.getPackageInfo(context.packageName, 0)
+        }
+        return info.lastUpdateTime
+    }
 
     /** True while the player is on screen; the guide's provider download waits for it to end. */
     val playback = PlaybackState()

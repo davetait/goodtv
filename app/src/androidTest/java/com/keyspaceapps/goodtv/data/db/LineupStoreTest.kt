@@ -2,6 +2,7 @@ package com.keyspaceapps.goodtv.data.db
 
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import com.keyspaceapps.goodtv.data.guide.LineupStamp
 import com.keyspaceapps.goodtv.data.guide.LiveGenre
 import com.keyspaceapps.goodtv.data.guide.Network
 import com.keyspaceapps.goodtv.data.guide.SavedFeed
@@ -58,20 +59,20 @@ class LineupStoreTest {
     @Test
     fun saveThenReadRoundTripsRowsFeedsInOrder() = runBlocking {
         assertNull(lineup.saved())
-        val saved = SavedLineup(listOf(row("b", 1, full = false), row("a", 0, full = true)), generation = 5, rulesVersion = 3)
+        val saved = SavedLineup(listOf(row("b", 1, full = false), row("a", 0, full = true)), generation = 5, rulesVersion = 3, appVersion = 9)
         lineup.save(saved)
         // Rows come back by position, each with its feeds in their saved order and every field intact.
-        assertEquals(SavedLineup(saved.rows.sortedBy { it.position }, 5, 3), lineup.saved())
+        assertEquals(SavedLineup(saved.rows.sortedBy { it.position }, 5, 3, 9), lineup.saved())
         assertEquals(lineup.saved(), lineup.observeSaved().first())
     }
 
     @Test
-    fun savedStampIsTheLastSavesGenerationAndRulesVersion() = runBlocking {
+    fun savedStampIsTheLastSavesGenerationRulesAndAppVersion() = runBlocking {
         assertNull(lineup.savedStamp())
-        lineup.save(SavedLineup(listOf(row("a", 0, true)), generation = 5, rulesVersion = 3))
-        assertEquals(5L to 3, lineup.savedStamp())
-        lineup.save(SavedLineup(emptyList(), generation = 6, rulesVersion = 4))
-        assertEquals(6L to 4, lineup.savedStamp())
+        lineup.save(SavedLineup(listOf(row("a", 0, true)), generation = 5, rulesVersion = 3, appVersion = 100))
+        assertEquals(LineupStamp(5, 3, 100), lineup.savedStamp())
+        lineup.save(SavedLineup(emptyList(), generation = 6, rulesVersion = 4, appVersion = 200))
+        assertEquals(LineupStamp(6, 4, 200), lineup.savedStamp())
     }
 
     @Test
