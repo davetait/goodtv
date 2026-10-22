@@ -87,6 +87,15 @@ class PeopleRepositoryTest {
     }
 
     @Test
+    fun staleTitlePeopleAreKeptWhenTmdbFails() = runTest {
+        val first = repo().titlePeople(TmdbKind.MOVIE, 361743).getOrThrow()
+        now += PeopleRepository.TITLE_PEOPLE_TTL_MS + 1
+        routes["/3/movie/361743/credits"] = 503 to "{}"
+        assertEquals(first, repo().titlePeople(TmdbKind.MOVIE, 361743).getOrThrow())
+        assertEquals(2, requests.size)
+    }
+
+    @Test
     fun ensureCreditsStoresOnlyCountedCredits() = runTest {
         assertTrue(repo().ensureCredits(500, "Tom Cruise").isSuccess)
         val titles = cache.observeTitles(500).first()

@@ -21,11 +21,15 @@ class PeopleRepository(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Memo>?) = size > MEMO_SIZE
     }
 
-    /** success(empty) = TMDB lists nobody or no api; failure = temporary (never cached). */
+    /**
+     * success(empty) = TMDB lists nobody or no api; failure = temporary (never cached) with nothing
+     * cached. A failed refresh of an expired entry returns the stale people.
+     */
     suspend fun titlePeople(kind: TmdbKind, tmdbId: Long): Result<List<TmdbPerson>> {
         val api = api ?: return Result.success(emptyList())
-        cache.titlePeople(kind, tmdbId)?.takeIf { clock() - it.second < TITLE_PEOPLE_TTL_MS }?.let { return Result.success(it.first) }
-        return call {
+        val cached = cache.titlePeople(kind, tmdbId)
+        if (cached != null && clock() - cached.second < TITLE_PEOPLE_TTL_MS) return Result.success(cached.first)
+        val fetched = call {
             val lang = language()
             val people = when (kind) {
                 TmdbKind.MOVIE -> api.movieCredits(tmdbId, lang)?.let(PeopleRules::moviePeople)
@@ -34,6 +38,7 @@ class PeopleRepository(
             cache.putTitlePeople(kind, tmdbId, people, clock())
             people
         }
+        return if (fetched.isFailure && cached != null) Result.success(cached.first) else fetched
     }
 
     /**
