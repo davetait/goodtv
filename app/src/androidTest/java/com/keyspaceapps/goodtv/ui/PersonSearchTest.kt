@@ -215,4 +215,43 @@ class PersonSearchTest {
         composeRule.onNodeWithText("Rogue Nation").assertIsDisplayed()
         composeRule.onAllNodesWithText("Nothing matches", substring = true).assertCountEquals(0)
     }
+
+    /** Top Gun → Tom Cruise → Top Gun: the same movie page twice on the back stack, a screen apart. */
+    @Test
+    fun theSameMovieTwiceOnTheBackStackUnwindsInOrder() {
+        seedAndLaunch("MOVIES")
+        openTomCruiseFromTopGun()
+        waitFor("With Tom Cruise · 2 titles")
+        waitUntilFocused { composeRule.onNodeWithText("Top Gun: Maverick").assertIsFocused() }
+        press(Key.DirectionCenter)
+
+        // Top Gun again, on top of the person screen.
+        assertMoviePage()
+        composeRule.onAllNodesWithText("With Tom Cruise", substring = true).assertCountEquals(0)
+
+        pressBack()
+        waitFor("With Tom Cruise · 2 titles")
+        composeRule.onNode(hasSetTextAction() and hasText("Tom Cruise")).assertExists()
+        composeRule.onAllNodesWithText("Play").assertCountEquals(0)
+
+        pressBack()
+        assertMoviePage()
+        composeRule.onAllNodesWithText("With Tom Cruise", substring = true).assertCountEquals(0)
+        waitUntilFocused { composeRule.onNodeWithTag("person-500", useUnmergedTree = true).assertIsFocused() }
+
+        pressBack()
+        // The Movies tab: Top Gun's poster, no detail page.
+        waitUntilFocused { composeRule.onNodeWithText("Top Gun: Maverick").assertIsFocused() }
+        composeRule.onAllNodesWithText("Play").assertCountEquals(0)
+        composeRule.onAllNodes(hasTestTag("person-500"), useUnmergedTree = true).assertCountEquals(0)
+    }
+
+    /** A movie page for Top Gun: Maverick with its title, Play button and People row. */
+    private fun assertMoviePage() {
+        waitFor("Play")
+        waitForTag("person-500")
+        composeRule.onNodeWithText("Play").assertIsDisplayed()
+        composeRule.onAllNodesWithText("Top Gun: Maverick").fetchSemanticsNodes().let { assertTrue("title shown", it.isNotEmpty()) }
+        composeRule.onNodeWithText("TMDB summary.").assertIsDisplayed()
+    }
 }

@@ -39,6 +39,7 @@ import kotlinx.coroutines.launch
 fun GoodTvNavigation() {
     val backStack = rememberNavBackStack(HomeKey)
     val pop: () -> Unit = { backStack.removeLastOrNull() }
+    val stackKey: (Any) -> Any = { stackContentKey(backStack, it) }
 
     // Posters everywhere get the watch list's bookmark and hold-Select menu.
     WatchListHost(LocalContext.current.appGraph().watchList) {
@@ -51,9 +52,9 @@ fun GoodTvNavigation() {
             ),
             entryProvider = entryProvider {
                 entry<HomeKey> { HomeScreen(onNavigate = { backStack.add(it) }) }
-                entry<EditSourceKey> { key -> EditSourceScreen(sourceId = key.sourceId, onDone = pop) }
-                entry<CategoriesKey> { key -> CategoriesScreen(key = key) }
-                entry<PlayerKey> { key ->
+                entry<EditSourceKey>(stackKey) { key -> EditSourceScreen(sourceId = key.sourceId, onDone = pop) }
+                entry<CategoriesKey>(stackKey) { key -> CategoriesScreen(key = key) }
+                entry<PlayerKey>(stackKey) { key ->
                     val graph = LocalContext.current.appGraph()
                     var item by remember(key) { mutableStateOf<PlayableItem?>(null) }
                     var next by remember(key) { mutableStateOf<NextEpisode?>(null) }
@@ -86,10 +87,10 @@ fun GoodTvNavigation() {
                         )
                     }
                 }
-                entry<MovieDetailKey> { key -> MovieDetailScreen(key = key, onPlay = { backStack.add(it) }, onPerson = { backStack.add(it) }) }
-                entry<SeriesDetailKey> { key -> SeriesDetailScreen(key = key, onPlay = { backStack.add(it) }, onPerson = { backStack.add(it) }) }
-                entry<PersonSearchKey> { key -> PersonSearchScreen(key = key, onNavigate = { backStack.add(it) }) }
-                entry<CategoryGridKey> { key ->
+                entry<MovieDetailKey>(stackKey) { key -> MovieDetailScreen(key = key, onPlay = { backStack.add(it) }, onPerson = { backStack.add(it) }) }
+                entry<SeriesDetailKey>(stackKey) { key -> SeriesDetailScreen(key = key, onPlay = { backStack.add(it) }, onPerson = { backStack.add(it) }) }
+                entry<PersonSearchKey>(stackKey) { key -> PersonSearchScreen(key = key, onNavigate = { backStack.add(it) }) }
+                entry<CategoryGridKey>(stackKey) { key ->
                     CategoryGridScreen(key = key, onItem = { item ->
                         backStack.add(if (key.kind == ContentKind.SERIES) SeriesDetailKey(item.sourceId, item.id) else MovieDetailKey(item.sourceId, item.id))
                     })
@@ -97,4 +98,16 @@ fun GoodTvNavigation() {
             },
         )
     }
+}
+
+/**
+ * The same page can be on the back stack twice, a screen apart (Top Gun → Tom Cruise → Top Gun).
+ * Equal keys would share one content key, and with it their saved state and view models, so each
+ * later copy gets its own: the key plus how many equal keys sit below it. An entry's count
+ * never changes while it is on the stack (only the top is pushed or popped), and a popped entry
+ * still counts the same copies below it.
+ */
+internal fun stackContentKey(backStack: List<Any>, key: Any): Any {
+    val below = backStack.takeWhile { it !== key }.count { it == key }
+    return "${key.javaClass.name}:$key#$below"
 }
