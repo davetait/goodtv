@@ -79,8 +79,8 @@ interface GuideSource {
  * The rows come from the lineup the [LineupKeeper] saved in [lineups], filtered by the current [Visibility];
  * only when nothing is saved (or there is no [lineups]) is the visible lineup merged here ([LineupBuilder]:
  * identities of ~12.6k channels, grouping, placeholder logos), on [compute], once per lineup. Moving the window
- * or switching filters only re-queries programmes. Each board comes channels first: the rows without programmes,
- * then the same rows once the window's programmes are read.
+ * or switching filters only re-queries programmes. A board whose programmes take longer than
+ * [CHANNELS_FIRST_DELAY_MS] comes channels first: the rows without programmes, then the same rows once they are read.
  */
 class GuideRepository(
     private val library: LibraryStore,
@@ -227,10 +227,14 @@ class GuideRepository(
     /** A board and whether its rows came from the saved lineup. */
     private class Built(val board: GuideBoard, val fromSaved: Boolean)
 
+    /** [CHANNELS_FIRST_DELAY_MS] have passed since the board was asked for. */
+    private object ChannelsDue
+
     /**
-     * Until this collection's first programmes arrive, each board comes first without them ([GuideBoard.programmesLoaded]
-     * false); after that a change (a favourite, new links) keeps the last board until the new one is whole.
-     * [GuideBoard.downloading] follows [GuideRefresher.working].
+     * Until this collection's first programmes arrive, each board is built first without them ([GuideBoard.programmesLoaded]
+     * false); that board is shown only if the full one hasn't come within [CHANNELS_FIRST_DELAY_MS] of collection (a cold
+     * open), never after it, so paging and switching chips never blink. After that a change (a favourite, new links) keeps
+     * the last board until the new one is whole. [GuideBoard.downloading] follows [GuideRefresher.working].
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     override fun board(filter: GuideFilter, windowStartMs: Long): Flow<GuideBoard> = flow {
@@ -250,20 +254,40 @@ class GuideRepository(
                 emit(Built(channels, s.fromSaved))
             }
         }
+        val due = flow { delay(CHANNELS_FIRST_DELAY_MS); emit(ChannelsDue) }
+        // One collector decides what shows, so a channels-only board can never follow the full one.
         var last: GuideBoard? = null
+        var held: Built? = null
+        var channelsDue = false
         var downloading = refresher.working.value
         var logged = false
-        merge(boards, refresher.working).collect { event ->
-            if (event is Built) {
-                last = event.board
-                if (!logged && event.board.programmesLoaded) {
-                    logged = true
-                    val rows = event.board.sections.sumOf { it.rows.size + it.more.size }
-                    debug("${if (event.fromSaved) "first board (saved)" else "first board"} ${msSince(started)} ms, $rows rows")
+        fun show(built: Built) {
+            last = built.board
+            if (!built.board.programmesLoaded) {
+                debug("${if (built.fromSaved) "channels board (saved)" else "channels board"} ${msSince(started)} ms")
+            } else if (!logged) {
+                logged = true
+                val rows = built.board.sections.sumOf { it.rows.size + it.more.size }
+                debug("${if (built.fromSaved) "first board (saved)" else "first board"} ${msSince(started)} ms, $rows rows")
+            }
+        }
+        merge(boards, refresher.working, due).collect { event ->
+            when (event) {
+                is Built -> when {
+                    event.board.programmesLoaded -> { held = null; show(event) }
+                    last?.programmesLoaded == true -> return@collect
+                    !channelsDue -> { held = event; return@collect }
+                    else -> show(event)
                 }
-            } else if (event is Boolean) {
-                if (event == downloading) return@collect
-                downloading = event
+                is ChannelsDue -> {
+                    channelsDue = true
+                    show(held ?: return@collect)
+                    held = null
+                }
+                is Boolean -> {
+                    if (event == downloading) return@collect
+                    downloading = event
+                }
             }
             last?.let { emit(it.copy(downloading = downloading)) }
         }
@@ -368,6 +392,8 @@ class GuideRepository(
 
     companion object {
         const val WINDOW_MS = 3 * 3_600_000L
+        /** How long a board waits for its programmes before showing its channels alone. */
+        const val CHANNELS_FIRST_DELAY_MS = 200L
         private const val FAVOURITES_TITLE = "Favourites"
         private const val SEARCH_PROGRAMMES = 50
         private const val ID_CHUNK = 500

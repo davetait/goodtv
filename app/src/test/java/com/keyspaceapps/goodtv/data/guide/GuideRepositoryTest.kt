@@ -15,10 +15,15 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -62,8 +67,9 @@ class GuideRepositoryTest {
         dispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Unconfined,
         lineups: LineupStore? = null,
         refresher: GuideRefresher = GuideRefresher(guide, refresherLibrary, SourceRegistry(emptyList()), EpgShareSource(OkHttpClient()), PlaybackState(), { now }, dispatcher, tmp.newFolder()),
+        store: GuideStore = limited,
     ) = GuideRepository(
-        lib, limited, refresher,
+        lib, store, refresher,
         LiveRefresher(lib, SourceRegistry(listOf(FakeChannelSource())), { false }, { now }),
         { now }, dispatcher, { warnings += it }, { timings += it }, lineups,
     )
@@ -481,22 +487,63 @@ class GuideRepositoryTest {
         assertTrue(timings.toString(), timings.none { it.startsWith("first board (saved)") })
     }
 
-    @Test fun boardEmitsChannelsThenProgrammes() = runBlocking {
+    /** The guide store, with every programme query answering [ms] late (virtual time). */
+    private fun programmesAfter(ms: Long): GuideStore = object : GuideStore by limited {
+        override fun observeProgrammes(guideIds: Set<String>, fromMs: Long, untilMs: Long): Flow<List<GuideProgramme>> =
+            flow { delay(ms); emitAll(limited.observeProgrammes(guideIds, fromMs, untilMs)) }
+    }
+
+    private fun linkedCnn(): ChannelCandidate {
         val cnn = feed("US: CNN HD", NEWS)
         lineup.value = listOf(cnn)
-        guide.replaceGuide(GuideOrigin.EPGSHARE, listOf(GuideChannel("CNN", GuideOrigin.EPGSHARE, null)), sequenceOf(programme("CNN", "Show", windowStart)))
-        guide.replaceLinks(listOf(link(cnn, "CNN")))
-        val repo = repoFor(library, Dispatchers.Default)
-        val key = ChannelIdentity.of(cnn.channel.name, cnn.categoryName).rowKey
-        val boards = boardsUntil(repo.board(GuideFilter.ALL, windowStart), { repo.setFavourite(key, true) }) { it.size >= 3 }
-        val (channels, full, favourite) = boards
+        runBlocking {
+            guide.replaceGuide(GuideOrigin.EPGSHARE, listOf(GuideChannel("CNN", GuideOrigin.EPGSHARE, null)), sequenceOf(programme("CNN", "Show", windowStart)))
+            guide.replaceLinks(listOf(link(cnn, "CNN")))
+        }
+        return cnn
+    }
+
+    /** Paging and chip switches: programmes that come within [GuideRepository.CHANNELS_FIRST_DELAY_MS] never blink a channels-only board. */
+    @Test fun fastProgrammesSkipTheChannelsOnlyBoard() = runTest {
+        linkedCnn()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val repo = repoFor(library, dispatcher, store = programmesAfter(50))
+        val boards = ArrayList<GuideBoard>()
+        backgroundScope.launch(dispatcher) { repo.board(GuideFilter.ALL, windowStart).collect { boards += it } }
+        advanceTimeBy(2_000)
+        runCurrent()
+        assertTrue(boards.toString(), boards.isNotEmpty())
+        assertTrue(boards.first().programmesLoaded)
+        assertTrue(boards.all { it.programmesLoaded })
+        assertEquals(listOf("Show"), boards.first().section("News").rows.single().programmes.map { it.title })
+    }
+
+    /** A cold open: programmes slower than [GuideRepository.CHANNELS_FIRST_DELAY_MS] show the channels first, then the full board, never back. */
+    @Test fun slowProgrammesShowChannelsFirst() = runTest {
+        val cnn = linkedCnn()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val repo = repoFor(library, dispatcher, store = programmesAfter(1_000))
+        val boards = ArrayList<GuideBoard>()
+        backgroundScope.launch(dispatcher) { repo.board(GuideFilter.ALL, windowStart).collect { boards += it } }
+        advanceTimeBy(199)
+        runCurrent()
+        assertEquals(emptyList<GuideBoard>(), boards)
+        advanceTimeBy(1)
+        runCurrent()
+        val channels = boards.single()
         assertFalse(channels.programmesLoaded)
         assertTrue(channels.section("News").rows.single().programmes.isEmpty())
-        assertTrue(full.programmesLoaded)
-        assertEquals(listOf("Show"), full.section("News").rows.single().programmes.map { it.title })
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(2, boards.size)
+        assertTrue(boards[1].programmesLoaded)
+        assertEquals(listOf("Show"), boards[1].section("News").rows.single().programmes.map { it.title })
         // A later change (a favourite) never drops back to channels only.
-        assertTrue(favourite.programmesLoaded)
-        assertEquals(listOf("Show"), favourite.section("Favourites").rows.single().programmes.map { it.title })
+        repo.setFavourite(ChannelIdentity.of(cnn.channel.name, cnn.categoryName).rowKey, true)
+        advanceTimeBy(2_000)
+        runCurrent()
+        assertTrue(boards.drop(1).all { it.programmesLoaded })
+        assertEquals(listOf("Show"), boards.last().section("Favourites").rows.single().programmes.map { it.title })
     }
 
     @Test fun downloadingFollowsTheRefresher() = runBlocking {
@@ -525,7 +572,7 @@ class GuideRepositoryTest {
     @Test fun fullLineupBoardIsCleanAndFast() = runBlocking {
         lineup.value = fixture
         val started = System.nanoTime()
-        val b = repoFor(library, Dispatchers.Default).board(GuideFilter.ALL, windowStart).first()
+        val b = repoFor(library, Dispatchers.Default).board(GuideFilter.ALL, windowStart).first { it.programmesLoaded }
         val ms = (System.nanoTime() - started) / 1_000_000
         val rows = b.sections.flatMap { it.rows + it.more }
         assertTrue("took ${ms}ms", ms < 5_000)
