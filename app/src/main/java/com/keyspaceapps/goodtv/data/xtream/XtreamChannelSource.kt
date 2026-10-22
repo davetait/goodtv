@@ -11,6 +11,7 @@ import com.keyspaceapps.goodtv.domain.MovieDetail
 import com.keyspaceapps.goodtv.domain.PlayableRef
 import com.keyspaceapps.goodtv.domain.SeriesDetail
 import com.keyspaceapps.goodtv.domain.SourceInfo
+import java.io.InputStream
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
@@ -56,6 +57,9 @@ class XtreamChannelSource(private val api: XtreamApi) : ChannelSource {
             LiveCatalog(XtreamMappers.categories(sourceId, ContentKind.LIVE, cats.await()), XtreamMappers.live(sourceId, live.await()))
         }
     }
+
+    override suspend fun openGuide(sourceId: Long, config: SourceConfig): Result<InputStream> =
+        runCatchingSource { api.xmltv(xtream(config)) }
 
     override suspend fun fetchMovieDetail(sourceId: Long, config: SourceConfig, movieId: String): Result<MovieDetail> =
         runCatchingSource { XtreamMappers.toMovieDetail(sourceId, movieId, api.vodInfo(xtream(config), movieId)) }

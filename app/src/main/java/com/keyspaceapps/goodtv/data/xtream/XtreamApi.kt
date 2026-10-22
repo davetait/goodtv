@@ -16,6 +16,7 @@ import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
+import java.io.InputStream
 
 /**
  * Thin client for `player_api.php`. Every failure surfaces as [SourceException] with on-screen copy.
@@ -54,6 +55,24 @@ class XtreamApi(
 
     suspend fun seriesInfo(cfg: SourceConfig.Xtream, seriesId: String): XtSeriesInfoResponse =
         get(XtreamUrls.api(cfg, "get_series_info", mapOf("series_id" to seriesId)), XtSeriesInfoResponse.serializer())
+
+    /**
+     * The provider's guide (`xmltv.php`), streamed: it can be hundreds of MB. The caller closes the
+     * stream, which releases the connection.
+     */
+    suspend fun xmltv(cfg: SourceConfig.Xtream): InputStream = withContext(io) {
+        val request = Request.Builder().url(XtreamUrls.xmltv(cfg)).header("User-Agent", USER_AGENT).build()
+        try {
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) {
+                response.close()
+                throw SourceException("Server returned HTTP ${response.code}")
+            }
+            response.body.byteStream()
+        } catch (e: IOException) {
+            throw SourceException("Could not reach server: ${e.message ?: e.javaClass.simpleName}", e)
+        }
+    }
 
     private suspend fun <T> get(url: HttpUrl, strategy: DeserializationStrategy<T>): T = withContext(io) {
         val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).build()

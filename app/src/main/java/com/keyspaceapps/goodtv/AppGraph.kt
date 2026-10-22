@@ -13,7 +13,10 @@ import com.keyspaceapps.goodtv.data.db.RoomTmdbGenreStore
 import com.keyspaceapps.goodtv.data.db.RoomGuideStore
 import com.keyspaceapps.goodtv.data.db.RoomWatchListStore
 import com.keyspaceapps.goodtv.data.db.RoomWatchProgressStore
+import com.keyspaceapps.goodtv.data.guide.EpgShareSource
+import com.keyspaceapps.goodtv.data.guide.GuideRefresher
 import com.keyspaceapps.goodtv.data.guide.GuideStore
+import com.keyspaceapps.goodtv.data.guide.PlaybackState
 import com.keyspaceapps.goodtv.data.progress.WatchProgressRepository
 import com.keyspaceapps.goodtv.data.repo.LibraryRepository
 import com.keyspaceapps.goodtv.data.repo.LibraryStore
@@ -121,6 +124,17 @@ class AppGraph(val context: Context) {
     /** Guide programmes, the channel-to-guide links and favourite channels. */
     val guideStore: GuideStore by lazy { RoomGuideStore(db) }
 
+    /** True while the player is on screen; the guide's provider download waits for it to end. */
+    val playback = PlaybackState()
+
+    /** Downloads the guide once a day: epgshare01 first, the provider's own for what it lacks. */
+    val guideRefresher: GuideRefresher by lazy {
+        GuideRefresher(
+            guideStore, store, sourceRegistry, EpgShareSource(okHttp), playback,
+            System::currentTimeMillis, Dispatchers.IO, File(context.cacheDir, "guide"),
+        )
+    }
+
     /** Home's popular rows: TMDB's popular streaming titles the library has, rankings refreshed daily. */
     val popularStore: PopularStore by lazy { RoomPopularStore(db.popular()) }
     val popularMovies: PopularRepository by lazy { PopularRepository(tmdbApi, popularStore, PopularMoviesQuery, tmdbLanguage) }
@@ -158,6 +172,14 @@ class AppGraph(val context: Context) {
         appScope.launch {
             syncManager.state.map { it is SyncState.Syncing }.distinctUntilChanged().drop(1).filter { syncing -> !syncing }
                 .collect { genreFetcher.start() }
+        }
+    }
+
+    /** Refreshes the guide whenever syncing finishes: a new source or a changed lineup needs new links. Call once per process. */
+    fun startGuideRefreshAfterSyncs() {
+        appScope.launch {
+            syncManager.state.map { it is SyncState.Syncing }.distinctUntilChanged().drop(1).filter { syncing -> !syncing }
+                .collect { guideRefresher.refreshIfStale() }
         }
     }
 

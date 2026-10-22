@@ -3,6 +3,7 @@ package com.keyspaceapps.goodtv.ui.nav
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -66,6 +67,11 @@ fun GoodTvNavigation() {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Loading…") }
                     } else {
                         val ref = key.watchRef()
+                        // Guide downloads wait while the player is on screen.
+                        DisposableEffect(Unit) {
+                            graph.playback.playing.value = true
+                            onDispose { graph.playback.playing.value = false }
+                        }
                         PlayerScreen(
                             item = current,
                             onBack = pop,
