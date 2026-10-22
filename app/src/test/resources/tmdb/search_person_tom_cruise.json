@@ -1,0 +1,7 @@
+{
+  "page": 1,
+  "results": [
+    {"id": 500, "name": "Tom Cruise", "known_for_department": "Acting", "popularity": 45.2},
+    {"id": 777, "name": "Tom Cruise", "known_for_department": "Crew", "popularity": 1.1}
+  ]
+}

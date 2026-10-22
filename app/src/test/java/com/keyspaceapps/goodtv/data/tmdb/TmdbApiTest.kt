@@ -155,5 +155,36 @@ class TmdbApiTest {
         assertEquals(17, page.total_pages)
         assertEquals("The Bear", page.results.single().name)
     }
-}
 
+    @Test fun personCallsUseTheirPaths() = runTest {
+        server.enqueue(ok(fixture("movie_credits_361743.json")))
+        assertEquals(12, api().movieCredits(1, "en-US")!!.cast.size)
+        assertEquals("/3/movie/1/credits", server.takeRequest().url.encodedPath)
+
+        server.enqueue(ok(fixture("tv_people_1396.json")))
+        val tv = api().tvPeople(2, "en-US")!!
+        val tvUrl = server.takeRequest().url
+        assertEquals("/3/tv/2", tvUrl.encodedPath)
+        assertEquals("aggregate_credits", tvUrl.queryParameter("append_to_response"))
+        assertEquals(listOf(66633L), tv.created_by.map { it.id })
+        assertEquals("Walter White", tv.aggregate_credits!!.cast.first().roles.first().character)
+
+        server.enqueue(ok(fixture("person_credits_500.json")))
+        assertEquals(6, api().personCredits(3, "en-US")!!.cast.size)
+        assertEquals("/3/person/3/combined_credits", server.takeRequest().url.encodedPath)
+
+        server.enqueue(ok(fixture("search_person_tom_cruise.json")))
+        val found = api().searchPerson("Tom Cruise", "en-US")
+        val searchUrl = server.takeRequest().url
+        assertEquals("/3/search/person", searchUrl.encodedPath)
+        assertEquals("Tom Cruise", searchUrl.queryParameter("query"))
+        assertEquals(listOf(500L, 777L), found.map { it.id })
+    }
+
+    @Test fun unknownPeopleDetailsAreNull() = runTest {
+        repeat(3) { server.enqueue(MockResponse(code = 404, body = """{"success":false,"status_code":34}""")) }
+        assertNull(api().movieCredits(1, "en-US"))
+        assertNull(api().tvPeople(1, "en-US"))
+        assertNull(api().personCredits(1, "en-US"))
+    }
+}
