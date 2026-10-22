@@ -170,6 +170,19 @@ val MIGRATION_11_12 = object : Migration(11, 12) {
     }
 }
 
+/** v12 → v13: cached people per title and cached credits per person. DDL matches schemas/13.json. */
+val MIGRATION_12_13 = object : Migration(12, 13) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS `tmdb_title_people` (`kind` TEXT NOT NULL, `tmdbId` INTEGER NOT NULL, `people` TEXT NOT NULL, `fetchedAt` INTEGER NOT NULL, PRIMARY KEY(`kind`, `tmdbId`))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `tmdb_people` (`personId` INTEGER NOT NULL, `name` TEXT NOT NULL, `fetchedAt` INTEGER NOT NULL, PRIMARY KEY(`personId`))")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `tmdb_person_credits` (`personId` INTEGER NOT NULL, `kind` TEXT NOT NULL, `tmdbId` INTEGER NOT NULL, `date` TEXT, " +
+                "PRIMARY KEY(`personId`, `kind`, `tmdbId`), FOREIGN KEY(`personId`) REFERENCES `tmdb_people`(`personId`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_tmdb_person_credits_personId` ON `tmdb_person_credits` (`personId`)")
+    }
+}
+
 @Database(
     entities = [
         SourceEntity::class, CategoryEntity::class, LiveChannelEntity::class, MovieEntity::class, SeriesEntity::class,
@@ -179,8 +192,9 @@ val MIGRATION_11_12 = object : Migration(11, 12) {
         TmdbListEntity::class, TmdbListItemEntity::class, WatchListEntity::class,
         GuideChannelEntity::class, GuideProgrammeEntity::class, ChannelGuideEntity::class, FavouriteChannelEntity::class, GuideMetaEntity::class,
         LineupRowEntity::class, LineupFeedEntity::class, LineupMetaEntity::class, LineupStateEntity::class,
+        TmdbTitlePeopleEntity::class, TmdbPersonEntity::class, TmdbPersonCreditEntity::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = true, // schemas/ holds the baseline every future migration is written against
 )
 abstract class GoodTvDatabase : RoomDatabase() {
@@ -194,11 +208,12 @@ abstract class GoodTvDatabase : RoomDatabase() {
     abstract fun watchList(): WatchListDao
     abstract fun guide(): GuideDao
     abstract fun lineup(): LineupDao
+    abstract fun people(): PeopleDao
 
     companion object {
         fun create(context: Context): GoodTvDatabase =
             Room.databaseBuilder(context, GoodTvDatabase::class.java, "goodtv.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
                 .fallbackToDestructiveMigration(dropAllTables = true) // last resort for an unknown version only
                 .build()
     }

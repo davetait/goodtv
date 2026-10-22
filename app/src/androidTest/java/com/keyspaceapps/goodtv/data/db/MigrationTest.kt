@@ -225,4 +225,26 @@ class MigrationTest {
         }
         db.close()
     }
+
+    /** v12 → v13 adds the people caches empty, keeps the TMDB cache, and a person's credits go with the person. */
+    @Test
+    fun migrate12To13AddsPeopleCache() {
+        helper.createDatabase(dbName, 12).apply {
+            execSQL("INSERT INTO tmdb_meta (kind, tmdbId, language, title, overview, rating, voteCount, year, genres, runtimeMinutes, posterUrl, backdropUrl, fetchedAt) VALUES ('MOVIE', 603, 'en-US', 'The Matrix', NULL, 8.2, 10, 1999, '', NULL, NULL, NULL, 1)")
+            close()
+        }
+        val db = helper.runMigrationsAndValidate(dbName, 13, true, MIGRATION_12_13)
+        db.query("SELECT title FROM tmdb_meta WHERE tmdbId = 603").use { c -> c.moveToFirst(); assertEquals("The Matrix", c.getString(0)) }
+        for (t in listOf("tmdb_title_people", "tmdb_people", "tmdb_person_credits")) {
+            db.query("SELECT COUNT(*) FROM $t").use { c -> c.moveToFirst(); assertEquals(0, c.getInt(0)) }
+        }
+        db.execSQL("INSERT INTO tmdb_title_people (kind, tmdbId, people, fetchedAt) VALUES ('MOVIE', 603, '[]', 1)")
+        db.execSQL("INSERT INTO tmdb_people (personId, name, fetchedAt) VALUES (6384, 'Keanu Reeves', 1)")
+        db.execSQL("INSERT INTO tmdb_person_credits (personId, kind, tmdbId, date) VALUES (6384, 'MOVIE', 603, '1999-03-31')")
+        db.query("SELECT COUNT(*) FROM tmdb_person_credits").use { c -> c.moveToFirst(); assertEquals(1, c.getInt(0)) }
+        db.execSQL("PRAGMA foreign_keys = ON") // the test helper's connection leaves them off
+        db.execSQL("DELETE FROM tmdb_people WHERE personId = 6384")
+        db.query("SELECT COUNT(*) FROM tmdb_person_credits").use { c -> c.moveToFirst(); assertEquals(0, c.getInt(0)) }
+        db.close()
+    }
 }

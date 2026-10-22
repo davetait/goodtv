@@ -256,3 +256,20 @@ data class LineupMetaEntity(
 /** The library generation, bumped by every library write; a single row (id 0), absent until the first bump. */
 @Entity(tableName = "lineup_state")
 data class LineupStateEntity(@PrimaryKey val id: Int = 0, val generation: Long)
+
+/** Who TMDB lists for one title: [people] is the JSON of `List<TmdbPerson>`; `[]` records "TMDB lists nobody". */
+@Entity(tableName = "tmdb_title_people", primaryKeys = ["kind", "tmdbId"])
+data class TmdbTitlePeopleEntity(val kind: String, val tmdbId: Long, val people: String, val fetchedAt: Long)
+
+/** A person whose credits are cached. */
+@Entity(tableName = "tmdb_people")
+data class TmdbPersonEntity(@PrimaryKey val personId: Long, val name: String, val fetchedAt: Long)
+
+/** One title a cached person counts for ([kind] is "MOVIE" or "TV"); [date] is its release or first-air date. */
+@Entity(
+    tableName = "tmdb_person_credits",
+    primaryKeys = ["personId", "kind", "tmdbId"],
+    foreignKeys = [ForeignKey(entity = TmdbPersonEntity::class, parentColumns = ["personId"], childColumns = ["personId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("personId")],
+)
+data class TmdbPersonCreditEntity(val personId: Long, val kind: String, val tmdbId: Long, val date: String?)

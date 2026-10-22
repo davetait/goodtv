@@ -456,3 +456,58 @@ interface LineupDao {
     @Query("SELECT id FROM sources WHERE enabled = 1") fun observeEnabledSources(): Flow<List<Long>>
     @Query("SELECT sourceId, categoryId FROM hidden_categories WHERE kind = 'LIVE'") fun observeHiddenLive(): Flow<List<HiddenLiveRow>>
 }
+
+/** A library movie that is in a person's credits, with the credit's date. */
+data class PersonMovieRow(@androidx.room.Embedded val movie: MovieEntity, val date: String?)
+
+/** A library series that is in a person's credits, with the credit's date. */
+data class PersonSeriesRow(@androidx.room.Embedded val series: SeriesEntity, val date: String?)
+
+@Dao
+interface PeopleDao {
+    @Query("SELECT * FROM tmdb_title_people WHERE kind = :kind AND tmdbId = :tmdbId")
+    suspend fun titlePeople(kind: String, tmdbId: Long): TmdbTitlePeopleEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertTitlePeople(row: TmdbTitlePeopleEntity)
+
+    @Query("SELECT fetchedAt FROM tmdb_people WHERE personId = :personId") suspend fun creditsFetchedAt(personId: Long): Long?
+    @Query("DELETE FROM tmdb_person_credits WHERE personId = :personId") suspend fun deleteCredits(personId: Long)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertPerson(row: TmdbPersonEntity)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertCredits(rows: List<TmdbPersonCreditEntity>)
+
+    @Transaction
+    suspend fun replaceCredits(person: TmdbPersonEntity, credits: List<TmdbPersonCreditEntity>) {
+        deleteCredits(person.personId)
+        upsertPerson(person)
+        insertCredits(credits)
+    }
+
+    @Query("DELETE FROM tmdb_title_people WHERE fetchedAt < :before") suspend fun pruneTitlePeople(before: Long)
+    @Query("DELETE FROM tmdb_people WHERE fetchedAt < :before") suspend fun prunePeople(before: Long) // credits go with them (cascade)
+
+    // Per credit, the copy to show: the same pick as PopularDao (English, then untagged, then any language;
+    // standard quality before 4K; enabled sources and visible categories only).
+    @Query(
+        """SELECT m.*, c.date AS date FROM tmdb_person_credits c
+           JOIN movies m ON m.rowid = (
+               SELECT x.rowid FROM movies x JOIN sources s ON s.id = x.sourceId
+               WHERE x.tmdbId = c.tmdbId AND s.enabled = 1
+                 AND NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = x.sourceId AND h.kind = 'MOVIE' AND h.categoryId = x.categoryId)
+               ORDER BY CASE WHEN x.language = 'EN' THEN 0 WHEN x.language IS NULL THEN 1 ELSE 2 END, x.quality IS NOT NULL, x.sourceId, x.id
+               LIMIT 1)
+           WHERE c.personId = :personId AND c.kind = 'MOVIE' LIMIT 500""",
+    )
+    fun observeMovies(personId: Long): Flow<List<PersonMovieRow>>
+
+    @Query(
+        """SELECT m.*, c.date AS date FROM tmdb_person_credits c
+           JOIN series m ON m.rowid = (
+               SELECT x.rowid FROM series x JOIN sources s ON s.id = x.sourceId
+               WHERE x.tmdbId = c.tmdbId AND s.enabled = 1
+                 AND NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = x.sourceId AND h.kind = 'SERIES' AND h.categoryId = x.categoryId)
+               ORDER BY CASE WHEN x.language = 'EN' THEN 0 WHEN x.language IS NULL THEN 1 ELSE 2 END, x.quality IS NOT NULL, x.sourceId, x.id
+               LIMIT 1)
+           WHERE c.personId = :personId AND c.kind = 'TV' LIMIT 500""",
+    )
+    fun observeSeries(personId: Long): Flow<List<PersonSeriesRow>>
+}
