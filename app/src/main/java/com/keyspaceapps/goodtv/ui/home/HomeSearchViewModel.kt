@@ -60,6 +60,9 @@ sealed interface PersonSection {
 
     /** The clicked person's credits couldn't be fetched and none are cached. */
     data class Offline(override val name: String) : PersonSection
+
+    /** The clicked person's credits are still on their way; never takes focus. */
+    data class Loading(override val name: String) : PersonSection
 }
 
 /**
@@ -101,14 +104,20 @@ class HomeSearchViewModel(
 
     /**
      * Empty while the query is blank, nobody matches, or TMDB is off. A changed query empties it
-     * straight away, so an earlier person's titles never sit under a new query while TMDB answers;
-     * coming back to the screen (same query) keeps what was shown.
+     * straight away (or, for the clicked person, shows them as [PersonSection.Loading]), so an
+     * earlier person's titles never sit under a new query while TMDB answers, and the clicked
+     * person's screen never claims nothing matches before their credits arrive. Coming back to the
+     * screen (same query) keeps what was shown.
      */
     val people: StateFlow<List<PersonSection>> =
         settledQuery.map { it.trim() }.distinctUntilChanged()
             .flatMapLatest { q ->
                 sectionsFor(q).onStart {
-                    if (q != peopleQuery) { peopleQuery = q; emit(emptyList()) }
+                    if (q != peopleQuery) {
+                        peopleQuery = q
+                        val clicked = pinnedFor(q)?.takeIf { peopleRepo != null }
+                        emit(if (clicked != null) listOf(PersonSection.Loading(clicked.name)) else emptyList())
+                    }
                 }
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())

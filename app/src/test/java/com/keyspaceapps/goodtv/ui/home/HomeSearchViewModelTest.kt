@@ -42,6 +42,7 @@ import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -292,6 +293,31 @@ class HomeSearchViewModelTest {
         assertEquals(listOf<PersonSection>(PersonSection.Offline("Tom Cruise")), vm.people.value)
         // Title results still come.
         assertNotNull(vm.results.value)
+    }
+
+    @Test
+    fun clickedPersonIsLoadingNotNoResultsUntilCreditsLand() = runTest(dispatcher) {
+        routes["/3/person/500/combined_credits"] = MockResponse.Builder().code(200)
+            .body(fixture("person_credits_500.json"))
+            .headersDelay(3, java.util.concurrent.TimeUnit.SECONDS).build()
+        // Real IO threads, so the slow TMDB call can't hold up the test dispatcher.
+        val vm = HomeSearchViewModel(repo, peopleRepo(listOf(movie("p1", 361743, "Top Gun: Maverick")), io = Dispatchers.IO), PersonSearchKey(500, "Tom Cruise"))
+        collectAll(vm)
+        advanceTimeBy(SEARCH_DEBOUNCE_MS + 1)
+        runCurrent()
+        // No title is called "Tom Cruise", and his credits haven't come back yet.
+        assertEquals(emptyList<SearchResult>(), vm.results.value)
+        assertEquals(listOf<PersonSection>(PersonSection.Loading("Tom Cruise")), vm.people.value)
+        assertNotEquals(SearchContent.NO_RESULTS, searchContent(vm.results.value, vm.people.value))
+        assertEquals(listOf("Top Gun: Maverick"), titlesOf(vm.people.first { it.firstOrNull() is PersonSection.Found }.single()))
+    }
+
+    @Test
+    fun noResultsOnlyWithoutTitlesOrSections() {
+        assertEquals(SearchContent.IDLE, searchContent(null, emptyList()))
+        assertEquals(SearchContent.NO_RESULTS, searchContent(emptyList(), emptyList()))
+        assertEquals(SearchContent.RESULTS, searchContent(emptyList(), listOf(PersonSection.NoTitles("A"))))
+        assertEquals(SearchContent.RESULTS, searchContent(emptyList(), listOf(PersonSection.Loading("A"))))
     }
 
     @Test

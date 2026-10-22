@@ -92,14 +92,14 @@ fun SearchPane(
             )
         }
         val found = results
-        when {
-            found == null && people.isEmpty() -> idle()
-            found.isNullOrEmpty() && people.isEmpty() -> Text(
+        when (searchContent(found, people)) {
+            SearchContent.IDLE -> idle()
+            SearchContent.NO_RESULTS -> Text(
                 stringResource(R.string.search_no_results, query.trim()),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 48.dp, top = 24.dp),
             )
-            else -> {
+            SearchContent.RESULTS -> {
                 val first = if (claimFocus && !editing) (people.firstOrNull() as? PersonSection.Found)?.let { personKey(it.personId, it.titles.first()) } else null
                 SearchResultsGrid(
                     people, found.orEmpty(), vm.focus, resultsRequested, defaultTarget = first,
@@ -108,6 +108,16 @@ fun SearchPane(
             }
         }
     }
+}
+
+/** What the area under the search bar shows. */
+internal enum class SearchContent { IDLE, NO_RESULTS, RESULTS }
+
+/** [IDLE] with nothing searched; [NO_RESULTS] only when no title matches and there is no person section (or note) to show. */
+internal fun searchContent(results: List<SearchResult>?, people: List<PersonSection>): SearchContent = when {
+    results == null && people.isEmpty() -> SearchContent.IDLE
+    results.isNullOrEmpty() && people.isEmpty() -> SearchContent.NO_RESULTS
+    else -> SearchContent.RESULTS
 }
 
 /** Person posters can show a copy that is also an ordinary result, so their keys (and remembered focus) are kept apart. */
@@ -153,6 +163,7 @@ private fun SearchResultsGrid(
                 }
                 is PersonSection.NoTitles -> fullWidth("person-note:$i") { Note(stringResource(R.string.person_no_titles, section.name)) }
                 is PersonSection.Offline -> fullWidth("person-note:$i") { Note(stringResource(R.string.person_offline)) }
+                is PersonSection.Loading -> fullWidth("person-note:$i") { Note(stringResource(R.string.person_loading, section.name)) }
             }
         }
         // Title results start on a row of their own, below any person section.

@@ -19,6 +19,7 @@
         <item quantity="other">With %1$s · %2$d titles</item>
     </plurals>
     <string name="person_no_titles">No titles with %1$s</string>
+    <string name="person_loading">Finding titles with %1$s…</string>
     <string name="person_offline">Searching by person needs the internet</string>
     <string name="tmdb_rating">%1$s TMDB</string>
     <string name="tmdb_logo_description">TMDB</string>
