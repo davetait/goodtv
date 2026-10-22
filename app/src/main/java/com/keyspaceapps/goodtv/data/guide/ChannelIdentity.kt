@@ -1,0 +1,188 @@
+package com.keyspaceapps.goodtv.data.guide
+
+import com.keyspaceapps.goodtv.data.sports.GameMatcher
+import com.keyspaceapps.goodtv.domain.DisplayTitle
+
+enum class LiveGenre { NETWORK, NEWS, SPORTS, ENTERTAINMENT, COMEDY, MOVIES, KIDS, DOCUMENTARY, EVENTS }
+
+enum class Network { ABC, CBS, NBC, FOX, PBS, CW }
+
+enum class Region { EAST, WEST }
+
+/** The five largest US TV markets: their local stations show under each network, the rest fold into "More NBC"… */
+val DEFAULT_MARKETS: List<String> = listOf("New York", "Los Angeles", "Chicago", "Philadelphia", "Dallas")
+
+/**
+ * What a provider channel is, read from its name and category: the guide row it belongs to, its genre,
+ * and for a local station its network, call sign and market.
+ *
+ * [rowKey] comes from the name alone (never ids), so favourites survive re-syncs. It merges copies that
+ * differ only in tag, quality or backup markers ("US: A&E HD", "TV: A&E ᴿᴬᵂ"); East and West feeds and
+ * different call signs stay apart. [callSign] is set only when the name carries one in parentheses or
+ * next to a network word, so "Doctor WHO" is not station WHO; it keeps a subchannel's designation
+ * ("WWAY-DT2"). A station's own news stream and app streams (Prime, Roku, Tubi) are not the station.
+ */
+data class ChannelIdentity(
+    val rowKey: String,
+    val displayName: String,
+    val genre: LiveGenre,
+    val network: Network?,
+    val callSign: String?,
+    val market: String?,
+    val region: Region?,
+    /** The show a "24/7:" channel loops, "30 Rock". */
+    val loopShow: String?,
+    /** Headings, empty event slots and ended ones. */
+    val hidden: Boolean,
+) {
+    companion object {
+        private val HEADING = Regex("""#{2,}""")
+        /** "US: ", "AT&T: ", "24/7: ": provider and category tags. */
+        private val TAG = Regex("""^\s*([A-Z0-9&/+]{1,6}):\s*""")
+        private val LOOP = Regex("""^\s*24/7\s+""")
+        private val LETTERS_OR_DIGITS = Regex("""[a-z]+|[0-9]+""")
+        private val SPACES = Regex("""\s+""")
+        private val PARENS = Regex("""\([^)]*\)""")
+        private val CALL_SIGN = Regex("""(?<![A-Za-z0-9])([KW][A-Z]{2,3})(?:-(DT|TV|LD|CD|D)(\d?)|\.(\d))?(?![A-Za-z0-9])""")
+        /** Words shaped like call signs that aren't any. */
+        private val NOT_CALL_SIGNS = setOf("WEST", "KIDS", "WACO")
+        /** Free streaming apps: their "ABC7 New York" is a news stream, not the broadcast. */
+        private val APP_TAGS = setOf("PRIME", "RK", "TUBI")
+        private val NETWORK_WORDS = Network.entries.associateBy { it.name.lowercase() }
+        private val MARKET_WORDS = DEFAULT_MARKETS.map { it.lowercase() to it } + listOf("fort worth" to "Dallas", "dfw" to "Dallas")
+        private val SMALL_WORDS = setOf("a", "an", "and", "at", "for", "in", "of", "on", "or", "the", "to", "vs")
+
+        /** By the start of the name, after its tag; "espn*" is any word starting "espn". */
+        private val KNOWN_CHANNELS: List<Pair<String, LiveGenre>> = listOf(
+            "cnn" to LiveGenre.NEWS, "hln" to LiveGenre.NEWS, "msnbc" to LiveGenre.NEWS, "fox news" to LiveGenre.NEWS,
+            "fox business" to LiveGenre.NEWS, "cnbc" to LiveGenre.NEWS, "bloomberg" to LiveGenre.NEWS, "newsmax" to LiveGenre.NEWS,
+            "newsnation" to LiveGenre.NEWS, "c span" to LiveGenre.NEWS,
+            "espn*" to LiveGenre.SPORTS, "fs1" to LiveGenre.SPORTS, "fs2" to LiveGenre.SPORTS, "fox sports" to LiveGenre.SPORTS,
+            "nfl network" to LiveGenre.SPORTS, "nfl redzone" to LiveGenre.SPORTS, "nba tv" to LiveGenre.SPORTS, "mlb network" to LiveGenre.SPORTS,
+            "nhl network" to LiveGenre.SPORTS, "bein" to LiveGenre.SPORTS, "golf channel" to LiveGenre.SPORTS, "tennis channel" to LiveGenre.SPORTS,
+            "cbs sports" to LiveGenre.SPORTS, "nbc sports" to LiveGenre.SPORTS, "big ten network" to LiveGenre.SPORTS,
+            "sec network" to LiveGenre.SPORTS, "acc network" to LiveGenre.SPORTS,
+            "comedy central" to LiveGenre.COMEDY,
+            "hbo" to LiveGenre.MOVIES, "showtime" to LiveGenre.MOVIES, "tcm" to LiveGenre.MOVIES, "turner classic movies" to LiveGenre.MOVIES,
+            "starz" to LiveGenre.MOVIES, "cinemax" to LiveGenre.MOVIES, "movie channel" to LiveGenre.MOVIES,
+            "disney" to LiveGenre.KIDS, "nickelodeon" to LiveGenre.KIDS, "nick jr" to LiveGenre.KIDS, "nicktoons" to LiveGenre.KIDS,
+            "cartoon network" to LiveGenre.KIDS, "boomerang" to LiveGenre.KIDS, "pbs kids" to LiveGenre.KIDS,
+            "discovery" to LiveGenre.DOCUMENTARY, "history" to LiveGenre.DOCUMENTARY, "hgtv" to LiveGenre.DOCUMENTARY,
+            "food network" to LiveGenre.DOCUMENTARY, "national geographic" to LiveGenre.DOCUMENTARY, "nat geo" to LiveGenre.DOCUMENTARY,
+            "animal planet" to LiveGenre.DOCUMENTARY, "science channel" to LiveGenre.DOCUMENTARY, "smithsonian" to LiveGenre.DOCUMENTARY,
+        )
+        private val CATEGORY_GENRES = mapOf(
+            "comedy" to LiveGenre.COMEDY, "movies" to LiveGenre.MOVIES, "sport" to LiveGenre.SPORTS, "sports" to LiveGenre.SPORTS,
+            "replay" to LiveGenre.SPORTS, "kids" to LiveGenre.KIDS, "cartoon" to LiveGenre.KIDS,
+        )
+
+        fun of(name: String, categoryName: String): ChannelIdentity {
+            val plain = GameMatcher.normalize(name)
+            val hidden = HEADING.containsMatchIn(name) || plain.startsWith("ended ") || "no event streaming" in plain || plain.endsWith(" no event")
+            val tag = TAG.find(name)
+            var body = if (tag != null) name.substring(tag.range.last + 1) else name
+            val tagName = tag?.groupValues?.get(1)
+            // "24/7: 30 ROCK", or "US: 24/7 MET GALA 2023".
+            val loopTag = if (tagName == "24/7") null else LOOP.find(body)
+            val loop = tagName == "24/7" || loopTag != null
+            if (loopTag != null) body = body.substring(loopTag.range.last + 1)
+            val category = GameMatcher.normalize(categoryName).split(' ').toSet()
+            val event = !loop && "ppv" in category
+
+            val words = ChannelNames.words(body)
+            val news = words.indices.any { words[it] == "news" && words.getOrNull(it - 1) != "newport" }
+            val notStation = hidden || loop || event || news || tagName in APP_TAGS
+            // "abc7" is the network word and a channel number.
+            val parts = words.flatMap { w -> LETTERS_OR_DIGITS.findAll(w).map { it.value }.toList() }
+            val netAt = parts.indexOfFirst { it in NETWORK_WORDS }
+            val callSign = if (notStation) null else callSignOf(body, hasNetworkWord = netAt >= 0)
+            val isStation = !notStation && netAt >= 0 && (
+                callSign != null || parts.getOrNull(netAt + 1)?.all(Char::isDigit) == true ||
+                    parts.all { it == parts[netAt] || it in ChannelNames.REGIONS } // a national feed: "ABC (EAST)"
+                )
+            val network = if (isStation) NETWORK_WORDS.getValue(parts[netAt]) else null
+            val region = if (callSign == null && !loop) words.drop(1).firstNotNullOfOrNull { ChannelNames.REGIONS[it] } else null
+            // "TV: DAVENPORT, IA KWQC NBC 6 A3 HD LOS ANGELES": the station's city is the one before the comma.
+            val city = " " + ChannelNames.words(body.substringBefore(',')).joinToString(" ") + " "
+            val market = if (network == null) null else MARKET_WORDS.firstOrNull { " ${it.first} " in city }?.second
+
+            val genre = if (event) LiveGenre.EVENTS else {
+                (if (loop) null else knownGenre(words)) ?: category.firstNotNullOfOrNull { CATEGORY_GENRES[it] } ?: when {
+                    news -> LiveGenre.NEWS
+                    network != null -> LiveGenre.NETWORK
+                    "news" in category -> LiveGenre.NEWS
+                    else -> LiveGenre.ENTERTAINMENT
+                }
+            }
+            // DisplayTitle drops most tags but not "AT&T:".
+            val displayName = DisplayTitle.parse(ChannelNames.MARKER.replace(name, "").replace(SPACES, " ").trim(), live = true).title
+                .let { t -> tag?.let { t.removePrefix(it.value.trim()) } ?: t }.trimStart(':', ' ')
+            val key = words.joinToString(" ").ifEmpty { plain.ifEmpty { name.trim() } }
+            return ChannelIdentity(
+                rowKey = if (loop) "24/7 $key" else key,
+                displayName = displayName,
+                genre = genre,
+                network = network,
+                callSign = callSign,
+                market = market,
+                region = region,
+                loopShow = if (loop) titleCase(displayName.removePrefix("24/7").trim()).ifEmpty { null } else null,
+                hidden = hidden,
+            )
+        }
+
+        /** The call sign in parentheses, else the first one when a network word is in the name, with any subchannel: "WWAY-DT2". */
+        private fun callSignOf(body: String, hasNetworkWord: Boolean): String? {
+            val parens = PARENS.findAll(body).map { it.range }.toList()
+            val found = CALL_SIGN.findAll(body).filter { it.groupValues[1] !in NOT_CALL_SIGNS }.toList()
+            val m = found.firstOrNull { c -> parens.any { c.range.first > it.first && c.range.last < it.last } }
+                ?: found.firstOrNull()?.takeIf { hasNetworkWord } ?: return null
+            val g = m.groupValues
+            val designation = if (g[4].isNotEmpty()) ChannelNames.designation("DT", g[4]) else ChannelNames.designation(g[2], g[3])
+            return g[1] + designation.orEmpty()
+        }
+
+        private fun knownGenre(words: List<String>): LiveGenre? {
+            val s = words.dropWhile { it == "the" }.joinToString(" ") + " "
+            return KNOWN_CHANNELS.firstOrNull { (k, _) -> if (k.endsWith('*')) s.startsWith(k.dropLast(1)) else s.startsWith("$k ") }?.second
+        }
+
+        /** "SCARECROW AND MRS. KING" → "Scarecrow and Mrs. King". */
+        private fun titleCase(s: String): String = s.split(' ').filter { it.isNotEmpty() }.mapIndexed { i, w ->
+            val lower = w.lowercase()
+            if (i > 0 && lower in SMALL_WORDS) lower else lower.replaceFirstChar { it.titlecase() }
+        }.joinToString(" ")
+    }
+}
+
+/** Name pieces [ChannelIdentity] and [GuideMatcher] share. */
+internal object ChannelNames {
+    private val QUALITY = setOf("hd", "fhd", "uhd", "sd", "4k", "8k", "raw", "hevc", "hdr", "1080p", "720p", "60fps", "50fps", "fps", "backup")
+    val REGIONS = mapOf("east" to Region.EAST, "west" to Region.WEST, "pacific" to Region.WEST)
+    /** "(D)", "(PC)", "(D11)": backup and server markers. */
+    val MARKER = Regex("""\((?:[A-Z]{1,2}|D\d{1,2})\)""")
+
+    /** Lower-case words without quality or backup markers, "&" and "+" spelled out so "A&E" meets "A and E". */
+    fun words(s: String): List<String> =
+        GameMatcher.normalize(MARKER.replace(s, " ").replace("&", " and ").replace("+", " plus "))
+            .split(' ').filter { it.isNotEmpty() && it !in QUALITY }
+
+    /** A cable channel's name for matching, without its region, and the region: "Bravo (Pacific)" → ("bravo", WEST). */
+    fun cableKey(s: String): Pair<String, Region?> {
+        var region: Region? = null
+        val w = words(s).filterIndexed { i, t -> (if (i > 0) REGIONS[t] else null)?.also { region = it } == null }.toMutableList()
+        if (w.firstOrNull() == "the") w.removeAt(0)
+        if (w.size > 1 && w.last() == "channel") w.removeAt(w.lastIndex)
+        return w.joinToString(" ") to region
+    }
+
+    /** A call sign's suffix as one form: "" for the main station (-DT, -TV, -D, none), "-DT2" for a subchannel, "-LD", "-CD". */
+    fun designation(suffix: String, digits: String): String? {
+        val n = digits.toIntOrNull() ?: 1
+        return when (suffix) {
+            "", "DT", "TV", "D" -> if (n <= 1) "" else "-DT$n"
+            "LD", "CD" -> "-$suffix$digits"
+            else -> null
+        }
+    }
+}
