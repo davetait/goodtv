@@ -141,7 +141,11 @@ class GuideRefresher(
         var epgLinks = stored.filterNot { it.guideId.startsWith(PROVIDER_PREFIX) }.associate { (it.sourceId to it.channelId) to it.guideId }
         val providerLinks = stored.filter { it.guideId.startsWith(PROVIDER_PREFIX) }
 
-        if (epgDue) guarded(GuideOrigin.EPGSHARE, now) { refreshEpgShare(lineup, now, providerLinks, epgLinks.size) }?.let { epgLinks = it }
+        // A collapse is judged against links of channels still in the lineup: hiding categories or
+        // disabling a source shrinks the lineup, not the guide.
+        val lineupKeys = lineup.mapTo(HashSet()) { it.channel.sourceId to it.channel.id }
+        val storedInLineup = epgLinks.keys.count { it in lineupKeys }
+        if (epgDue) guarded(GuideOrigin.EPGSHARE, now) { refreshEpgShare(lineup, now, providerLinks, storedInLineup) }?.let { epgLinks = it }
         // The epgshare01 stage can take minutes: a player may have started since [providerDue] was decided.
         if (providerDue && !playback.playing.value) guarded(GuideOrigin.PROVIDER, now) { refreshProvider(lineup, epgLinks, now) }
     }
