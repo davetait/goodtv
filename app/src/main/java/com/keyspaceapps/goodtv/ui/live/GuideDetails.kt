@@ -29,6 +29,9 @@ import com.keyspaceapps.goodtv.R
 import com.keyspaceapps.goodtv.data.guide.GuideProgramme
 import com.keyspaceapps.goodtv.data.guide.GuideRow
 
+/** Whole minutes until [programme] ends, rounded up: "1 min left" in its last minute. */
+internal fun minutesLeft(programme: GuideProgramme, now: Long): Int = ((programme.endMs - now + 59_999) / 60_000).toInt()
+
 /** What the details panel describes: a row's cell, or (on the channel cell) the row and what's on it now. */
 internal data class GuideFocused(val row: GuideRow, val cell: GuideCell?)
 
@@ -65,7 +68,7 @@ internal fun GuideDetails(focusedState: State<GuideFocused?>, now: Long, timeLab
                 listOfNotNull(
                     "${timeLabel(programme.startMs)} – ${timeLabel(programme.endMs)}",
                     programme.genres.firstOrNull(),
-                    if (onNow) stringResource(R.string.minutes_left, ((programme.endMs - now + 59_999) / 60_000).toInt()) else null,
+                    if (onNow) stringResource(R.string.minutes_left, minutesLeft(programme, now)) else null,
                 ).joinToString(" · ")
             } else null
             meta?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }

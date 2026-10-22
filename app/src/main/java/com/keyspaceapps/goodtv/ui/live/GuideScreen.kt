@@ -6,10 +6,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
@@ -24,6 +26,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -31,6 +35,8 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.ExperimentalTvMaterial3Api
@@ -39,6 +45,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.keyspaceapps.goodtv.R
 import com.keyspaceapps.goodtv.data.guide.GuideFilter
+import com.keyspaceapps.goodtv.data.guide.GuideProgramme
 import com.keyspaceapps.goodtv.data.guide.GuideRow
 import com.keyspaceapps.goodtv.data.guide.GuideSource
 import com.keyspaceapps.goodtv.data.sports.ChannelCandidate
@@ -47,6 +54,7 @@ import com.keyspaceapps.goodtv.domain.label
 import com.keyspaceapps.goodtv.ui.browse.EmptyStates
 import com.keyspaceapps.goodtv.ui.browse.messageRes
 import com.keyspaceapps.goodtv.ui.goodTvViewModel
+import com.keyspaceapps.goodtv.ui.home.HomeSearchBar
 import com.keyspaceapps.goodtv.ui.nav.PlayerKey
 import com.keyspaceapps.goodtv.ui.watchlist.WatchListDialog
 import java.util.Date
@@ -55,12 +63,14 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
- * The Live tab: an on-screen TV guide. Genre chips above; channels down and half-hour columns across a
- * three-hour window that pages half an hour at a time (never before now); the focused programme's
- * details below. Select plays what's on now (through the feed picker when a channel has several feeds);
- * on a later programme it only shows its details. Holding Select (or Menu) on a channel adds or removes
- * it from Favourites. Back from the player returns to the cell that was played. [source] and [clock]
- * replace the real guide and time in tests.
+ * The Live tab: an on-screen TV guide. Genre chips and a search field above; channels down and half-hour
+ * columns across a three-hour window that pages half an hour at a time (never before now); the focused
+ * programme's details below. Select plays what's on now (through the feed picker when a channel has
+ * several feeds); on a later programme it only shows its details. Holding Select (or Menu) on a channel
+ * adds or removes it from Favourites. Typing a search replaces the grid with results (Select works the
+ * same there); clearing it brings the grid back, and Down from the field returns to the cell left. Back
+ * from the player returns to the cell (or result) that was played. [source] and [clock] replace the real
+ * guide and time in tests.
  */
 @Composable
 fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock: () -> Long = System::currentTimeMillis) {
@@ -73,6 +83,14 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
     val filter by vm.filter.collectAsState()
     val expanded by vm.expanded.collectAsState()
     val now by vm.now.collectAsState()
+    val query by vm.query.collectAsState()
+    val results by vm.results.collectAsState()
+    // The grid gives way as soon as anything is typed; the results follow once typing pauses.
+    val searching = query.isNotBlank()
+    // Hoisted so a result takes focus only when coming back from the player, never while typing.
+    val resultRequested = remember { mutableStateOf(false) }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val searchField = remember { FocusRequester() }
     val context = LocalContext.current
     val format = remember(context) { DateFormat.getTimeFormat(context) }
     val timeLabel: (Long) -> String = remember(format) { { format.format(Date(it)) } }
@@ -90,6 +108,8 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
     val windowStart = board?.windowStartMs ?: vm.window
     focus.lines = lines
     focus.windowStart = windowStart
+    // A grid that appears when a search is cleared never pulls focus from the field.
+    if (searching) focus.initialDone = true
     // Back from the player (or a first open): the remembered cell, or its row at now once it has ended, else the first row's now.
     if (focus.initial == null && lines.isNotEmpty()) {
         val key = vm.focus.key
@@ -104,7 +124,7 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
     LaunchedEffect(lines) {
         val before = focus.before
         focus.before = lines
-        if (!focus.initialDone || lines.isEmpty() || picking != null || menuFor != null) return@LaunchedEffect
+        if (!focus.initialDone || lines.isEmpty() || picking != null || menuFor != null || searching) return@LaunchedEffect
         val paged = focus.pending
         val id = if (paged != null) {
             if (paged.windowStart != windowStart) return@LaunchedEffect
@@ -130,13 +150,19 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
         picking = null
     }
 
-    val actions = remember(vm) {
-        fun playRow(fromId: String, row: GuideRow) = when (row.feeds.size) {
-            0 -> Unit
-            1 -> play(row.feeds.single())
-            else -> picking = fromId to row
-        }
+    fun playRow(fromId: String, row: GuideRow) = when (row.feeds.size) {
+        0 -> Unit
+        1 -> play(row.feeds.single())
+        else -> picking = fromId to row
+    }
 
+    // Select on what's on now (or a row without a guide) plays it; a later programme only shows its details, which follow focus.
+    fun playIfOnNow(fromId: String, row: GuideRow, p: GuideProgramme?) {
+        val t = clock()
+        if (p == null || (p.startMs <= t && t < p.endMs)) playRow(fromId, row)
+    }
+
+    val actions = remember(vm) {
         GuideActions(
             onFocused = { id, row, cell ->
                 vm.focus.key = id
@@ -146,12 +172,7 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
             },
             onChannel = { line -> playRow(line.channelId, line.row) },
             onMenu = { row -> menuFor = row },
-            onCell = { line, cell ->
-                val p = cell.programme
-                val t = clock()
-                // A later programme only shows its details, which already follow focus.
-                if (p == null || (p.startMs <= t && t < p.endMs)) playRow(cell.id, line.row)
-            },
+            onCell = { line, cell -> playIfOnNow(cell.id, line.row, cell.programme) },
             onMore = { line -> vm.toggleMore(line.section) },
             onPage = { forward, line ->
                 val old = vm.window
@@ -170,21 +191,58 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().padding(horizontal = 48.dp)) {
-            GuideChips(
-                selected = filter,
-                // Up from the grid, not Compose rehoming focus after the focused cell left the board.
-                onFocus = { focus.outside = vm.focus.key?.let { isOnGrid(focus.lines, focus.windowStart, it) } ?: true },
-                // Down from the chips goes to what's on now in the first row.
-                onDown = { defaultTarget(lines, windowStart, now)?.let { focus.requesters[it] }?.let { it.requestFocus(); true } ?: false },
-                onSelect = { f ->
-                    vm.select(f)
-                    scope.launch {
-                        vm.view.first { it?.filter == f }
-                        listState.scrollToItem(0)
-                    }
-                },
-            )
+            fun focusOn(id: String?): Boolean {
+                val requester = id?.let { focus.requesters[it] } ?: return false
+                keyboard?.hide()
+                requester.requestFocus()
+                return true
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 10.dp)
+                    // Up from the grid, not Compose rehoming focus after the focused cell left the board.
+                    .onFocusChanged { if (it.hasFocus) focus.outside = vm.focus.key?.let { k -> isOnGrid(focus.lines, focus.windowStart, k) } ?: true },
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                GuideChips(
+                    selected = filter,
+                    // Down from the chips goes to the first result, or to what's on now in the first row.
+                    onDown = { focusOn(if (searching) results?.firstOrNull()?.let(::searchId) else defaultTarget(lines, windowStart, now)) },
+                    onSelect = { f ->
+                        vm.select(f)
+                        scope.launch {
+                            vm.view.first { it?.filter == f }
+                            listState.scrollToItem(0)
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                // Down from the field goes to the first result, or back to the cell focused before the search.
+                Box(
+                    Modifier.width(SearchWidth).onPreviewKeyEvent { e ->
+                        e.key == Key.DirectionDown && e.type == KeyEventType.KeyDown && focusOn(
+                            if (searching) results?.firstOrNull()?.let(::searchId)
+                            else vm.focus.key?.let { refocusTarget(lines, windowStart, now, it.substringBeforeLast('|'), it, vm.focusTimeMs) }
+                                ?: defaultTarget(lines, windowStart, now),
+                        )
+                    },
+                ) {
+                    HomeSearchBar(query = query, onQueryChange = vm::setQuery, hint = stringResource(R.string.guide_search_hint), modifier = Modifier.focusRequester(searchField).testTag("guide_search"))
+                }
+            }
+            val hits = results
             when {
+                searching -> when {
+                    hits == null -> Spacer(Modifier.weight(1f))
+                    hits.isEmpty() -> Message(stringResource(R.string.search_no_results, query.trim()), Modifier.weight(1f))
+                    else -> GuideSearchResults(
+                        hits, now, timeLabel, focus, vm.searchFocus, resultRequested,
+                        onFocused = { focused.value = focusedOf(it) },
+                        onSelect = { playIfOnNow(searchId(it), it.row, it.programme) },
+                        onUpFromFirst = { searchField.requestFocus(); true },
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                    )
+                }
                 current == null -> Message(stringResource(R.string.guide_loading), Modifier.weight(1f))
                 lines.none { it is ChannelLine || it is MoreLine } -> Message(
                     stringResource(
@@ -234,13 +292,14 @@ private val Chips = listOf(
     GuideFilter.EVENTS to R.string.guide_chip_events,
 )
 
+private val SearchWidth = 340.dp
+
 /** The genre chips; selecting one (Select, not focus) narrows the grid. */
 @OptIn(ExperimentalTvMaterial3Api::class) // FilterChip
 @Composable
-private fun GuideChips(selected: GuideFilter, onFocus: () -> Unit, onDown: () -> Boolean, onSelect: (GuideFilter) -> Unit) {
+private fun GuideChips(selected: GuideFilter, onDown: () -> Boolean, onSelect: (GuideFilter) -> Unit, modifier: Modifier = Modifier) {
     Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 10.dp)
-            .onFocusChanged { if (it.hasFocus) onFocus() }
+        modifier.horizontalScroll(rememberScrollState())
             .onPreviewKeyEvent { e -> e.key == Key.DirectionDown && e.type == KeyEventType.KeyDown && onDown() },
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {

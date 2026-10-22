@@ -8,6 +8,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -98,8 +99,9 @@ class HomeTabsTest {
         waitFor("Channel One")
         waitFocused(hasText("No guide info"))
 
+        // A row-wide cell sits under both the chips and the search field to their right.
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionUp) }
-        waitFocused(hasAnyChipLabel())
+        waitFocused(hasAnyChipLabel() or hasTestTag("guide_search"))
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionUp) }
         waitFocused(hasText("Sources"))
         composeRule.onNodeWithText("Live").assertIsSelected()

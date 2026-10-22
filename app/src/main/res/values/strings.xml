@@ -164,4 +164,9 @@
     <string name="guide_chip_kids">Kids</string>
     <string name="guide_chip_documentary">Documentary</string>
     <string name="guide_chip_events">Events</string>
+    <string name="guide_search_hint">Search shows and channels</string>
+    <string name="guide_on_now_left">On now · %1$d min left</string>
+    <string name="guide_today_at">Today %1$s</string>
+    <string name="guide_tomorrow_at">Tomorrow %1$s</string>
+    <string name="guide_day_at">%1$s %2$s</string>
 </resources>

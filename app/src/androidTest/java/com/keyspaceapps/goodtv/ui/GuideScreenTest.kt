@@ -9,6 +9,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.isRoot
@@ -17,6 +18,9 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performTextClearance
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.printToLog
 import com.keyspaceapps.goodtv.data.guide.GuideBoard
@@ -36,7 +40,9 @@ import com.keyspaceapps.goodtv.ui.nav.PlayerKey
 import com.keyspaceapps.goodtv.ui.sports.SportsFormats
 import com.keyspaceapps.goodtv.ui.theme.GoodTvTheme
 import java.time.Instant
+import java.time.ZoneOffset
 import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import kotlin.math.abs
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -102,21 +108,58 @@ class GuideScreenTest {
     private val news = GuideSection("News", null, listOf(fox, cnn, msnbc), emptyList())
     private val nbc = GuideSection("NBC", Network.NBC, listOf(station("wnbc", "NBC 4 New York")), listOf(station("wral", "NBC 5 Raleigh"), station("wxia", "NBC 11 Atlanta")))
 
-    /** Any filter gets [sections]; each window keeps only the programmes overlapping it. Favourite changes are recorded. */
-    private inner class FakeGuide(initial: List<GuideSection>) : GuideSource {
+    /**
+     * Any filter gets [sections] (Events gets [events]); each window keeps only the programmes overlapping it.
+     * A search answers from [hits] by its trimmed, lower-case query. Favourite changes and event refreshes are recorded.
+     */
+    private inner class FakeGuide(
+        initial: List<GuideSection>,
+        private val events: List<GuideSection> = initial,
+        private val hits: Map<String, List<GuideSearchHit>> = emptyMap(),
+    ) : GuideSource {
         val sections = MutableStateFlow(initial)
         val favourites = mutableListOf<Pair<String, Boolean>>()
         val windows = MutableStateFlow<List<Long>>(emptyList())
+        val queries = mutableListOf<String>()
+        @Volatile var eventRefreshes = 0
         override fun board(filter: GuideFilter, windowStartMs: Long): Flow<GuideBoard> {
             windows.value = windows.value + windowStartMs
             val end = windowStartMs + 3 * 3_600_000L
             fun clip(r: GuideRow) = r.copy(programmes = r.programmes.filter { it.endMs > windowStartMs && it.startMs < end })
-            return sections.map { all -> GuideBoard(all.map { s -> s.copy(rows = s.rows.map(::clip), more = s.more.map(::clip)) }, windowStartMs) }
+            return sections.map { all ->
+                val shown = if (filter == GuideFilter.EVENTS) events else all
+                GuideBoard(shown.map { s -> s.copy(rows = s.rows.map(::clip), more = s.more.map(::clip)) }, windowStartMs)
+            }
         }
-        override fun search(query: String): Flow<List<GuideSearchHit>> = flowOf(emptyList())
+        override fun search(query: String): Flow<List<GuideSearchHit>> {
+            queries += query
+            return flowOf(hits[query.trim().lowercase()].orEmpty())
+        }
         override suspend fun setFavourite(rowKey: String, favourite: Boolean) { favourites += rowKey to favourite }
-        override suspend fun refreshEventSlots() = Unit
+        override suspend fun refreshEventSlots() { eventRefreshes++ }
     }
+
+    // Search hits carry rows without programmes, as the repository's do.
+    private fun hit(row: GuideRow, programme: GuideProgramme?) = GuideSearchHit(row.copy(programmes = emptyList()), programme)
+    private val dayMs = 24 * 3_600_000L
+    private val specialReport = fox.programmes[0]
+    private val hannityTonight = fox.programmes[3]
+    private val hannityTomorrow = p("fn", at(21) + dayMs, at(22) + dayMs, "Hannity")
+    private val searches = mapOf(
+        // In the repository's order: on now, then by start, then channels and loops.
+        "fox" to listOf(hit(fox, specialReport), hit(fox, hannityTonight), hit(fox, hannityTomorrow), hit(fox, null), hit(rock, null)),
+        "special" to listOf(hit(fox, specialReport)),
+        "hannity" to listOf(hit(fox, hannityTonight), hit(fox, hannityTomorrow)),
+        "msnbc" to listOf(hit(msnbc, null)),
+    )
+
+    private fun searchFor(text: String) {
+        composeRule.onNodeWithTag("guide_search").requestFocus()
+        keys("C")
+        composeRule.waitUntil(5_000) { runCatching { composeRule.onNode(hasSetTextAction()).assertIsFocused() }.isSuccess }
+        composeRule.onNode(hasSetTextAction()).performTextInput(text)
+    }
+    private fun top(text: String) = composeRule.onNode(hasText(text)).fetchSemanticsNode().positionInRoot.y
 
     private fun show(guide: FakeGuide = FakeGuide(listOf(news, nbc))): FakeGuide {
         composeRule.setContent { GoodTvTheme { GuideScreen(onPlay = { played = it }, source = guide, clock = { now }) } }
@@ -308,6 +351,127 @@ class GuideScreenTest {
         waitFocused("The Situation Room")
     }
 
+    @Test fun searchShowsOnNowFirstThenLater() {
+        val guide = show(FakeGuide(listOf(news, nbc), hits = searches))
+        waitFocused("Special Report")
+        searchFor("Fox")
+        waitFor("On now · 50 min left")
+        // The results replace the grid.
+        assertEquals(0, composeRule.onAllNodes(hasText("Network · NBC")).fetchSemanticsNodes().size)
+        val today = "Today ${time(21, 0)}"
+        val tomorrow = "Tomorrow ${time(21, 0)}"
+        composeRule.onNodeWithText(today).assertIsDisplayed()
+        composeRule.onNodeWithText(tomorrow).assertIsDisplayed()
+        composeRule.onNodeWithText("30 Rock · all day").assertIsDisplayed()
+        assertTrue(top("On now · 50 min left") < top(today))
+        assertTrue(top(today) < top(tomorrow))
+        assertTrue(top(tomorrow) < top("30 Rock · all day"))
+        // Typing never takes focus from the field; one query once typing settles.
+        composeRule.onNode(hasSetTextAction()).assertIsFocused()
+        assertEquals(listOf("Fox"), guide.queries)
+    }
+
+    @Test fun searchHitOnNowPlays() {
+        show(FakeGuide(listOf(news, nbc), hits = searches))
+        waitFocused("Special Report")
+        searchFor("special")
+        waitFor("On now · 50 min left")
+        keys("D")
+        waitFocused("Special Report")
+        // The details panel follows focus here too.
+        waitFor("Special Report · Fox News")
+        keys("C")
+        composeRule.waitUntil(5_000) { played != null }
+        assertEquals(PlayerKey(7, PlayerKey.KIND_LIVE, "fx", null, foxFeed.channel.label), played)
+    }
+
+    /** Up from the top result returns to the field, never to a chip (where Select would change the chip). */
+    @Test fun upFromTheFirstResultGoesToTheField() {
+        show(FakeGuide(listOf(news, nbc), hits = searches))
+        waitFocused("Special Report")
+        searchFor("fox")
+        waitFor("On now · 50 min left")
+        keys("D")
+        waitFocused("On now · 50 min left")
+        keys("U")
+        composeRule.waitUntil(5_000) { runCatching { composeRule.onNodeWithTag("guide_search").assertIsFocused() }.isSuccess }
+    }
+
+    @Test fun searchChannelHitPlays() {
+        show(FakeGuide(listOf(news, nbc), hits = searches))
+        waitFocused("Special Report")
+        searchFor("msnbc")
+        composeRule.waitUntil(10_000) { composeRule.onAllNodes(hasText("Network · NBC")).fetchSemanticsNodes().isEmpty() }
+        // The grid's gone, so this is the result.
+        waitFor("MSNBC")
+        keys("D")
+        // The details panel names the channel too; the focused one is the result.
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasText("MSNBC") and isFocused()).fetchSemanticsNodes().size == 1 }
+        keys("C")
+        composeRule.waitUntil(5_000) { played != null }
+        assertEquals("ms", played!!.refId)
+    }
+
+    @Test fun searchHitLaterShowsDetails() {
+        show(FakeGuide(listOf(news, nbc), hits = searches))
+        waitFocused("Special Report")
+        searchFor("hannity")
+        waitFor("Today ${time(21, 0)}")
+        keys("D")
+        waitFocused("Today ${time(21, 0)}")
+        keys("C")
+        composeRule.waitForIdle()
+        assertNull(played)
+        waitFor("Hannity · Fox News")
+        composeRule.onNodeWithText("${time(21, 0)} – ${time(22, 0)}", substring = true).assertIsDisplayed()
+    }
+
+    @Test fun clearingSearchRestoresTheGrid() {
+        show(FakeGuide(listOf(news, nbc), hits = searches))
+        waitFocused("Special Report")
+        keys("R")
+        waitFocused("The Ingraham Angle")
+        searchFor("hannity")
+        waitFor("Today ${time(21, 0)}")
+        assertEquals(0, composeRule.onAllNodes(hasText("Network · NBC")).fetchSemanticsNodes().size)
+        composeRule.onNode(hasSetTextAction()).performTextClearance()
+        waitFor("Network · NBC")
+        // Back on the grid, focus returns to the cell it left.
+        keys("D")
+        waitFocused("The Ingraham Angle")
+    }
+
+    /** An event slot's cell starts at the time in its name and lasts three hours; one without a time spans the window. */
+    @Test fun eventsChipShowsSlotsAtTheirTime() {
+        val utc = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneOffset.UTC)
+        fun slot(key: String, name: String, feedName: String) =
+            GuideRow(key, name, null, LiveGenre.EVENTS, listOf(feed(key, feedName, "PPV EVENTS")), emptyList(), null, false)
+        val bills = slot("event bills", "NFL Bills vs Jets", "PPV 01: NFL Bills vs Jets ${utc.format(Instant.ofEpochMilli(at(19)))}")
+        val boxing = slot("event boxing", "Boxing Undercard", "PPV 02: Boxing Undercard ${utc.format(Instant.ofEpochMilli(at(17)))}")
+        val ufc = slot("event ufc", "UFC Fight Night", "PPV 03: UFC FIGHT NIGHT")
+        val guide = show(FakeGuide(listOf(news), events = listOf(GuideSection("Events", null, listOf(bills, boxing, ufc), emptyList()))))
+        waitFocused("Special Report")
+        composeRule.onNodeWithText("Events").requestFocus()
+        keys("C")
+        waitFor("UFC Fight Night")
+        composeRule.waitUntil(5_000) { guide.eventRefreshes == 1 }
+        assertEquals(0, composeRule.onAllNodes(hasText("No guide info")).fetchSemanticsNodes().size)
+
+        val x0 = composeRule.onNodeWithTag("guide_time_0").fetchSemanticsNode().positionInRoot.x
+        val column = composeRule.onNodeWithTag("guide_time_1").fetchSemanticsNode().positionInRoot.x - x0
+        // The slot's cell is the one right of its channel cell.
+        fun cell(name: String) = composeRule.onAllNodes(hasText(name)).fetchSemanticsNodes().maxBy { it.positionInRoot.x }
+        fun near(what: String, actual: Float, expected: Float) = assertTrue("$what $actual vs $expected", abs(actual - expected) < 0.1f * column)
+        // 19:00 is the third column; the window ends at 21:00.
+        near("bills left", cell("NFL Bills vs Jets").positionInRoot.x, x0 + 2 * column)
+        near("bills width", cell("NFL Bills vs Jets").size.width.toFloat(), 4 * column)
+        // 17:00 for three hours: from the window's start to 20:00.
+        near("boxing left", cell("Boxing Undercard").positionInRoot.x, x0)
+        near("boxing width", cell("Boxing Undercard").size.width.toFloat(), 4 * column)
+        near("ufc left", cell("UFC Fight Night").positionInRoot.x, x0)
+        near("ufc width", cell("UFC Fight Night").size.width.toFloat(), 6 * column)
+    }
+
     @Test fun chipChangeResetsTheWindowAndDownGoesToNow() {
         val guide = show()
         waitFocused("Special Report")
@@ -316,6 +480,8 @@ class GuideScreenTest {
         waitFocused("Hannity")
         keys("U")
         composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasText("Hannity") and isFocused()).fetchSemanticsNodes().isEmpty() }
+        // Up from the right of the grid reaches the search field; the chips are to its left.
+        composeRule.onNodeWithText("All").requestFocus()
         keys("C")
         // The chip keeps focus (flicking through chips), the window is back at now.
         firstHeader(time(18, 0))
