@@ -109,4 +109,12 @@ class PeopleDaoTest {
         assertNull(cache.titlePeople(TmdbKind.MOVIE, 603))
         assertEquals(emptyList<TmdbPerson>() to 11L, cache.titlePeople(TmdbKind.TV, 604))
     }
+
+    @Test
+    fun undecodableTitlePeopleAreACacheMiss() = runBlocking {
+        db.people().upsertTitlePeople(TmdbTitlePeopleEntity(TmdbKind.MOVIE.name, 603, """[{"id":"not a number"}]""", 1))
+        assertNull(cache.titlePeople(TmdbKind.MOVIE, 603))
+        db.people().upsertTitlePeople(TmdbTitlePeopleEntity(TmdbKind.MOVIE.name, 604, "not json", 1))
+        assertNull(cache.titlePeople(TmdbKind.MOVIE, 604))
+    }
 }

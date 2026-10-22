@@ -15,8 +15,16 @@ class RoomPeopleCache(private val dao: PeopleDao) : PeopleCache {
     private val json = Json { ignoreUnknownKeys = true }
     private val serializer = ListSerializer(TmdbPerson.serializer())
 
-    override suspend fun titlePeople(kind: TmdbKind, tmdbId: Long): Pair<List<TmdbPerson>, Long>? =
-        dao.titlePeople(kind.name, tmdbId)?.let { json.decodeFromString(serializer, it.people) to it.fetchedAt }
+    /** A row that no longer decodes (an older format) is a miss, so it is fetched again. */
+    override suspend fun titlePeople(kind: TmdbKind, tmdbId: Long): Pair<List<TmdbPerson>, Long>? {
+        val row = dao.titlePeople(kind.name, tmdbId) ?: return null
+        val people = try {
+            json.decodeFromString(serializer, row.people)
+        } catch (_: IllegalArgumentException) { // SerializationException is one
+            return null
+        }
+        return people to row.fetchedAt
+    }
 
     override suspend fun putTitlePeople(kind: TmdbKind, tmdbId: Long, people: List<TmdbPerson>, fetchedAt: Long) =
         dao.upsertTitlePeople(TmdbTitlePeopleEntity(kind.name, tmdbId, json.encodeToString(serializer, people), fetchedAt))
