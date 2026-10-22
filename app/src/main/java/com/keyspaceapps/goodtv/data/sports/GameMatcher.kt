@@ -25,7 +25,8 @@ object GameMatcher {
     const val WINDOW_HOURS = 30L
 
     private val LEAGUE_WORDS = League.entries.map { it.label.lowercase() }.toSet()
-    private val CLOSED = listOf("ended ", "end ", "final ", "no event streaming")
+    /** Name starts (normalised) of a slot that is over or empty; the guide hides these too. */
+    internal val CLOSED = listOf("ended ", "end ", "final ", "no event streaming")
     /** Leagues outside the six whose teams share cities with them (Toronto, Montreal, …): a channel naming one is theirs. */
     private val OTHER_LEAGUES = setOf("cfl", "mls", "fc", "cf", "ahl", "echl", "ohl", "whl", "qmjhl", "chl", "ncaa", "ncaaf", "ncaab", "nwsl", "ufl", "xfl", "nll", "khl")
 

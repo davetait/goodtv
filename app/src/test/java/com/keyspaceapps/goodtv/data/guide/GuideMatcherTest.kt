@@ -50,6 +50,13 @@ class GuideMatcherTest {
         assertNull(guideOf("US: CBS 3 (WWAY-DT2) WILMINGTON HD", l = onlyMain))
     }
 
+    @Test fun stationsNeverFallThroughToCable() {
+        val cbsNamed = listOf(XmltvChannel("CBS.KYW.us2", listOf("CBS KYW"), null))
+        assertNull(guideOf("US: CBS (KYW)", l = emptyList(), c = cbsNamed))
+        // A network's national feed has no call sign, so the cable file may list it.
+        assertEquals("CW.us2", guideOf("US: CW HD"))
+    }
+
     @Test fun newsAndAppStreamsAreNotTheStation() {
         assertNull(guideOf("PRIME: CBS OMAHA NEWS (KMTV) ᴿᴬᵂ", "US| PRIME ᴿᴬᵂ ⁶⁰ᶠᵖˢ"))
         assertNull(guideOf("RK: WABC ABC7 NEW YORK ᴿᴬᵂ", "US| ROKU ᴿᴬᵂ ⁶⁰ᶠᵖˢ"))
@@ -87,12 +94,27 @@ class GuideMatcherTest {
         val localCount = matched.count { it.value.endsWith(".us_locals1") }
         val cableCount = matched.count { it.value.endsWith(".us2") }
         println("guide matching: $localCount locals, $cableCount cable in $ms ms")
-        // The plan's 1,300 came from a looser prototype that also took network words from the category; measured 1,273.
+        // Measured 1,273: below the plan's 1,300 because news streams and app (Prime/Roku/Tubi) copies of stations never get the station's guide.
         assertTrue("locals $localCount", localCount >= 1_250)
         assertTrue("cable $cableCount", cableCount >= 650)
         assertEquals(0, matched.keys.count { it.channel.name.startsWith("24/7:") })
+        // A station guide only ever comes from a call sign the name itself carries.
+        val callSignMissing = matched.filter { (c, guide) -> guide.endsWith(".us_locals1") && guide.substringBefore('-').substringBefore('.') !in c.channel.name }
+        assertEquals(emptyMap<ChannelCandidate, String>(), callSignMissing)
         assertFalse(matched.keys.any { ChannelIdentity.of(it.channel.name, it.categoryName).let { i -> i.hidden || i.genre == LiveGenre.EVENTS } })
         assertTrue("took $ms ms", ms < 2_000)
+    }
+
+    @Test fun oneIdentityPerRow() {
+        // Whatever the name style, the channels of one row agree on what the row is. Genre is left out: it
+        // also comes from the category, so A&E under Entertainment and under AT&T may differ.
+        val visible = lineup.map { ChannelIdentity.of(it.channel.name, it.categoryName) }.filter { !it.hidden }
+        val conflicts = visible.groupBy { it.rowKey }.filterValues { row ->
+            row.map { listOf(it.network, it.callSign, it.region, it.genre == LiveGenre.EVENTS) }.distinct().size > 1 ||
+                row.mapNotNull { it.market }.distinct().size > 1
+        }.keys
+        // The provider files one Philadelphia station under "NBC (WCAU) LOS ANGELES, CA".
+        assertEquals(setOf("station:NBC:WCAU"), conflicts)
     }
 
     @Test fun placeholderLogosAreTheWidelySharedOnes() {
@@ -101,10 +123,12 @@ class GuideMatcherTest {
         val placeholders = PlaceholderLogos.of(channels)
         assertEquals(1_600, counts["d7ffb154"])
         assertTrue("d7ffb154" in placeholders)
+        // The Starz family's logo, on its 16 channels, is a real one.
+        assertEquals(16, counts["721a1773"])
+        assertFalse("721a1773" in placeholders)
         val unique = counts.entries.first { it.value == 1 }.key
         assertFalse(unique in placeholders)
-        // Copies of one channel share its real logo.
-        val copies = listOf("US: FOX NEWS HD", "US: FOX NEWS UHD", "AT&T: FOX NEWS ᴿᴬᵂ").mapIndexed { i, n -> LiveChannel(1, "$i", null, n, "fox", null) }
-        assertTrue(PlaceholderLogos.of(copies).isEmpty())
+        val generic = LiveChannel(1, "g", null, "US: SOMETHING", "http://dtil.tmsimg.com/sources/generic/generic_sources_h3.png", null)
+        assertEquals(setOf(generic.logoUrl), PlaceholderLogos.of(listOf(generic)))
     }
 }

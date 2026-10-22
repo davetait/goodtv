@@ -8,7 +8,7 @@ import com.keyspaceapps.goodtv.data.sports.ChannelCandidate
  * A local station matches by its [ChannelIdentity.callSign] (`WNBC-DT.us_locals1` is WNBC; a subchannel
  * needs its own id, `WWAY-DT2`). Anything else matches a cable channel whose name or id, without quality
  * and region words, is the channel's name, within the same region (East and an unmarked feed are one).
- * A name that fits several guide channels matches none: no guide is better than the wrong show. Headings,
+ * A station (call sign and network) with no locals id gets no guide. A name that fits several guide channels matches none: no guide is better than the wrong show. Headings,
  * event slots and 24/7 loops never match. Pure and fast enough (~12,600 channels well under a second) to
  * run over the whole lineup on a background dispatcher.
  */
@@ -27,8 +27,10 @@ object GuideMatcher {
         for (c in channels) {
             val identity = ChannelIdentity.of(c.channel.name, c.categoryName)
             if (identity.hidden || identity.loopShow != null || identity.genre == LiveGenre.EVENTS) continue
-            val guide = identity.callSign?.let { stations[it] } ?: cableGuide(identity.displayName, cableIds) ?: continue
-            out[c.channel.sourceId to c.channel.id] = guide
+            // A station has its own guide or none; its name never stands in for a cable channel's.
+            val guide = if (identity.callSign != null && identity.network != null) stations[identity.callSign]
+            else identity.callSign?.let { stations[it] } ?: cableGuide(identity.displayName, cableIds)
+            out[c.channel.sourceId to c.channel.id] = guide ?: continue
         }
         return out
     }

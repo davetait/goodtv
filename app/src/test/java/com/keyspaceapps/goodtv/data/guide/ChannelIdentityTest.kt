@@ -15,6 +15,8 @@ class ChannelIdentityTest {
         assertTrue(id("- NO EVENT STREAMING - | 8K EXCLUSIVE | US: MLS PPV 1", "US| MLS PPV").hidden)
         assertTrue(id("ENDED | DET - PISTONS VS BOS - CELTICS | Tue 20 Oct 14:00 EDT (US) | 8K EXCLUSIVE | US: NBA PASS PPV 1", "US| NBA PASS PPV ⁸ᴷ").hidden)
         assertTrue(id("LIVE EVENT 03 - NO EVENT", "US| PPV EVENT").hidden)
+        assertTrue(id("End | Paolini vs. Kalinina | all | 20-10-2026 | 00:00 (GMT) | 8K EXCLUSIVE | US: SOCCER PPV 2", "US| SOCCER PPV").hidden)
+        assertTrue(id("Final | Rangers 3 - 2 Maple Leafs | 8K EXCLUSIVE | US: NHL PPV 4", "US| NHL PPV").hidden)
         assertFalse(id("US: NBC 4 NEW YORK (WNBC)", "US| NBC ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ").hidden)
         assertFalse(id("LIVE | SAS - SPURS VS OKC - THUNDER | Tue 20 Oct 20:30 EDT (US) | 8K EXCLUSIVE | US: NBA PASS PPV 3", "US| NBA PASS PPV ⁸ᴷ").hidden)
     }
@@ -28,6 +30,48 @@ class ChannelIdentityTest {
         assertEquals(Region.WEST, id("US: BRAVO WEST HD").region)
         // A loop of a show is not the cinema channel of the same name.
         assertNotEquals(id("24/7: 30 ROCK", "US| 24/7 COMEDY ᴿᴬᵂ ⁶⁰ᶠᵖˢ").rowKey, id("US: 30 ROCK 4K").rowKey)
+    }
+
+    @Test fun stationCopiesShareOneRow() {
+        val wcbs = listOf(
+            "US: CBS 2 WCBS (NEW YORK) HD", "US: CBS 2 (WCBS) NEW YORK HD", "US: CBS (WCBS)",
+            "TV: A3 NEW YORK 02 WCBS CBS ᴿᴬᵂ", "TV: A3 NEW YORK 02 WCBS CBS NEW YORK ᶜᶦᵗʸ ᴿᴬᵂ",
+        ).map { id(it).rowKey }
+        assertEquals(1, wcbs.distinct().size)
+        assertNotEquals(id("US: NBC 4 NEW YORK (WNBC)").rowKey, id("US: TELEMUNDO NBC (WNJU) ᴴᴰ").rowKey)
+        assertNotEquals(id("US: CBS 3 (WWAY-DT2) WILMINGTON HD").rowKey, id("US: ABC 3 (WWAY) WILMINGTON HD").rowKey)
+        val east = id("US: CBS (WCBS) (EAST)")
+        val west = id("US: CBS (WCBS) WEST HD")
+        assertEquals(Region.EAST, east.region)
+        assertEquals(Region.WEST, west.region)
+        assertNotEquals(east.rowKey, west.rowKey)
+        assertNotEquals(east.rowKey, id("US: CBS (WCBS)").rowKey)
+        // A city, not a feed.
+        assertNull(id("US: NBC (WVIT) WEST HARTFORD, CT (D) ᴿᴬᵂ").region)
+        assertEquals(id("US: NBC (WVIT) WEST HARTFORD, CT (D) ᴿᴬᵂ").rowKey, id("US: NBC 30 (WVIT) HARTFORD (H) ᴿᴬᵂ").rowKey)
+    }
+
+    @Test fun appCopiesOfStationsAreTheirOwnRow() {
+        val prime = id("PRIME: FOX 7 AUSTIN ᴿᴬᵂ", "US| PRIME ᴿᴬᵂ ⁶⁰ᶠᵖˢ")
+        val local = id("US: FOX 7 HD [AUSTIN]", "US| FOX ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ")
+        assertEquals(Network.FOX, prime.network)
+        assertEquals(LiveGenre.NETWORK, prime.genre)
+        assertEquals("FOX 7 AUSTIN (Prime)", prime.displayName)
+        assertNotEquals(local.rowKey, prime.rowKey)
+        assertNotEquals(prime.rowKey, id("RK: FOX 7 AUSTIN ᴿᴬᵂ", "US| ROKU ᴿᴬᵂ ⁶⁰ᶠᵖˢ").rowKey)
+        val wabc = id("RK: WABC ABC7 NEW YORK ᴿᴬᵂ", "US| ROKU ᴿᴬᵂ ⁶⁰ᶠᵖˢ")
+        assertEquals(Network.ABC, wabc.network)
+        assertEquals("New York", wabc.market)
+        assertNull(wabc.callSign)
+        assertNotEquals(id("TV: A3 NEW YORK 07 WABC ABC ᴿᴬᵂ").rowKey, wabc.rowKey)
+        assertEquals(Network.ABC, id("PRIME: WSB ATLANTA (ABC) ᴿᴬᵂ").network)
+        // Not a station: the app copy merges with the others.
+        assertEquals(id("PRIME: HBO LATINO ᴿᴬᵂ").rowKey, id("TV: HBO LATINO ᴿᴬᵂ").rowKey)
+    }
+
+    @Test fun eventSlotsAreNotTheChannelOfTheSameName() {
+        assertNotEquals(id("NBA: CHICAGO BULLS ᴴᴰ", "US| NBA TEAM PPV").rowKey, id("AT&T: CHICAGO BULLS ᴿᴬᵂ", "US| AT&T ᴿᴬᵂ ⁶⁰ᶠᵖˢ").rowKey)
+        assertEquals(id("NBA: CHICAGO BULLS ᴴᴰ", "US| NBA TEAM PPV").rowKey, id("NBA: CHICAGO BULLS SD", "US| NBA TEAM PPV").rowKey)
     }
 
     @Test fun regionsAndCallSignsStayApart() {
@@ -89,6 +133,8 @@ class ChannelIdentityTest {
         assertEquals(LiveGenre.SPORTS, id("US: DAZN COMBAT", "US| SPORT ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ").genre)
         assertEquals(LiveGenre.ENTERTAINMENT, id("US: A&E HD", "US| ENTERTAINMENT ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ").genre)
         assertEquals(LiveGenre.ENTERTAINMENT, id("24/7: CSI", "US| 24/7 CRIME ᴿᴬᵂ ⁶⁰ᶠᵖˢ").genre)
+        assertEquals(LiveGenre.MOVIES, id("US: CINEMANIA ACCION", "US| CINEMANIA HOLLYWOOD ᴿᴬᵂ ⁶⁰ᶠᵖˢ").genre)
+        assertEquals(LiveGenre.ENTERTAINMENT, id("US: BLACK MIRROR 4K", "US| CINEMA TV SHOWS ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ").genre)
         // A local station's own news stream is news, not the station.
         val omaha = id("PRIME: CBS OMAHA NEWS (KMTV) ᴿᴬᵂ", "US| PRIME ᴿᴬᵂ ⁶⁰ᶠᵖˢ")
         assertEquals(LiveGenre.NEWS, omaha.genre)

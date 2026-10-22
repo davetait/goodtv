@@ -18,9 +18,11 @@ val DEFAULT_MARKETS: List<String> = listOf("New York", "Los Angeles", "Chicago",
  *
  * [rowKey] comes from the name alone (never ids), so favourites survive re-syncs. It merges copies that
  * differ only in tag, quality or backup markers ("US: A&E HD", "TV: A&E ᴿᴬᵂ"); East and West feeds and
- * different call signs stay apart. [callSign] is set only when the name carries one in parentheses or
- * next to a network word, so "Doctor WHO" is not station WHO; it keeps a subchannel's designation
- * ("WWAY-DT2"). A station's own news stream and app streams (Prime, Roku, Tubi) are not the station.
+ * different call signs stay apart. A station's copies (call sign plus network) are one row whatever
+ * the name says: network, call sign with any subchannel ("WWAY-DT2") and feed region. [callSign] is set
+ * only when the name carries one in parentheses or next to a network word, so "Doctor WHO" is not
+ * station WHO. A station's own news stream is not the station; an app's copy of one (Prime, Roku,
+ * Tubi) keeps its network and market but is its own row, "FOX 7 AUSTIN (Prime)", with no call sign.
  */
 data class ChannelIdentity(
     val rowKey: String,
@@ -47,7 +49,7 @@ data class ChannelIdentity(
         /** Words shaped like call signs that aren't any. */
         private val NOT_CALL_SIGNS = setOf("WEST", "KIDS", "WACO")
         /** Free streaming apps: their "ABC7 New York" is a news stream, not the broadcast. */
-        private val APP_TAGS = setOf("PRIME", "RK", "TUBI")
+        private val APP_TAGS = mapOf("PRIME" to "Prime", "RK" to "Roku", "TUBI" to "Tubi")
         private val NETWORK_WORDS = Network.entries.associateBy { it.name.lowercase() }
         private val MARKET_WORDS = DEFAULT_MARKETS.map { it.lowercase() to it } + listOf("fort worth" to "Dallas", "dfw" to "Dallas")
         private val SMALL_WORDS = setOf("a", "an", "and", "at", "for", "in", "of", "on", "or", "the", "to", "vs")
@@ -73,12 +75,13 @@ data class ChannelIdentity(
         )
         private val CATEGORY_GENRES = mapOf(
             "comedy" to LiveGenre.COMEDY, "movies" to LiveGenre.MOVIES, "sport" to LiveGenre.SPORTS, "sports" to LiveGenre.SPORTS,
-            "replay" to LiveGenre.SPORTS, "kids" to LiveGenre.KIDS, "cartoon" to LiveGenre.KIDS,
+            "replay" to LiveGenre.SPORTS, "cinemania" to LiveGenre.MOVIES, "kids" to LiveGenre.KIDS, "cartoon" to LiveGenre.KIDS,
         )
 
         fun of(name: String, categoryName: String): ChannelIdentity {
             val plain = GameMatcher.normalize(name)
-            val hidden = HEADING.containsMatchIn(name) || plain.startsWith("ended ") || "no event streaming" in plain || plain.endsWith(" no event")
+            val hidden = HEADING.containsMatchIn(name) || GameMatcher.CLOSED.any { plain.startsWith(it) } ||
+                "no event streaming" in plain || plain.endsWith(" no event")
             val tag = TAG.find(name)
             var body = if (tag != null) name.substring(tag.range.last + 1) else name
             val tagName = tag?.groupValues?.get(1)
@@ -91,17 +94,26 @@ data class ChannelIdentity(
 
             val words = ChannelNames.words(body)
             val news = words.indices.any { words[it] == "news" && words.getOrNull(it - 1) != "newport" }
-            val notStation = hidden || loop || event || news || tagName in APP_TAGS
+            val notStation = hidden || loop || event || news
+            val app = APP_TAGS[tagName]
             // "abc7" is the network word and a channel number.
             val parts = words.flatMap { w -> LETTERS_OR_DIGITS.findAll(w).map { it.value }.toList() }
             val netAt = parts.indexOfFirst { it in NETWORK_WORDS }
-            val callSign = if (notStation) null else callSignOf(body, hasNetworkWord = netAt >= 0)
+            val found = if (notStation) null else callSignOf(body, hasNetworkWord = netAt >= 0)
             val isStation = !notStation && netAt >= 0 && (
-                callSign != null || parts.getOrNull(netAt + 1)?.all(Char::isDigit) == true ||
+                found != null || parts.getOrNull(netAt + 1)?.all(Char::isDigit) == true ||
                     parts.all { it == parts[netAt] || it in ChannelNames.REGIONS } // a national feed: "ABC (EAST)"
                 )
             val network = if (isStation) NETWORK_WORDS.getValue(parts[netAt]) else null
-            val region = if (callSign == null && !loop) words.drop(1).firstNotNullOfOrNull { ChannelNames.REGIONS[it] } else null
+            val region = when {
+                loop -> null
+                // "WEST HARTFORD" is a city: a station's feed says "(EAST)" or ends with it.
+                found != null -> ChannelNames.REGIONS[words.lastOrNull()]
+                    ?: PARENS.findAll(body).firstNotNullOfOrNull { ChannelNames.REGIONS[GameMatcher.normalize(it.value)] }
+                else -> words.drop(1).firstNotNullOfOrNull { ChannelNames.REGIONS[it] }
+            }
+            // An app's copy of a station is its own channel and never gets the broadcast's guide.
+            val callSign = if (app == null) found else null
             // "TV: DAVENPORT, IA KWQC NBC 6 A3 HD LOS ANGELES": the station's city is the one before the comma.
             val city = " " + ChannelNames.words(body.substringBefore(',')).joinToString(" ") + " "
             val market = if (network == null) null else MARKET_WORDS.firstOrNull { " ${it.first} " in city }?.second
@@ -117,10 +129,19 @@ data class ChannelIdentity(
             // DisplayTitle drops most tags but not "AT&T:".
             val displayName = DisplayTitle.parse(ChannelNames.MARKER.replace(name, "").replace(SPACES, " ").trim(), live = true).title
                 .let { t -> tag?.let { t.removePrefix(it.value.trim()) } ?: t }.trimStart(':', ' ')
-            val key = words.joinToString(" ").ifEmpty { plain.ifEmpty { name.trim() } }
+            val nameKey = words.joinToString(" ").ifEmpty { plain.ifEmpty { name.trim() } }
+            // Every copy of a station is one row, however the name is written: "CBS 2 WCBS NEW YORK", "A3 NEW YORK 02 WCBS CBS".
+            val key = when {
+                loop -> "24/7 $nameKey"
+                // "NBA: CHICAGO BULLS" in a PPV category is an event slot, not the AT&T channel of that name.
+                event -> "event $nameKey"
+                network != null && found != null -> listOfNotNull("station", network.name, found, region?.name).joinToString(":")
+                else -> nameKey
+            }
+            val appCopy = app?.takeIf { network != null }
             return ChannelIdentity(
-                rowKey = if (loop) "24/7 $key" else key,
-                displayName = displayName,
+                rowKey = if (appCopy != null) "${appCopy.lowercase()} $key" else key,
+                displayName = if (appCopy != null) "$displayName ($appCopy)" else displayName,
                 genre = genre,
                 network = network,
                 callSign = callSign,

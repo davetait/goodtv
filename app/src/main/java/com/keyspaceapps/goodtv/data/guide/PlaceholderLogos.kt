@@ -3,20 +3,19 @@ package com.keyspaceapps.goodtv.data.guide
 import com.keyspaceapps.goodtv.domain.LiveChannel
 
 /**
- * Provider logos that are really placeholders: one image (a category's or an app's badge) shared by many
- * different channels. Copies of one channel sharing its own logo don't count, since they're one guide row.
+ * Provider logos that are really placeholders: one image (a category's or an app's badge) used by many
+ * channels, or a "generic" image.
  */
 object PlaceholderLogos {
-    /** Different guide rows sharing one image before it counts as a placeholder. */
-    const val MIN_ROWS = 6
+    /** Channels sharing one image before it counts as a placeholder. */
+    const val MIN_CHANNELS = 20
 
     fun of(channels: List<LiveChannel>): Set<String> {
-        val rows = HashMap<String, MutableSet<String>>()
+        val counts = HashMap<String, Int>()
         for (c in channels) {
             val logo = c.logoUrl?.takeIf { it.isNotBlank() } ?: continue
-            val keys = rows.getOrPut(logo) { HashSet() }
-            if (keys.size < MIN_ROWS) keys += ChannelIdentity.of(c.name, "").rowKey
+            counts[logo] = (counts[logo] ?: 0) + 1
         }
-        return rows.filterValues { it.size >= MIN_ROWS }.keys
+        return counts.filter { (logo, n) -> n >= MIN_CHANNELS || logo.contains("generic", ignoreCase = true) }.keys
     }
 }
