@@ -10,6 +10,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.isRoot
@@ -46,8 +47,8 @@ import java.time.format.DateTimeFormatter
 import kotlin.math.abs
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -110,6 +111,8 @@ class GuideScreenTest {
 
     /**
      * Any filter gets [sections] (Events gets [events]); each window keeps only the programmes overlapping it.
+     * A window in [pending] has its channels but no programmes yet, like the repository's first board; [downloading]
+     * stands for the guide refresher at work.
      * A search answers from [hits] by its trimmed, lower-case query. Favourite changes and event refreshes are recorded.
      */
     private inner class FakeGuide(
@@ -118,6 +121,8 @@ class GuideScreenTest {
         private val hits: Map<String, List<GuideSearchHit>> = emptyMap(),
     ) : GuideSource {
         val sections = MutableStateFlow(initial)
+        val pending = MutableStateFlow(emptySet<Long>())
+        val downloading = MutableStateFlow(false)
         val favourites = mutableListOf<Pair<String, Boolean>>()
         val windows = MutableStateFlow<List<Long>>(emptyList())
         val queries = mutableListOf<String>()
@@ -126,9 +131,11 @@ class GuideScreenTest {
             windows.value = windows.value + windowStartMs
             val end = windowStartMs + 3 * 3_600_000L
             fun clip(r: GuideRow) = r.copy(programmes = r.programmes.filter { it.endMs > windowStartMs && it.startMs < end })
-            return sections.map { all ->
+            return combine(sections, pending, downloading) { all, waiting, working ->
                 val shown = if (filter == GuideFilter.EVENTS) events else all
-                GuideBoard(shown.map { s -> s.copy(rows = s.rows.map(::clip), more = s.more.map(::clip)) }, windowStartMs)
+                val loaded = windowStartMs !in waiting
+                fun rowOf(r: GuideRow) = if (loaded) clip(r) else r.copy(programmes = emptyList())
+                GuideBoard(shown.map { s -> s.copy(rows = s.rows.map(::rowOf), more = s.more.map(::rowOf)) }, windowStartMs, loaded, working)
             }
         }
         override fun search(query: String): Flow<List<GuideSearchHit>> {
@@ -570,5 +577,85 @@ class GuideScreenTest {
         assertEquals(0, composeRule.onAllNodes(isFocused() and (hasText("Special Report") or hasText("Hannity"))).fetchSemanticsNodes().size)
         keys("D")
         waitFocused("Special Report")
+    }
+
+    private fun loadingFocused() = try {
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasTestTag("guide_loading_cell") and isFocused()).fetchSemanticsNodes().size == 1 }
+    } catch (e: Throwable) {
+        composeRule.onRoot(useUnmergedTree = true).printToLog("GoodTvTree"); throw e
+    }
+    private fun count(text: String) = composeRule.onAllNodes(hasText(text)).fetchSemanticsNodes().size
+
+    /** The first board has channels but no programmes yet: rows and a loading indicator, never "No guide info". */
+    @Test fun channelsShowWhileProgrammesLoad() {
+        val guide = FakeGuide(listOf(news, GuideSection("Entertainment", null, listOf(silent, rock), emptyList())))
+        guide.pending.value = setOf(at(18))
+        show(guide)
+        waitFor("Fox News")
+        composeRule.onNodeWithText("Some Channel").assertIsDisplayed()
+        composeRule.onNodeWithText("Loading guide…").assertIsDisplayed()
+        assertEquals(0, count("No guide info"))
+        assertEquals(0, count("Special Report"))
+        // A loop doesn't wait for programmes.
+        waitFor("30 Rock · all day")
+        // The first row's loading cell has focus; the details name the channel, and Select plays it.
+        loadingFocused()
+        waitFor("Select to watch")
+        keys("C")
+        composeRule.waitUntil(5_000) { played != null }
+        assertEquals("fx", played!!.refId)
+        // Once the programmes are in, a row without any says so and the indicator goes.
+        guide.pending.value = emptySet()
+        waitFor("Special Report")
+        waitFor("No guide info")
+        composeRule.waitUntil(5_000) { count("Loading guide…") == 0 }
+    }
+
+    /** While the refresher downloads the guide the indicator says so, programmes or not. */
+    @Test fun downloadingSaysSo() {
+        val guide = FakeGuide(listOf(news))
+        guide.pending.value = setOf(at(18))
+        guide.downloading.value = true
+        show(guide)
+        waitFor("Downloading guide…")
+        assertEquals(0, count("Loading guide…"))
+        guide.pending.value = emptySet()
+        waitFor("Special Report")
+        composeRule.onNodeWithText("Downloading guide…").assertIsDisplayed()
+        guide.downloading.value = false
+        composeRule.waitUntil(5_000) { count("Downloading guide…") == 0 }
+        assertEquals(0, count("Loading guide…"))
+    }
+
+    /**
+     * The programmes arrive as a second board with the same rows (the rebuilt rows): focus stays on its row,
+     * moving from the loading cell to what's on now.
+     */
+    @Test fun programmesFillInWithoutMovingFocus() {
+        val guide = FakeGuide(listOf(news, nbc))
+        guide.pending.value = setOf(at(18))
+        show(guide)
+        loadingFocused()
+        keys("D")
+        // The details panel names the focused row's channel: CNN, the second row.
+        composeRule.waitUntil(5_000) { count("CNN") == 2 }
+        loadingFocused()
+        guide.pending.value = emptySet()
+        waitFocused("The Situation Room")
+        waitFor("The Situation Room · CNN")
+    }
+
+    /** Paging lands on what follows the old window even when the new window's programmes come a moment later. */
+    @Test fun pagingWhileProgrammesLoadKeepsTheTime() {
+        val guide = show()
+        waitFocused("Special Report")
+        keys("R", "R")
+        waitFocused("Jesse Watters Primetime")
+        guide.pending.value = setOf(at(18, 30))
+        keys("R")
+        firstHeader(time(18, 30))
+        loadingFocused()
+        guide.pending.value = emptySet()
+        waitFocused("Hannity")
     }
 }
