@@ -50,6 +50,38 @@ class GuideMatcherTest {
         assertNull(guideOf("US: CBS 3 (WWAY-DT2) WILMINGTON HD", l = onlyMain))
     }
 
+    @Test fun subchannelOfAnotherNetworkNeverGetsTheMainGuide() {
+        val links = GuideMatcher.match(lineup, locals, cable)
+        fun guide(name: String) = lineup.filter { it.channel.name == name }.map { links[it.channel.sourceId to it.channel.id] }.distinct().single()
+        // KRQE's channels are mostly CBS, so FOX is its subchannel; WEVV's FOX also shows as "(WEVV2)".
+        assertEquals("KRQE-DT2.us_locals1", guide("US: FOX (KRQE) ALBUQUERQUE HD "))
+        assertEquals("KRQE-DT.us_locals1", guide("US: CBS 13 (KRQE) ALBUQUERQUE HD"))
+        assertEquals("WEVV-DT2.us_locals1", guide("US: FOX (WEVV) EVANSVILLE HD "))
+        assertEquals("WEVV-DT.us_locals1", guide("US: CBS 44 (WEVV) EVANSVILLE HD"))
+        // One CBS and one FOX (or NBC) channel each: which is main is unknown, so neither guesses.
+        assertNull(guide("US: FOX 22 (WSBT) SOUTH BEND  HD"))
+        assertNull(guide("US: NBC (KGWN) CHEYENNE, WY (D) ᴿᴬᵂ"))
+        for (n in listOf("US: FOX 22 (WSBT) SOUTH BEND  HD", "US: FOX (WEVV) EVANSVILLE HD ", "US: FOX (KRQE) ALBUQUERQUE HD ", "US: NBC (KGWN) CHEYENNE, WY (D) ᴿᴬᵂ")) {
+            assertFalse(n, guide(n).orEmpty().matches(Regex("""^[KW][A-Z]{2,3}-DT\.us_locals1$""")))
+        }
+        // Several subchannels: never guess between them.
+        val wway = listOf("WWAY-DT", "WWAY-DT2", "WWAY-DT3").map { XmltvChannel("$it.us_locals1", listOf(it), null) }
+        val names = listOf("US: ABC 3 (WWAY) WILMINGTON HD", "US: ABC 3 (WWAY) WILMINGTON (D) ᴿᴬᵂ", "US: CBS 3 (WWAY) WILMINGTON HD")
+        val few = GuideMatcher.match(names.map { candidate(it) }, wway, emptyList())
+        assertEquals("WWAY-DT.us_locals1", few[1L to names[0]])
+        assertNull(few[1L to names[2]])
+    }
+
+    @Test fun trailingSubchannelNumberIsRecognised() {
+        assertEquals("WEVV-DT2", ChannelIdentity.of("US: FOX (WEVV2) OWENSBORO HD ", "US| FOX ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ").callSign)
+        assertEquals("KRQE-DT2", ChannelIdentity.of("US: FOX (KRQEDT2) ALBUQUERQUE NEW MEXICO", "US| FOX ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ").callSign)
+        assertEquals("WEVV-DT2.us_locals1", guideOf("US: FOX (WEVV2) OWENSBORO HD "))
+        assertEquals("KRQE-DT2.us_locals1", guideOf("US: FOX (KRQEDT2) ALBUQUERQUE NEW MEXICO"))
+        assertNull(guideOf("US: FOX (WEVV3) OWENSBORO HD "))
+        // Outside parentheses a glued number is a brand, not a subchannel.
+        assertNull(ChannelIdentity.of("US: CW KTLA5 LOS ANGELES", "US| CW ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ").callSign)
+    }
+
     @Test fun stationsNeverFallThroughToCable() {
         val cbsNamed = listOf(XmltvChannel("CBS.KYW.us2", listOf("CBS KYW"), null))
         assertNull(guideOf("US: CBS (KYW)", l = emptyList(), c = cbsNamed))
@@ -101,6 +133,16 @@ class GuideMatcherTest {
         // A station guide only ever comes from a call sign the name itself carries.
         val callSignMissing = matched.filter { (c, guide) -> guide.endsWith(".us_locals1") && guide.substringBefore('-').substringBefore('.') !in c.channel.name }
         assertEquals(emptyMap<ChannelCandidate, String>(), callSignMissing)
+        // No channel of another network than its call sign's main one gets the main channel's guide.
+        val identities = lineup.associateWith { ChannelIdentity.of(it.channel.name, it.categoryName) }
+        val mains = GuideMatcher.mainNetworks(identities.values.toList())
+        val mainId = Regex("""^([KW][A-Z]{2,3})(?:-DT|-TV)?_?\.us_locals1$""")
+        val wrongMain = matched.filter { (c, guide) ->
+            val call = mainId.find(guide)?.groupValues?.get(1) ?: return@filter false
+            val network = identities.getValue(c).network
+            network != null && network != mains[call]
+        }
+        assertEquals(emptyMap<ChannelCandidate, String>(), wrongMain)
         assertFalse(matched.keys.any { ChannelIdentity.of(it.channel.name, it.categoryName).let { i -> i.hidden || i.genre == LiveGenre.EVENTS } })
         assertTrue("took $ms ms", ms < 2_000)
     }

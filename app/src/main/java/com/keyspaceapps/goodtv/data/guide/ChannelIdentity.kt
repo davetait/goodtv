@@ -45,7 +45,8 @@ data class ChannelIdentity(
         private val LETTERS_OR_DIGITS = Regex("""[a-z]+|[0-9]+""")
         private val SPACES = Regex("""\s+""")
         private val PARENS = Regex("""\([^)]*\)""")
-        private val CALL_SIGN = Regex("""(?<![A-Za-z0-9])([KW][A-Z]{2,3})(?:-(DT|TV|LD|CD|D)(\d?)|\.(\d))?(?![A-Za-z0-9])""")
+        /** "WWAY", "WWAY-DT2", "WCIV.2", and in parentheses "(WEVV2)" or "(KRQEDT2)". */
+        private val CALL_SIGN = Regex("""(?<![A-Za-z0-9])([KW][A-Z]{2,3})(?:-(DT|TV|LD|CD|D)(\d?)|\.(\d)|(DT)?(\d))?(?![A-Za-z0-9])""")
         /** Words shaped like call signs that aren't any. */
         private val NOT_CALL_SIGNS = setOf("WEST", "KIDS", "WACO")
         /** Free streaming apps: their "ABC7 New York" is a news stream, not the broadcast. */
@@ -155,11 +156,16 @@ data class ChannelIdentity(
         /** The call sign in parentheses, else the first one when a network word is in the name, with any subchannel: "WWAY-DT2". */
         private fun callSignOf(body: String, hasNetworkWord: Boolean): String? {
             val parens = PARENS.findAll(body).map { it.range }.toList()
-            val found = CALL_SIGN.findAll(body).filter { it.groupValues[1] !in NOT_CALL_SIGNS }.toList()
-            val m = found.firstOrNull { c -> parens.any { c.range.first > it.first && c.range.last < it.last } }
-                ?: found.firstOrNull()?.takeIf { hasNetworkWord } ?: return null
+            fun inParens(c: MatchResult) = parens.any { c.range.first > it.first && c.range.last < it.last }
+            // A number glued on ("WEVV2") only counts in parentheses; elsewhere it may be a brand ("KTLA5").
+            val found = CALL_SIGN.findAll(body).filter { it.groupValues[1] !in NOT_CALL_SIGNS && (it.groupValues[6].isEmpty() || inParens(it)) }.toList()
+            val m = found.firstOrNull(::inParens) ?: found.firstOrNull()?.takeIf { hasNetworkWord } ?: return null
             val g = m.groupValues
-            val designation = if (g[4].isNotEmpty()) ChannelNames.designation("DT", g[4]) else ChannelNames.designation(g[2], g[3])
+            val designation = when {
+                g[4].isNotEmpty() -> ChannelNames.designation("DT", g[4])
+                g[6].isNotEmpty() -> ChannelNames.designation("DT", g[6])
+                else -> ChannelNames.designation(g[2], g[3])
+            }
             return g[1] + designation.orEmpty()
         }
 
