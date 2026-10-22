@@ -18,6 +18,8 @@ data class LiveChannel(
     val title: String = name,
     val language: String? = null,
     val quality: String? = null,
+    /** The provider's guide id for this channel (Xtream `epg_channel_id`); null when it has none. */
+    val epgChannelId: String? = null,
 )
 
 data class Movie(

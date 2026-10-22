@@ -10,8 +10,14 @@ import com.keyspaceapps.goodtv.data.db.RoomLibraryStore
 import com.keyspaceapps.goodtv.data.db.RoomPopularStore
 import com.keyspaceapps.goodtv.data.db.RoomTmdbCache
 import com.keyspaceapps.goodtv.data.db.RoomTmdbGenreStore
+import com.keyspaceapps.goodtv.data.db.RoomGuideStore
 import com.keyspaceapps.goodtv.data.db.RoomWatchListStore
 import com.keyspaceapps.goodtv.data.db.RoomWatchProgressStore
+import com.keyspaceapps.goodtv.data.guide.EpgShareSource
+import com.keyspaceapps.goodtv.data.guide.GuideRefresher
+import com.keyspaceapps.goodtv.data.guide.GuideRepository
+import com.keyspaceapps.goodtv.data.guide.GuideStore
+import com.keyspaceapps.goodtv.data.guide.PlaybackState
 import com.keyspaceapps.goodtv.data.progress.WatchProgressRepository
 import com.keyspaceapps.goodtv.data.repo.LibraryRepository
 import com.keyspaceapps.goodtv.data.repo.LibraryStore
@@ -51,6 +57,7 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import java.io.File
 import java.util.Locale
@@ -116,6 +123,24 @@ class AppGraph(val context: Context) {
     /** Titles saved to watch later, for the Watch list row, poster bookmarks and detail pages. */
     val watchList: WatchListRepository by lazy { WatchListRepository(RoomWatchListStore(db.watchList())) }
 
+    /** Guide programmes, the channel-to-guide links and favourite channels. */
+    val guideStore: GuideStore by lazy { RoomGuideStore(db) }
+
+    /** True while the player is on screen; the guide's provider download waits for it to end. */
+    val playback = PlaybackState()
+
+    /**
+     * Downloads the guide once a day: epgshare01 first, the provider's own for what it lacks. Under
+     * [GoodTvApp.disableGuideDownloads] epgshare01 is a closed local port, so its refresh fails at once.
+     */
+    val guideRefresher: GuideRefresher by lazy {
+        val epgShare = if (GoodTvApp.disableGuideDownloads) EpgShareSource(okHttp, "http://127.0.0.1:9/".toHttpUrl()) else EpgShareSource(okHttp)
+        GuideRefresher(
+            guideStore, store, sourceRegistry, epgShare, playback,
+            System::currentTimeMillis, Dispatchers.IO, File(context.cacheDir, "guide"), early = settings, failures = settings,
+        )
+    }
+
     /** Home's popular rows: TMDB's popular streaming titles the library has, rankings refreshed daily. */
     val popularStore: PopularStore by lazy { RoomPopularStore(db.popular()) }
     val popularMovies: PopularRepository by lazy { PopularRepository(tmdbApi, popularStore, PopularMoviesQuery, tmdbLanguage) }
@@ -137,8 +162,14 @@ class AppGraph(val context: Context) {
     val sports: SportsRepository by lazy {
         val espn = EspnScoreboard(okHttp)
         val sources: Map<League, ScheduleSource> = League.entries.associateWith { if (it == League.PWHL) PwhlScorebar(okHttp) else espn }
-        SportsRepository(sources, store, LiveRefresher(store, sourceRegistry, { syncManager.state.value is SyncState.Syncing }))
+        SportsRepository(sources, store, liveRefresher)
     }
+
+    /** Re-downloads the live lists of stale sources; shared by Sports and the guide's event slots. */
+    private val liveRefresher: LiveRefresher by lazy { LiveRefresher(store, sourceRegistry, { syncManager.state.value is SyncState.Syncing }) }
+
+    /** The Live TV guide: the lineup with its programmes, favourites and search. */
+    val guide: GuideRepository by lazy { GuideRepository(store, guideStore, guideRefresher, liveRefresher, System::currentTimeMillis, Dispatchers.Default) }
 
     /** Background TMDB genre fill for movies; started on launch after stale sources refresh. */
     val genreFetcher: TmdbGenreFetcher by lazy {
@@ -153,6 +184,17 @@ class AppGraph(val context: Context) {
         appScope.launch {
             syncManager.state.map { it is SyncState.Syncing }.distinctUntilChanged().drop(1).filter { syncing -> !syncing }
                 .collect { genreFetcher.start() }
+        }
+    }
+
+    /**
+     * Refreshes the guide whenever syncing finishes. A fresh guide is left alone, except that a source
+     * with channels but no guide links yet (just added) gets the epgshare01 files matched to it. Call once per process.
+     */
+    fun startGuideRefreshAfterSyncs() {
+        appScope.launch {
+            syncManager.state.map { it is SyncState.Syncing }.distinctUntilChanged().drop(1).filter { syncing -> !syncing }
+                .collect { guideRefresher.refreshIfStale() }
         }
     }
 

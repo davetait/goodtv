@@ -123,6 +123,26 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
     }
 }
 
+/** v9 → v10: the Live TV guide, channel links, favourite channels and the provider's guide id. DDL matches schemas/10.json. */
+val MIGRATION_9_10 = object : Migration(9, 10) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `live_channels` ADD COLUMN `epgChannelId` TEXT")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `guide_channels` (`guideId` TEXT NOT NULL, `origin` TEXT NOT NULL, `logoUrl` TEXT, PRIMARY KEY(`guideId`))")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `guide_programmes` (`guideId` TEXT NOT NULL, `startMs` INTEGER NOT NULL, `endMs` INTEGER NOT NULL, `title` TEXT NOT NULL, " +
+                "`description` TEXT, `genres` TEXT NOT NULL, `imageUrl` TEXT, PRIMARY KEY(`guideId`, `startMs`), " +
+                "FOREIGN KEY(`guideId`) REFERENCES `guide_channels`(`guideId`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_guide_programmes_endMs` ON `guide_programmes` (`endMs`)")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `channel_guide` (`sourceId` INTEGER NOT NULL, `channelId` TEXT NOT NULL, `guideId` TEXT NOT NULL, " +
+                "PRIMARY KEY(`sourceId`, `channelId`), FOREIGN KEY(`sourceId`) REFERENCES `sources`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        )
+        db.execSQL("CREATE TABLE IF NOT EXISTS `favourite_channels` (`rowKey` TEXT NOT NULL, `addedAt` INTEGER NOT NULL, PRIMARY KEY(`rowKey`))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `guide_meta` (`origin` TEXT NOT NULL, `fetchedAt` INTEGER NOT NULL, PRIMARY KEY(`origin`))")
+    }
+}
+
 @Database(
     entities = [
         SourceEntity::class, CategoryEntity::class, LiveChannelEntity::class, MovieEntity::class, SeriesEntity::class,
@@ -130,8 +150,9 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
         HiddenCategoryEntity::class, TmdbMetaEntity::class, TmdbTitleMatchEntity::class,
         SeriesGenreEntity::class, TmdbGenreEntity::class, TmdbGenreStatusEntity::class, WatchProgressEntity::class,
         TmdbListEntity::class, TmdbListItemEntity::class, WatchListEntity::class,
+        GuideChannelEntity::class, GuideProgrammeEntity::class, ChannelGuideEntity::class, FavouriteChannelEntity::class, GuideMetaEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = true, // schemas/ holds the baseline every future migration is written against
 )
 abstract class GoodTvDatabase : RoomDatabase() {
@@ -143,11 +164,12 @@ abstract class GoodTvDatabase : RoomDatabase() {
     abstract fun watchProgress(): WatchProgressDao
     abstract fun popular(): PopularDao
     abstract fun watchList(): WatchListDao
+    abstract fun guide(): GuideDao
 
     companion object {
         fun create(context: Context): GoodTvDatabase =
             Room.databaseBuilder(context, GoodTvDatabase::class.java, "goodtv.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                 .fallbackToDestructiveMigration(dropAllTables = true) // last resort for an unknown version only
                 .build()
     }

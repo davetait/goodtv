@@ -139,14 +139,16 @@ class GameMatcherTest {
     @Test fun channelTimesFormats() {
         fun t(s: String) = ChannelTimes.parse(s, now)
         assertEquals(Instant.parse("2026-10-20T23:05:00Z"), t("LIVE | X | Tue 20 Oct 19:05 EDT (US) |"))
-        assertEquals("no zone → UTC", Instant.parse("2026-10-20T19:00:00Z"), t("NHL: San Jose vs Montreal @ Oct 20 7:00 PM :Sportsnet+ 15"))
-        assertEquals(Instant.parse("2026-10-20T18:30:05Z"), t("76ers vs. Knicks (2026-10-20 18:30:05)"))
+        assertEquals("no zone → New York", Instant.parse("2026-10-20T23:00:00Z"), t("NHL: San Jose vs Montreal @ Oct 20 7:00 PM :Sportsnet+ 15"))
+        assertEquals(Instant.parse("2026-10-20T22:30:05Z"), t("76ers vs. Knicks (2026-10-20 18:30:05)"))
+        assertEquals("an ISO time reads a zone after it", Instant.parse("2026-10-20T18:30:00Z"), t("76ers vs. Knicks 2026-10-20 18:30 UTC"))
+        assertEquals(Instant.parse("2026-10-21T01:30:00Z"), t("Lakers vs. Suns 2026-10-20 18:30 PT"))
         assertEquals(Instant.parse("2026-10-20T01:00:00Z"), t("Next | 76ers vs. Knicks | all | 20-10-2026 | 01:00 (GMT) | 8K"))
-        assertEquals(Instant.parse("2026-10-18T22:08:00Z"), t("MLB 01 : Rays x Guardians start:2026-10-18 22:08:00 stop:2026-10-19 05:21:20"))
+        assertEquals(Instant.parse("2026-10-19T02:08:00Z"), t("MLB 01 : Rays x Guardians start:2026-10-18 22:08:00 stop:2026-10-19 05:21:20"))
         assertEquals("ET in November is EST", Instant.parse("2026-11-08T20:00:00Z"), t("CFL 00: Montreal Alouettes vs Hamilton Tiger-Cats | Sat 8th Nov 3:00 PM ET"))
         assertEquals(Instant.parse("2026-10-20T21:55:00Z"), t("NEW JERSEY DEVILS - COLORADO AVALANCHE | Wed 21 Oct 00:55 EEST (FI)"))
         assertNull(t("US: NHL NETWORK"))
-        assertEquals("a year-less date takes the nearest year", Instant.parse("2026-12-31T20:00:00Z"),
+        assertEquals("a year-less date takes the nearest year", Instant.parse("2027-01-01T01:00:00Z"),
             ChannelTimes.parse("X @ Dec 31 8:00 PM", Instant.parse("2027-01-02T00:00:00Z")))
     }
 }

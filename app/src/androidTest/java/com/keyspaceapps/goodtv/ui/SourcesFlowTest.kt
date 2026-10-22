@@ -2,9 +2,6 @@ package com.keyspaceapps.goodtv.ui
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ActivityScenario
@@ -81,7 +78,7 @@ class SourcesFlowTest {
     }
 
     @Test
-    fun addSourceShowsCountsAndLiveCategories() {
+    fun addSourceShowsCountsAndLiveChannels() {
         composeRule.waitUntil(10_000) { composeRule.onAllNodes(hasText("Add source")).fetchSemanticsNodes().isNotEmpty() }
         composeRule.onNodeWithText("Add source").tvClick()
         try {
@@ -111,10 +108,9 @@ class SourcesFlowTest {
         }
         composeRule.onNodeWithText("Living Room").assertIsDisplayed()
 
+        // The Live tab's guide lists the synced channels.
         composeRule.onNodeWithText("Live").tvClick()
-        // The "Sports" live category, not the Sports tab.
-        val category = hasText("Sports") and !SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab)
-        composeRule.waitUntil(10_000) { composeRule.onAllNodes(category).fetchSemanticsNodes().isNotEmpty() }
-        composeRule.onNode(category).assertIsDisplayed()
+        composeRule.waitUntil(10_000) { composeRule.onAllNodes(hasText("Sports One")).fetchSemanticsNodes().isNotEmpty() }
+        composeRule.onNodeWithText("Sports One").assertIsDisplayed()
     }
 }

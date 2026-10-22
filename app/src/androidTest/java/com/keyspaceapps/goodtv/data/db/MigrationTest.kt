@@ -147,4 +147,30 @@ class MigrationTest {
         db.query("SELECT COUNT(*) FROM watch_list").use { c -> c.moveToFirst(); assertEquals(0, c.getInt(0)) }
         db.close()
     }
+
+    /** v9 → v10 adds the guide tables and epgChannelId; sources, channels and the watch list survive. */
+    @Test
+    fun migrate9To10AddsGuide() {
+        helper.createDatabase(dbName, 9).apply {
+            execSQL("INSERT INTO sources (id, type, nickname, configJson, enabled, lastSyncAt, lastError, createdAt) VALUES (1, 'XTREAM', 'Home', '{\"type\":\"xtream\",\"server\":\"http://s\",\"username\":\"u\",\"password\":\"p\"}', 1, 1, NULL, 0)")
+            execSQL("INSERT INTO live_channels (sourceId, id, categoryId, name, logoUrl, number) VALUES (1, 'l1', 'c', 'Fox News', NULL, 1)")
+            execSQL("INSERT INTO watch_list (sourceId, kind, itemId, savedAt) VALUES (1, 'MOVIE', 'm1', 5)")
+            close()
+        }
+        val db = helper.runMigrationsAndValidate(dbName, 10, true, MIGRATION_9_10)
+        db.query("SELECT name, epgChannelId FROM live_channels").use { c ->
+            c.moveToFirst()
+            assertEquals("Fox News", c.getString(0))
+            assertTrue(c.isNull(1))
+        }
+        db.query("SELECT COUNT(*) FROM watch_list").use { c -> c.moveToFirst(); assertEquals(1, c.getInt(0)) }
+        for (t in listOf("guide_channels", "guide_programmes", "channel_guide", "favourite_channels", "guide_meta")) {
+            db.query("SELECT COUNT(*) FROM $t").use { c -> c.moveToFirst(); assertEquals(0, c.getInt(0)) }
+        }
+        db.execSQL("INSERT INTO channel_guide (sourceId, channelId, guideId) VALUES (1, 'l1', 'fox.us')")
+        db.execSQL("PRAGMA foreign_keys = ON")
+        db.execSQL("DELETE FROM sources WHERE id = 1")
+        db.query("SELECT COUNT(*) FROM channel_guide").use { c -> c.moveToFirst(); assertEquals(0, c.getInt(0)) }
+        db.close()
+    }
 }

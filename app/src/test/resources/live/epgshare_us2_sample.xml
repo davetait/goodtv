@@ -1,0 +1,385 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+<channel id="Fox.News.Channel.HD.us2">
+    <icon src="http://dtil.tmsimg.com/assets/s60179_ll_h15_ab.png?w=360&amp;h=270" />
+    <icon src="http://dtil.tmsimg.com/assets/s60179_ll_h15_ab.png?w=360&amp;h=270" />
+    <url>http://www.tmsapi.com</url>
+    <display-name lang="en">Fox News Channel HD</display-name>
+  </channel>
+  <channel id="AMC.HD.us2">
+    <icon src="http://dtil.tmsimg.com/assets/s59337_ll_h15_ab.png?w=360&amp;h=270" />
+    <icon src="http://dtil.tmsimg.com/assets/s59337_ll_h15_ab.png?w=360&amp;h=270" />
+    <url>http://www.tmsapi.com</url>
+    <display-name lang="en">AMC HD</display-name>
+  </channel>
+  <programme channel="Fox.News.Channel.HD.us2" start="20261020050000 +0000" stop="20261020060000 +0000">
+    <title lang="en">Jesse Watters Primetime</title>
+    <desc lang="en">Jesse Watters speaks with newsmakers from across the U.S. to present news with a clear and direct approach.</desc>
+    <credits>
+      <actor>Jesse Watters</actor>
+    </credits>
+    <date>2026</date>
+    <category lang="en">Series</category>
+    <category lang="en">Talk</category>
+    <icon src="http://dtil.tmsimg.com/assets/p21448823_b_h8_ab.jpg?w=960&amp;h=540" />
+    <episode-num system="onscreen">E211</episode-num>
+    <previously-shown /></programme>
+  <programme channel="Fox.News.Channel.HD.us2" start="20261020060000 +0000" stop="20261020070000 +0000">
+    <title lang="en">Hannity</title>
+    <desc lang="en">Sean Hannity interviews political figures and newsmakers and offers his own conservative perspective on events.</desc>
+    <credits>
+      <actor>Sean Hannity</actor>
+    </credits>
+    <date>2026</date>
+    <category lang="en">Series</category>
+    <category lang="en">Talk</category>
+    <category lang="en">News</category>
+    <icon src="http://dtil.tmsimg.com/assets/p195286_b_h8_ab.jpg?w=960&amp;h=540" />
+    <episode-num system="onscreen">E212</episode-num>
+    <previously-shown /></programme>
+  <programme channel="Fox.News.Channel.HD.us2" start="20261020070000 +0000" stop="20261020080000 +0000">
+    <title lang="en">Gutfeld!</title>
+    <desc lang="en">Greg Gutfeld looks at the news of the day through a satiric lens fused with pop culture and features his takes on the day&apos;s headlines.</desc>
+    <credits>
+      <actor>Greg Gutfeld</actor>
+    </credits>
+    <date>2026</date>
+    <category lang="en">Series</category>
+    <category lang="en">News</category>
+    <category lang="en">Entertainment</category>
+    <category lang="en">Comedy</category>
+    <icon src="http://dtil.tmsimg.com/assets/p19706862_b_h10_ad.jpg?w=960&amp;h=540" />
+    <episode-num system="onscreen">E210</episode-num>
+    <previously-shown /></programme>
+  <programme channel="Fox.News.Channel.HD.us2" start="20261020080000 +0000" stop="20261020100000 +0000">
+    <title lang="en">Live: FOX &amp; Friends First</title>
+    <desc lang="en">Hosts Todd Piro and Carley Shimkus present all the headlines viewers may have missed overnight, along with a preview of upcoming news events.</desc>
+    <credits>
+      <actor>Carley Shimkus</actor>
+      <actor>Todd Piro</actor>
+    </credits>
+    <date>2026</date>
+    <category lang="en">Series</category>
+    <category lang="en">Newsmagazine</category>
+    <icon src="http://dtil.tmsimg.com/assets/p678619_b_h8_aa.jpg?w=960&amp;h=540" />
+    <episode-num system="onscreen">E217</episode-num>
+    <premiere lang="en" />
+  </programme>
+  <programme channel="Fox.News.Channel.HD.us2" start="20261020100000 +0000" stop="20261020130000 +0000">
+    <title lang="en">Live: FOX and Friends</title>
+    <desc lang="en">Co-hosts Steve Doocy, Ainsley Earhardt, Brian Kilmeade and Lawrence Jones highlight the latest.</desc>
+    <credits>
+      <actor>Steve Doocy</actor>
+      <actor>Brian Kilmeade</actor>
+      <actor>Ainsley Earhardt</actor>
+    </credits>
+    <date>2026</date>
+    <category lang="en">Series</category>
+    <category lang="en">Talk</category>
+    <category lang="en">News</category>
+    <icon src="http://dtil.tmsimg.com/assets/p186468_b_h8_ao.jpg?w=960&amp;h=540" />
+    <episode-num system="onscreen">E637</episode-num>
+    <premiere lang="en" />
+  </programme>
+  <programme channel="Fox.News.Channel.HD.us2" start="20261020130000 +0000" stop="20261020140000 +0000">
+    <title lang="en">Live: America&apos;s Newsroom</title>
+    <desc lang="en">Bill Hemmer and Dana Perino cover events happening around the nation and the world; guests pertinent to the news topics are interviewed, and viewer emails are also answered by the anchors and guests.</desc>
+    <credits>
+      <actor>Bill Hemmer</actor>
+      <actor>Dana Perino</actor>
+    </credits>
+    <date>2026</date>
+    <category lang="en">Series</category>
+    <category lang="en">Talk</category>
+    <category lang="en">News</category>
+    <icon src="http://dtil.tmsimg.com/assets/p186463_b_h8_ac.jpg?w=960&amp;h=540" />
+    <episode-num system="onscreen">E423</episode-num>
+    <premiere lang="en" />
+  </programme>
+  <programme channel="Fox.News.Channel.HD.us2" start="20261020140000 +0000" stop="20261020150000 +0000">
+    <title lang="en">Live: America&apos;s Newsroom</title>
+    <desc lang="en">Bill Hemmer and Dana Perino cover events happening around the nation and the world; guests pertinent to the news topics are interviewed, and viewer emails are also answered by the anchors and guests.</desc>
+    <credits>
+      <actor>Bill Hemmer</actor>
+      <actor>Dana Perino</actor>
+    </credits>
+    <date>2026</date>
+    <category lang="en">Series</category>
+    <category lang="en">Talk</category>
+    <category lang="en">News</category>
+    <icon src="http://dtil.tmsimg.com/assets/p186463_b_h8_ac.jpg?w=960&amp;h=540" />
+    <episode-num system="onscreen">E424</episode-num>
+    <premiere lang="en" />
+  </programme>
+  <programme channel="Fox.News.Channel.HD.us2" start="20261020150000 +0000" stop="20261020160000 +0000">
+    <title lang="en">Live: The Faulkner Focus</title>
+    <desc lang="en">Emmy-winning journalist Harris Faulkner provides the news with insightful analysis and interviews with some of the top newsmakers.</desc>
+    <credits>
+      <actor>Harris Faulkner</actor>
+    </credits>
+    <date>2026</date>
+    <category lang="en">Series</category>
+    <category lang="en">News</category>
+    <category lang="en">Children</category>
+    <icon src="http://dtil.tmsimg.com/assets/p19361102_b_h8_ag.jpg?w=960&amp;h=540" />
+    <episode-num system="onscreen">E212</episode-num>
+    <premiere lang="en" />
+  </programme>
+  <programme channel="AMC.HD.us2" start="20261020050000 +0000" stop="20261020070000 +0000">
+    <title lang="en">The Cabin in the Woods</title>
+    <desc lang="en">When five college friends (Kristen Connolly, Chris Hemsworth, Anna Hutchison, Fran Kranz, Jesse Williams) arrive at a remote forest cabin for a little vacation, little do they expect the horrors that await them. One by one, the youths fall victim to backwoods zombies, but there is another factor at play. Two scientists (Richard Jenkins, Bradley Whitford) are manipulating the ghoulish goings-on, but even as the body count rises, there is yet more at work than meets the eye.</desc>
+    <credits>
+      <actor>Kristen Connolly</actor>
+      <actor>Chris Hemsworth</actor>
+      <actor>Anna Hutchison</actor>
+      <director>Drew Goddard</director>
+    </credits>
+    <date>2011</date>
+    <category lang="en">Movie</category>
+    <category lang="en">Horror</category>
+    <category lang="en">Dark comedy</category>
+    <category lang="en">Mystery</category>
+    <category lang="en">Thriller</category>
+    <icon src="http://dtil.tmsimg.com/assets/p7820886_v_h8_az.jpg?w=960&amp;h=540" />
+    <previously-shown />  <rating system="Motion Picture Association">
+      <value>R</value>
+    </rating>
+    <rating system="British Board of Film Classification">
+      <value>15</value>
+    </rating>
+    <rating system="B.C. Film Classification Office">
+      <value>18A</value>
+    </rating>
+    <rating system="Saskatchewan Film and Video Classification Board">
+      <value>18A</value>
+    </rating>
+    <rating system="Ontario Film Authority">
+      <value>18A</value>
+    </rating>
+    <rating system="Alberta&apos;s Film Classification Board">
+      <value>18A</value>
+    </rating>
+    <rating system="Manitoba Film Classification Board">
+      <value>18A</value>
+    </rating>
+    <rating system="Maritime Film Classification Board">
+      <value>18</value>
+    </rating>
+    <rating system="Régie du cinéma">
+      <value>13+</value>
+    </rating>
+    <rating system="Departamento de Justiça, Classificação, Títulos e Qualificação">
+      <value>16</value>
+    </rating>
+    <rating system="Mediakasvatus- ja kuvaohjelmayksikkö">
+      <value>K16</value>
+    </rating>
+    <rating system="Freiwillige Selbstkontrolle der Filmwirtschaft">
+      <value>16</value>
+    </rating>
+    <rating system="Australian Classification Board">
+      <value>MA 15+</value>
+    </rating>
+    <rating system="Ministero della Cultura">
+      <value>VM14</value>
+    </rating>
+    <rating system="Instituto Nacional de Cine y Artes Audiovisuales">
+      <value>SAM 16</value>
+    </rating>
+    <rating system="Medietilsynet">
+      <value>15 år</value>
+    </rating>
+    <rating system="Film &amp; Publication Board">
+      <value>16</value>
+    </rating>
+    <rating system="映倫">
+      <value>R15+</value>
+    </rating>
+    <rating system="Kijkwijzer">
+      <value>16</value>
+    </rating>
+    <rating system="Dirección General de Radio, Televisión y Cinematografía">
+      <value>C</value>
+    </rating>
+    <rating system="Krajowa Rada Radiofonii i Telewizji">
+      <value>18</value>
+    </rating>
+    <rating system="영상물등급위원회">
+      <value>18+</value>
+    </rating>
+    <rating system="UK Content Provider">
+      <value>15</value>
+    </rating>
+    <rating system="Central Board of Film Certification">
+      <value>A</value>
+    </rating>
+    <star-rating system="TMS">
+      <value>6.0/10</value>
+    </star-rating>
+  </programme>
+  <programme channel="AMC.HD.us2" start="20261020070000 +0000" stop="20261020094500 +0000">
+    <title lang="en">The Mist</title>
+    <desc lang="en">After a powerful storm damages their Maine home, David Drayton (Thomas Jane) and his young son head into town to gather food and supplies. Soon afterward, a thick fog rolls in and engulfs the town, trapping the Draytons and others in the grocery store. Terror mounts as deadly creatures reveal themselves outside, but that may be nothing compared to the threat within, where a zealot (Marcia Gay Harden) calls for a sacrifice.</desc>
+    <credits>
+      <actor>Thomas Jane</actor>
+      <actor>Marcia Gay Harden</actor>
+      <actor>Laurie Holden</actor>
+      <director>Frank Darabont</director>
+    </credits>
+    <date>2007</date>
+    <category lang="en">Movie</category>
+    <category lang="en">Horror</category>
+    <category lang="en">Science fiction</category>
+    <category lang="en">Thriller</category>
+    <icon src="http://dtil.tmsimg.com/assets/p170178_v_h10_ab.jpg?w=960&amp;h=540" />
+    <previously-shown />  <rating system="Ontario Film Authority">
+      <value>14A</value>
+    </rating>
+    <rating system="Motion Picture Association">
+      <value>R</value>
+    </rating>
+    <rating system="B.C. Film Classification Office">
+      <value>18A</value>
+    </rating>
+    <rating system="Saskatchewan Film and Video Classification Board">
+      <value>18A</value>
+    </rating>
+    <rating system="Maritime Film Classification Board">
+      <value>18</value>
+    </rating>
+    <rating system="Régie du cinéma">
+      <value>13+</value>
+    </rating>
+    <rating system="Alberta&apos;s Film Classification Board">
+      <value>18A</value>
+    </rating>
+    <rating system="Manitoba Film Classification Board">
+      <value>18A</value>
+    </rating>
+    <rating system="British Board of Film Classification">
+      <value>15</value>
+    </rating>
+    <rating system="Departamento de Justiça, Classificação, Títulos e Qualificação">
+      <value>16</value>
+    </rating>
+    <rating system="Freiwillige Selbstkontrolle der Filmwirtschaft">
+      <value>16</value>
+    </rating>
+    <rating system="Australian Classification Board">
+      <value>MA 15+</value>
+    </rating>
+    <rating system="Instituto Nacional de Cine y Artes Audiovisuales">
+      <value>SAM 13</value>
+    </rating>
+    <rating system="Mediakasvatus- ja kuvaohjelmayksikkö">
+      <value>K16</value>
+    </rating>
+    <rating system="Medietilsynet">
+      <value>15 år</value>
+    </rating>
+    <rating system="Statens medieråd">
+      <value>Från 15 år</value>
+    </rating>
+    <rating system="Medierådet">
+      <value>15</value>
+    </rating>
+    <rating system="영상물등급위원회">
+      <value>15+</value>
+    </rating>
+    <rating system="映倫">
+      <value>R15+</value>
+    </rating>
+    <rating system="Kijkwijzer">
+      <value>16</value>
+    </rating>
+    <rating system="Krajowa Rada Radiofonii i Telewizji">
+      <value>16</value>
+    </rating>
+    <rating system="Arcom">
+      <value>-12</value>
+    </rating>
+    <rating system="Dirección General de Radio, Televisión y Cinematografía">
+      <value>C</value>
+    </rating>
+    <star-rating system="TMS">
+      <value>5.0/10</value>
+    </star-rating>
+  </programme>
+  <programme channel="AMC.HD.us2" start="20261020094500 +0000" stop="20261020095500 +0000">
+    <title lang="en">The Three Stooges</title>
+    <sub-title lang="en">They Stooge to Conga</sub-title>
+    <desc lang="en">The trio encounters Nazis; guest Lloyd Bridges.</desc>
+    <credits>
+      <actor>Moe Howard</actor>
+      <actor>Larry Fine</actor>
+      <actor>Curly Howard</actor>
+      <director>Del Lord</director>
+    </credits>
+    <date>1943</date>
+    <category lang="en">Series</category>
+    <category lang="en">Comedy</category>
+    <icon src="http://dtil.tmsimg.com/assets/p184232_b_h10_aa.jpg?w=960&amp;h=540" />
+    <episode-num system="onscreen">E1</episode-num>
+    <previously-shown />  <rating system="Canadian Parental Rating">
+      <value>PG</value>
+    </rating>
+    <rating system="USA Parental Rating">
+      <value>TVPG</value>
+    </rating>
+  </programme>
+  <programme channel="AMC.HD.us2" start="20261020095500 +0000" stop="20261020100000 +0000">
+    <title lang="en">The Three Stooges</title>
+    <sub-title lang="en">Three Little Beers</sub-title>
+    <desc lang="en">The trio tries golf.</desc>
+    <credits>
+      <actor>Moe Howard</actor>
+      <actor>Larry Fine</actor>
+      <actor>Curly Howard</actor>
+      <director>Del Lord</director>
+    </credits>
+    <date>1935</date>
+    <category lang="en">Series</category>
+    <category lang="en">Comedy</category>
+    <icon src="http://dtil.tmsimg.com/assets/p184232_b_h10_aa.jpg?w=960&amp;h=540" />
+    <episode-num system="onscreen">E7</episode-num>
+    <previously-shown />  <rating system="USA Parental Rating">
+      <value>TVG</value>
+    </rating>
+    <rating system="Departamento de Justiça, Classificação, Títulos e Qualificação">
+      <value>L</value>
+    </rating>
+    <rating system="Canadian Parental Rating">
+      <value>G</value>
+    </rating>
+    <rating system="Régie du cinéma">
+      <value>G</value>
+    </rating>
+  </programme>
+  <programme channel="AMC.HD.us2" start="20261020100000 +0000" stop="20261020103000 +0000">
+    <title lang="en">Interested in Gold? Learn More!</title>
+    <desc lang="en">Gold has been the best long-term asset class for thousands of years; find out how you can protect your financial future by diversifying your nest-egg with physical gold today.</desc>
+    <category lang="en">Consumer</category>
+    <icon src="http://dtil.tmsimg.com/assets/p27818800_b_h8_aa.jpg?w=960&amp;h=540" />
+    <previously-shown /></programme>
+  <programme channel="AMC.HD.us2" start="20261020103000 +0000" stop="20261020110000 +0000">
+    <title lang="en">Freedom to Leave the House! Inogen Portable Oxygen</title>
+    <desc lang="en">Regain independence and enjoy greater mobility with the compact design and long-lasting battery of portable oxygen.</desc>
+    <category lang="en">Consumer</category>
+    <icon src="http://dtil.tmsimg.com/assets/p29463212_b_h8_aa.jpg?w=960&amp;h=540" />
+    <previously-shown /></programme>
+  <programme channel="AMC.HD.us2" start="20261020110000 +0000" stop="20261020113000 +0000">
+    <title lang="en">Bathroom Makeover</title>
+    <desc lang="en">Transform your bath affordably in just one day!</desc>
+    <category lang="en">Consumer</category>
+    <category lang="en">Health</category>
+    <category lang="en">House/garden</category>
+    <category lang="en">Self improvement</category>
+    <icon src="http://dtil.tmsimg.com/assets/p30220270_b_h8_aa.jpg?w=960&amp;h=540" />
+    <previously-shown /></programme>
+  <programme channel="AMC.HD.us2" start="20261020113000 +0000" stop="20261020120000 +0000">
+    <title lang="en">Looking for a Medicare plan? Tune in now!</title>
+    <desc lang="en">The Medicare annual election period ends on December 7th. Watch and learn about Humana Medicare Advantage plans.</desc>
+    <category lang="en">Consumer</category>
+    <icon src="http://dtil.tmsimg.com/assets/p7855567_b_h8_ab.jpg?w=960&amp;h=540" />
+    <previously-shown /></programme>
+  </tv>

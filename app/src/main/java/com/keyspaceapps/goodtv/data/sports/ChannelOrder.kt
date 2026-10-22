@@ -9,18 +9,21 @@ object ChannelOrder {
     private val FRENCH = listOf("french", "francais")
     private val OTHER = listOf("spanish", "espanol")
 
-    fun sort(list: List<ChannelCandidate>): List<ChannelCandidate> = list.sortedWith(
-        compareBy<ChannelCandidate> { if (northAmerican(it)) 0 else 1 }
-            .thenBy { language(it) }
-            .thenBy { liveness(it) }
-            .thenBy { GameMatcher.normalize(it.channel.name) },
-    )
+    /** A channel with its sort key, worked out once rather than on both sides of every comparison. */
+    private class Keyed(val c: ChannelCandidate, val region: Int, val language: Int, val liveness: Int, val name: String)
+
+    private val ORDER = compareBy<Keyed>({ it.region }, { it.language }, { it.liveness }, { it.name })
+
+    fun sort(list: List<ChannelCandidate>): List<ChannelCandidate> = list.map { c ->
+        val name = GameMatcher.normalize(c.channel.name)
+        Keyed(c, if (northAmerican(c)) 0 else 1, language(c, name), liveness(name), name)
+    }.sortedWith(ORDER).map { it.c }
 
     private fun northAmerican(c: ChannelCandidate) = c.categoryName.trimStart().let { it.startsWith("US|") || it.startsWith("CA|") }
 
     /** 0 English, 1 French, 2 other. */
-    private fun language(c: ChannelCandidate): Int {
-        val words = " ${GameMatcher.normalize(c.channel.name)} "
+    private fun language(c: ChannelCandidate, name: String): Int {
+        val words = " $name "
         val lang = c.channel.language?.uppercase()
         return when {
             FRENCH.any { " $it " in words } || lang == "FR" -> 1
@@ -29,8 +32,7 @@ object ChannelOrder {
         }
     }
 
-    private fun liveness(c: ChannelCandidate): Int {
-        val n = GameMatcher.normalize(c.channel.name)
+    private fun liveness(n: String): Int {
         return when {
             n.startsWith("live ") -> 0
             n.startsWith("next ") -> 2

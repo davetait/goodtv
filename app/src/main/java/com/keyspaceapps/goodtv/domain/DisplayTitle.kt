@@ -47,7 +47,7 @@ object DisplayTitle {
         var year: Int? = null
         if (!live) {
             // Panels write a missing year as "None": "PREDICTION.None", "X (None)". Not "None Shall Escape".
-            s = s.removeSuffix(".None").replace(Regex("""\s*\(None\)$"""), "")
+            s = s.removeSuffix(".None").replace(NONE_SUFFIX, "")
             if (' ' !in s && ('.' in s || '_' in s)) s = s.replace('.', ' ').replace('_', ' ')
             PAREN_YEAR.find(s)?.let { m -> year = m.groupValues[1].toInt(); s = s.substring(0, m.range.first) }
                 ?: TRAILING_YEAR.find(s)?.takeIf { it.groupValues[1].toInt() <= latestYear() && !EVENT_DATE.containsMatchIn(s) }?.let { m ->
@@ -78,7 +78,7 @@ object DisplayTitle {
         if (s.startsWith(seriesTitle, ignoreCase = true)) s = s.substring(seriesTitle.length)
         // "The Bear (US) - S01E01 - System": the show's own tag is left in front once its name is gone.
         s = LEADING_TAG.replace(s, "")
-        s = EPISODE_CODE.replace(s, " ").replace(REPEATED_SEPARATORS, " - ").replace(EDGE_SEPARATORS, "").replace(Regex("""\s+"""), " ")
+        s = EPISODE_CODE.replace(s, " ").replace(REPEATED_SEPARATORS, " - ").replace(EDGE_SEPARATORS, "").replace(SPACES, " ")
         return s.ifEmpty { null }
     }
 
@@ -149,13 +149,18 @@ object DisplayTitle {
     private val EDGE_SEPARATORS = Regex("""^[\s\-:|.,]+|[\s\-:|.,]+$""")
     private val LEADING_TAG = Regex("""^\s*\([^)]{1,12}\)""")
     private val REPEATED_SEPARATORS = Regex("""(\s*[\-–|]\s*){2,}""")
+    // Compiled once: titles are parsed for every channel of a ~12k lineup.
+    private val NONE_SUFFIX = Regex("""\s*\(None\)$""")
+    private val SPACES = Regex("""\s+""")
+    private val DECORATIONS = Regex("""[ᴀ-ᶿ⁰-₟²³¹◉●]""")
+    private val WIDE_SPACES = Regex("""[\s\u00A0\u2007\u202F]+""")
     private val EPISODE_CODE = Regex("""\b[Ss]\d{1,2}\s?[Ee]\d{1,3}\b""")
 
     /** Superscript/small-capital decorations ("ᴿᴬᵂ", "³⁸⁴⁰ᴾ", "◉") removed, spaces collapsed. */
     private fun stripDecorations(raw: String): String = raw
-        .replace(Regex("""[ᴀ-ᶿ⁰-₟²³¹◉●]"""), "")
+        .replace(DECORATIONS, "")
         // Non-breaking spaces (some panels put them after the tag) count as spaces; plain \s misses them.
-        .replace(Regex("""[\s\u00A0\u2007\u202F]+"""), " ")
+        .replace(WIDE_SPACES, " ")
         .trim()
 
     private fun latestYear() = java.time.Year.now().value + 1

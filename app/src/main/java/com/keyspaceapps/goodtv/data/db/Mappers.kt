@@ -32,8 +32,8 @@ internal fun CategoryRow.toDomain() = CategoryWithSource(Category(sourceId, Cont
 internal fun CategoryEntity.toDomain() = Category(sourceId, ContentKind.valueOf(kind), id, name)
 
 internal fun Category.toEntity() = CategoryEntity(sourceId, kind.name, id, name)
-internal fun LiveChannel.toEntity() = LiveChannelEntity(sourceId, id, categoryId, name, logoUrl, number, title, language, quality)
-internal fun LiveChannelEntity.toDomain() = LiveChannel(sourceId, id, categoryId, name, logoUrl, number, title ?: name, language, quality)
+internal fun LiveChannel.toEntity() = LiveChannelEntity(sourceId, id, categoryId, name, logoUrl, number, title, language, quality, epgChannelId)
+internal fun LiveChannelEntity.toDomain() = LiveChannel(sourceId, id, categoryId, name, logoUrl, number, title ?: name, language, quality, epgChannelId)
 internal fun Movie.toEntity() = MovieEntity(sourceId, id, categoryId, name, posterUrl, containerExtension, rating, addedAt, tmdbId, title, language, quality)
 internal fun MovieEntity.toDomain() = Movie(sourceId, id, categoryId, name, posterUrl, containerExtension, rating, addedAt, tmdbId, title ?: name, language, quality)
 internal fun Series.toEntity() = SeriesEntity(sourceId, id, categoryId, name, coverUrl, plot, rating, tmdbId, title, language, quality)

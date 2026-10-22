@@ -14,6 +14,7 @@ import com.keyspaceapps.goodtv.domain.MovieDetail
 import com.keyspaceapps.goodtv.domain.PlayableRef
 import com.keyspaceapps.goodtv.domain.SeriesDetail
 import com.keyspaceapps.goodtv.domain.SourceInfo
+import java.io.InputStream
 
 /** Scripted ChannelSource for JVM tests. Results are looked up per sourceId; unknown ids fail. */
 class FakeChannelSource : ChannelSource {
@@ -40,6 +41,15 @@ class FakeChannelSource : ChannelSource {
     override suspend fun fetchLive(sourceId: Long, config: SourceConfig): Result<LiveCatalog> {
         fetchLiveCalls += sourceId
         return liveResults[sourceId]?.invoke() ?: Result.failure(SourceException("No live script for $sourceId"))
+    }
+
+    /** Guide bytes per source id; a source without one fails. */
+    val guideResults = mutableMapOf<Long, suspend () -> Result<InputStream>>()
+    val openGuideCalls = mutableListOf<Long>()
+
+    override suspend fun openGuide(sourceId: Long, config: SourceConfig): Result<InputStream> {
+        openGuideCalls += sourceId
+        return guideResults[sourceId]?.invoke() ?: Result.failure(SourceException("No guide script for $sourceId"))
     }
 
     override suspend fun fetchMovieDetail(sourceId: Long, config: SourceConfig, movieId: String): Result<MovieDetail> {

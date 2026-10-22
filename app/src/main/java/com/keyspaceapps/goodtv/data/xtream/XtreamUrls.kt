@@ -33,6 +33,14 @@ object XtreamUrls {
         return builder.build()
     }
 
+    /** The provider's whole guide as one XMLTV file. */
+    fun xmltv(cfg: SourceConfig.Xtream): HttpUrl =
+        normalizeServer(cfg.server).toHttpUrl().newBuilder()
+            .addPathSegment("xmltv.php")
+            .addEncodedQueryParameter("username", encode(cfg.username))
+            .addEncodedQueryParameter("password", encode(cfg.password))
+            .build()
+
     /** Live prefers raw `.ts` (most reliable on real panels); falls back to `.m3u8`. */
     fun stream(cfg: SourceConfig.Xtream, ref: PlayableRef): String {
         val base = "${normalizeServer(cfg.server)}"

@@ -404,3 +404,30 @@ data class WatchListRow(
     val itemTmdbId: Long?,
     val rawName: String,
 )
+
+@Dao
+interface GuideDao {
+    @Query("DELETE FROM guide_channels WHERE origin = :origin") suspend fun deleteChannels(origin: String)
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertChannels(rows: List<GuideChannelEntity>)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertProgrammes(rows: List<GuideProgrammeEntity>)
+
+    @Query("SELECT * FROM guide_channels") fun observeChannels(): Flow<List<GuideChannelEntity>>
+
+    @Query("SELECT * FROM guide_programmes WHERE guideId IN (:guideIds) AND startMs < :untilMs AND endMs > :fromMs ORDER BY guideId, startMs")
+    fun observeProgrammes(guideIds: Set<String>, fromMs: Long, untilMs: Long): Flow<List<GuideProgrammeEntity>>
+
+    @Query("SELECT * FROM guide_programmes WHERE title LIKE '%' || :pattern || '%' ESCAPE '\\' AND endMs > :fromMs ORDER BY startMs LIMIT :limit")
+    suspend fun search(pattern: String, fromMs: Long, limit: Int): List<GuideProgrammeEntity>
+
+    @Query("DELETE FROM channel_guide") suspend fun deleteLinks()
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertLinks(rows: List<ChannelGuideEntity>)
+    @Query("SELECT * FROM channel_guide") fun observeLinks(): Flow<List<ChannelGuideEntity>>
+    @Query("SELECT DISTINCT sourceId FROM channel_guide") suspend fun linkedSourceIds(): List<Long>
+
+    @Query("SELECT fetchedAt FROM guide_meta WHERE origin = :origin") suspend fun fetchedAt(origin: String): Long?
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertMeta(row: GuideMetaEntity)
+
+    @Query("SELECT rowKey FROM favourite_channels") fun observeFavourites(): Flow<List<String>>
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun addFavourite(row: FavouriteChannelEntity)
+    @Query("DELETE FROM favourite_channels WHERE rowKey = :rowKey") suspend fun removeFavourite(rowKey: String)
+}

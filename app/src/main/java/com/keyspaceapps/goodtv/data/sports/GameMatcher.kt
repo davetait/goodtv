@@ -25,7 +25,8 @@ object GameMatcher {
     const val WINDOW_HOURS = 30L
 
     private val LEAGUE_WORDS = League.entries.map { it.label.lowercase() }.toSet()
-    private val CLOSED = listOf("ended ", "end ", "final ", "no event streaming")
+    /** Name starts (normalised) of a slot that is over or empty; the guide hides these too. */
+    internal val CLOSED = listOf("ended ", "end ", "final ", "no event streaming")
     /** Leagues outside the six whose teams share cities with them (Toronto, Montreal, …): a channel naming one is theirs. */
     private val OTHER_LEAGUES = setOf("cfl", "mls", "fc", "cf", "ahl", "echl", "ohl", "whl", "qmjhl", "chl", "ncaa", "ncaaf", "ncaab", "nwsl", "ufl", "xfl", "nll", "khl")
 
@@ -84,20 +85,24 @@ object GameMatcher {
         team.abbreviation.takeIf { it.length in 2..4 }?.let { add(normalize(it)) }
     }.filter { it.isNotEmpty() && it !in LEAGUE_WORDS }.distinct().map { it.split(' ') }
 
-    /** Lower case, no accents, letters and digits only, single spaces. */
+    private val MARKS = Regex("""\p{M}+""")
+    private val NOT_ALPHANUMERIC = Regex("""[^a-z0-9]+""")
+
+    /** Lower case, no accents, letters and digits only, single spaces. Patterns compiled once: this runs for every channel, often. */
     internal fun normalize(s: String): String =
-        Normalizer.normalize(s, Normalizer.Form.NFD).replace(Regex("""\p{M}+"""), "").lowercase()
-            .replace(Regex("""[^a-z0-9]+"""), " ").trim()
+        Normalizer.normalize(s, Normalizer.Form.NFD).replace(MARKS, "").lowercase()
+            .replace(NOT_ALPHANUMERIC, " ").trim()
 }
 
-/** Reads the date and time some channel names carry; without a zone, UTC (the matcher's window absorbs it). */
+/** Reads the date and time some channel names carry; without a zone (or with one it doesn't know), New York time: the lineup is US. */
 object ChannelTimes {
     private const val MONTHS = "jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec"
-    private val ISO = Regex("""(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?""")
+    private val ISO = Regex("""(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*\(?([A-Za-z]{1,4})\b)?""")
     private val DMY = Regex("""\b(\d{1,2})-(\d{1,2})-(\d{4})\s*\|?\s*(\d{1,2}):(\d{2})\s*(?:\(([A-Za-z]{1,4})\))?""")
     private val DAY_MONTH = Regex("""\b(\d{1,2})(?:st|nd|rd|th)?\s+($MONTHS)[a-z]*\.?\s+(?:(\d{4})\s+)?(\d{1,2}):(\d{2})(?::\d{2})?\s*(am|pm)?\b\s*([a-z]{1,4})?\b""", RegexOption.IGNORE_CASE)
     private val MONTH_DAY = Regex("""\b($MONTHS)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(?:(\d{4})\s+)?(\d{1,2}):(\d{2})(?::\d{2})?\s*(am|pm)?\b\s*([a-z]{1,4})?\b""", RegexOption.IGNORE_CASE)
 
+    private val NEW_YORK: ZoneId = ZoneId.of("America/New_York")
     private val ZONES: Map<String, ZoneId> = mapOf(
         "UTC" to ZoneOffset.UTC, "GMT" to ZoneOffset.UTC, "Z" to ZoneOffset.UTC,
         "EDT" to ZoneOffset.ofHours(-4), "EST" to ZoneOffset.ofHours(-5), "CDT" to ZoneOffset.ofHours(-5), "CST" to ZoneOffset.ofHours(-6),
@@ -110,7 +115,7 @@ object ChannelTimes {
     fun parse(name: String, now: Instant): Instant? {
         ISO.find(name)?.let { m ->
             val g = m.groupValues
-            return at(g[1].toInt(), g[2].toInt(), g[3].toInt(), g[4].toInt(), g[5].toInt(), g[6].toIntOrNull() ?: 0, null)
+            return at(g[1].toInt(), g[2].toInt(), g[3].toInt(), g[4].toInt(), g[5].toInt(), g[6].toIntOrNull() ?: 0, g[7])
         }
         DMY.find(name)?.let { m ->
             val g = m.groupValues
@@ -144,7 +149,7 @@ object ChannelTimes {
     }
 
     private fun at(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int, zone: String?): Instant? = runCatching {
-        val z = zone?.uppercase()?.let { ZONES[it] } ?: ZoneOffset.UTC
+        val z = zone?.uppercase()?.let { ZONES[it] } ?: NEW_YORK
         LocalDateTime.of(year, month, day, hour, minute, second).atZone(z).toInstant()
     }.getOrNull()
 }
