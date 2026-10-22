@@ -176,7 +176,7 @@ class AppGraph(val context: Context) {
     private val liveRefresher: LiveRefresher by lazy { LiveRefresher(store, sourceRegistry, { syncManager.state.value is SyncState.Syncing }) }
 
     /** The Live TV guide: the lineup with its programmes, favourites and search. */
-    val guide: GuideRepository by lazy { GuideRepository(store, guideStore, guideRefresher, liveRefresher, System::currentTimeMillis, Dispatchers.Default) }
+    val guide: GuideRepository by lazy { GuideRepository(store, guideStore, guideRefresher, liveRefresher, System::currentTimeMillis, Dispatchers.Default, lineups = lineupStore) }
 
     /** Background TMDB genre fill for movies; started on launch after stale sources refresh. */
     val genreFetcher: TmdbGenreFetcher by lazy {
