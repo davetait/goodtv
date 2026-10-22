@@ -97,9 +97,9 @@ class GuideRefresherTest {
 
     private val tempDir by lazy { tmp.newFolder() }
 
-    private fun refresherWith(limits: GuideLimits = GuideLimits(), timeoutMs: Long = GuideRefresher.DOWNLOAD_TIMEOUT_MS, store: GuideStore = guide, io: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Unconfined) = GuideRefresher(
+    private fun refresherWith(limits: GuideLimits = GuideLimits(), timeoutMs: Long = GuideRefresher.DOWNLOAD_TIMEOUT_MS, store: GuideStore = guide, io: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Unconfined, early: EarlyRefreshLog = MemoryEarlyRefreshLog()) = GuideRefresher(
         store, library, SourceRegistry(listOf(channelSource)), EpgShareSource(OkHttpClient(), server.url("/epgshare01/")),
-        playback, { now }, io, tempDir, { warnings += it }, limits, timeoutMs,
+        playback, { now }, io, tempDir, { warnings += it }, limits, timeoutMs, early,
     )
 
     private fun leftovers() = tempDir.listFiles().orEmpty().toList()
@@ -267,6 +267,22 @@ class GuideRefresherTest {
         addSource("US: NOTHING MATCHES THIS" to null)
         refresher.refreshIfStale(); refresher.refreshIfStale()
         assertEquals(first * 3, hits.size)
+    }
+
+    /** A source nothing matches costs one early download a day, not one per cold start: the attempt outlives the process. */
+    @Test fun earlyRefreshForAnUnlinkedSourceOncePerDayAcrossRestarts() = runBlocking {
+        val log = MemoryEarlyRefreshLog()
+        refresher = refresherWith(early = log)
+        refresher.refreshIfStale()
+        val first = hits.size
+        val lonely = addSource("US: NOTHING MATCHES THIS" to null)
+        refresher.refreshIfStale()
+        assertEquals(first * 2, hits.size)
+        assertEquals(now, log.lastEarlyRefresh(lonely))
+        // A restart (a new refresher, the same saved log) an hour later downloads nothing.
+        now += 3_600_000L
+        refresherWith(early = log).refreshIfStale()
+        assertEquals(first * 2, hits.size)
     }
 
     @Test fun oneMatchRunsOverBothSources() = runBlocking {

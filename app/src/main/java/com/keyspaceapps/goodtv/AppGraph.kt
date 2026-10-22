@@ -137,7 +137,7 @@ class AppGraph(val context: Context) {
         val epgShare = if (GoodTvApp.disableGuideDownloads) EpgShareSource(okHttp, "http://127.0.0.1:9/".toHttpUrl()) else EpgShareSource(okHttp)
         GuideRefresher(
             guideStore, store, sourceRegistry, epgShare, playback,
-            System::currentTimeMillis, Dispatchers.IO, File(context.cacheDir, "guide"),
+            System::currentTimeMillis, Dispatchers.IO, File(context.cacheDir, "guide"), early = settings,
         )
     }
 

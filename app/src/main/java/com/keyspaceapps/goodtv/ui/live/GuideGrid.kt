@@ -97,9 +97,16 @@ internal enum class CellKind { PROGRAMME, LOOP, EVENT, NO_GUIDE }
 
 /**
  * A programme clipped to the window ([fromMs], [untilMs]); a loop or a row without a guide is one cell spanning it.
- * An event slot is one cell too (see [eventCell]).
+ * An event slot is one cell too (see [eventCell]); [startsMs] is set on one whose start lies outside the window.
  */
-internal data class GuideCell(val id: String, val kind: CellKind, val programme: GuideProgramme?, val fromMs: Long, val untilMs: Long)
+internal data class GuideCell(
+    val id: String,
+    val kind: CellKind,
+    val programme: GuideProgramme?,
+    val fromMs: Long,
+    val untilMs: Long,
+    val startsMs: Long? = null,
+)
 
 internal fun cellsOf(line: ChannelLine, windowStart: Long): List<GuideCell> {
     val end = windowStart + GuideTime.WINDOW_MS
@@ -118,7 +125,8 @@ internal fun cellsOf(line: ChannelLine, windowStart: Long): List<GuideCell> {
 
 /**
  * An event slot from the start time in its name (the row's, else its first feed's) for [GuideTime.EVENT_MS],
- * clipped to the window; across the whole window when no time parses or the slot lies outside it.
+ * clipped to the window. A slot outside the window spans it, dim, saying when it starts ([GuideCell.startsMs]);
+ * one with no time spans it as if on now.
  */
 private fun eventCell(line: ChannelLine, windowStart: Long, end: Long): GuideCell {
     val row = line.row
@@ -127,10 +135,17 @@ private fun eventCell(line: ChannelLine, windowStart: Long, end: Long): GuideCel
     if (start != null) {
         val from = maxOf(start, windowStart)
         val until = minOf(start + GuideTime.EVENT_MS, end)
-        if (until > from) return GuideCell("${line.key}|$start", CellKind.EVENT, null, from, until)
+        return if (until > from) GuideCell("${line.key}|$start", CellKind.EVENT, null, from, until)
+        else GuideCell("${line.key}|$start", CellKind.EVENT, null, windowStart, end, startsMs = start)
     }
     return GuideCell("${line.key}|all", CellKind.EVENT, null, windowStart, end)
 }
+
+/** "Starts 11:00 PM", "Tomorrow 8:00 PM", "Started 7:00 PM": when an event slot outside the window starts. */
+@Composable
+internal fun eventStart(startMs: Long, now: Long, timeLabel: (Long) -> String): String =
+    if (startMs < now) stringResource(R.string.guide_event_started, timeLabel(startMs))
+    else dayAndTime(startMs, now, timeLabel, today = R.string.guide_event_starts)
 
 /** The cell showing [t], else the first after it, else the last. */
 internal fun cellAt(cells: List<GuideCell>, t: Long): GuideCell =
@@ -281,7 +296,7 @@ internal fun GuideGrid(
                 items(lines, key = { it.key }, contentType = { it::class }) { line ->
                     when (line) {
                         is SectionLine -> SectionTitle(line)
-                        is ChannelLine -> ChannelRow(line, windowStart, column, focus, actions)
+                        is ChannelLine -> ChannelRow(line, windowStart, now, column, focus, actions, timeLabel)
                         is MoreLine -> MoreRow(line, focus, actions)
                     }
                 }
@@ -305,7 +320,7 @@ private fun SectionTitle(line: SectionLine) {
 }
 
 @Composable
-private fun ChannelRow(line: ChannelLine, windowStart: Long, column: Dp, focus: GuideFocus, actions: GuideActions) {
+private fun ChannelRow(line: ChannelLine, windowStart: Long, now: Long, column: Dp, focus: GuideFocus, actions: GuideActions, timeLabel: (Long) -> String) {
     val cells = remember(line, windowStart) { cellsOf(line, windowStart) }
     Row(Modifier.height(RowHeight)) {
         ChannelCell(line, focus, actions)
@@ -318,6 +333,8 @@ private fun ChannelRow(line: ChannelLine, windowStart: Long, column: Dp, focus: 
                     ProgrammeCell(
                         cell,
                         line.row,
+                        now,
+                        timeLabel,
                         onClick = { actions.onCell(line, cell) },
                         modifier = Modifier.offset(x = left).width(width).fillMaxHeight()
                             .guideFocusable(focus, cell.id) { actions.onFocused(cell.id, line.row, cell) }
@@ -366,8 +383,8 @@ private fun ChannelCell(line: ChannelLine, focus: GuideFocus, actions: GuideActi
 }
 
 @Composable
-private fun ProgrammeCell(cell: GuideCell, row: GuideRow, onClick: () -> Unit, modifier: Modifier) {
-    val dim = cell.kind == CellKind.NO_GUIDE
+private fun ProgrammeCell(cell: GuideCell, row: GuideRow, now: Long, timeLabel: (Long) -> String, onClick: () -> Unit, modifier: Modifier) {
+    val dim = cell.kind == CellKind.NO_GUIDE || cell.startsMs != null
     Surface(
         onClick = onClick,
         modifier = modifier,
@@ -385,7 +402,7 @@ private fun ProgrammeCell(cell: GuideCell, row: GuideRow, onClick: () -> Unit, m
                 when (cell.kind) {
                     CellKind.PROGRAMME -> cell.programme!!.title
                     CellKind.LOOP -> stringResource(R.string.guide_all_day, row.loopShow.orEmpty())
-                    CellKind.EVENT -> row.name
+                    CellKind.EVENT -> cell.startsMs?.let { eventStart(it, now, timeLabel) } ?: row.name
                     CellKind.NO_GUIDE -> stringResource(R.string.guide_no_info)
                 },
                 style = MaterialTheme.typography.bodyMedium.copy(

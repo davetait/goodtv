@@ -33,6 +33,23 @@ private const val PROVIDER_PREFIX = "P:"
 /** Most bytes one download may write to disk, and most it may unpack to when read. */
 data class GuideCap(val download: Long, val unpacked: Long)
 
+/**
+ * When each source last had an early epgshare01 refresh for having no guide links. Kept across restarts
+ * (see [com.keyspaceapps.goodtv.data.settings.AppSettings]), so a source nothing matches costs one extra
+ * download a day rather than one per cold start.
+ */
+interface EarlyRefreshLog {
+    suspend fun lastEarlyRefresh(sourceId: Long): Long?
+    suspend fun recordEarlyRefresh(sourceId: Long, atMs: Long)
+}
+
+/** An [EarlyRefreshLog] that lasts as long as the process (tests). */
+class MemoryEarlyRefreshLog : EarlyRefreshLog {
+    private val at = HashMap<Long, Long>()
+    override suspend fun lastEarlyRefresh(sourceId: Long): Long? = synchronized(at) { at[sourceId] }
+    override suspend fun recordEarlyRefresh(sourceId: Long, atMs: Long) { synchronized(at) { at[sourceId] = atMs } }
+}
+
 /** Size limits that keep a hostile or broken server from filling the disk or the CPU. */
 data class GuideLimits(
     val locals: GuideCap = GuideCap(150 * MIB, 1024 * MIB),
@@ -72,10 +89,9 @@ class GuideRefresher(
     private val warn: (String) -> Unit = { Log.w("GoodTV", it) },
     private val limits: GuideLimits = GuideLimits(),
     private val timeoutMs: Long = DOWNLOAD_TIMEOUT_MS,
+    private val early: EarlyRefreshLog = MemoryEarlyRefreshLog(),
 ) {
     private val lock = Mutex()
-    /** Sources already given a refresh for lacking links, so one with no match at all costs one per process. */
-    private val triedUnlinked = HashSet<Long>()
 
     suspend fun refreshIfStale(): Unit = lock.withLock { withContext(io) { refresh() } }
 
@@ -85,11 +101,14 @@ class GuideRefresher(
         if (lineup.isEmpty()) return
         val stored = store.observeLinks().first()
         val linkedSources = stored.mapTo(HashSet()) { it.sourceId }
-        val unlinked = lineup.mapTo(HashSet()) { it.channel.sourceId }.filter { it !in linkedSources && it !in triedUnlinked }
+        // A source without links gets one early refresh a day; one nothing matches would otherwise download on every start.
+        val unlinked = lineup.mapTo(HashSet()) { it.channel.sourceId }.filter { id ->
+            id !in linkedSources && early.lastEarlyRefresh(id)?.let { now - it < GUIDE_MAX_AGE_MS } != true
+        }
         val epgDue = isStale(GuideOrigin.EPGSHARE, now) || unlinked.isNotEmpty()
         val providerDue = isStale(GuideOrigin.PROVIDER, now) && !playback.playing.value
         if (!epgDue && !providerDue) return
-        triedUnlinked += unlinked
+        unlinked.forEach { early.recordEarlyRefresh(it, now) }
 
         // Whatever an earlier run left behind (a killed process) is garbage.
         tempDir.mkdirs()

@@ -49,7 +49,8 @@ internal fun GuideDetails(focusedState: State<GuideFocused?>, now: Long, timeLab
             null -> row.programmes.firstOrNull { it.startMs <= now && now < it.endMs }
             else -> null
         }
-        val onNow = programme == null || (programme.startMs <= now && now < programme.endMs)
+        val starts = focused.cell?.startsMs
+        val onNow = starts == null && (programme == null || (programme.startMs <= now && now < programme.endMs))
         Box(Modifier.size(width = 160.dp, height = 90.dp).clip(RoundedCornerShape(5.dp)).background(Color(0xFF2A3045))) {
             val picture = programme?.imageUrl
             (picture ?: row.logoUrl)?.let {
@@ -70,7 +71,7 @@ internal fun GuideDetails(focusedState: State<GuideFocused?>, now: Long, timeLab
                     programme.genres.firstOrNull(),
                     if (onNow) stringResource(R.string.minutes_left, minutesLeft(programme, now)) else null,
                 ).joinToString(" · ")
-            } else null
+            } else starts?.let { eventStart(it, now, timeLabel) }
             meta?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             Spacer(Modifier.height(4.dp))
             programme?.description?.let {

@@ -156,11 +156,17 @@ private fun SearchResult(hit: GuideSearchHit, now: Long, timeLabel: (Long) -> St
 private fun whenOf(hit: GuideSearchHit, now: Long, timeLabel: (Long) -> String): String? {
     val p = hit.programme ?: return hit.row.loopShow?.let { stringResource(R.string.guide_all_day, it) }
     if (p.startMs <= now && now < p.endMs) return stringResource(R.string.guide_on_now_left, minutesLeft(p, now))
+    return dayAndTime(p.startMs, now, timeLabel)
+}
+
+/** "Today 9:00 PM" ([today] holds the time), "Tomorrow 9:00 PM", else "Fri 9:00 PM", by the device's calendar. */
+@Composable
+internal fun dayAndTime(t: Long, now: Long, timeLabel: (Long) -> String, today: Int = R.string.guide_today_at): String {
     val zone = ZoneId.systemDefault()
-    val day = Instant.ofEpochMilli(p.startMs).atZone(zone).toLocalDate()
+    val day = Instant.ofEpochMilli(t).atZone(zone).toLocalDate()
     return when (ChronoUnit.DAYS.between(Instant.ofEpochMilli(now).atZone(zone).toLocalDate(), day)) {
-        0L -> stringResource(R.string.guide_today_at, timeLabel(p.startMs))
-        1L -> stringResource(R.string.guide_tomorrow_at, timeLabel(p.startMs))
-        else -> stringResource(R.string.guide_day_at, day.dayOfWeek.getDisplayName(TextStyle.SHORT, LocalConfiguration.current.locales[0]), timeLabel(p.startMs))
+        0L -> stringResource(today, timeLabel(t))
+        1L -> stringResource(R.string.guide_tomorrow_at, timeLabel(t))
+        else -> stringResource(R.string.guide_day_at, day.dayOfWeek.getDisplayName(TextStyle.SHORT, LocalConfiguration.current.locales[0]), timeLabel(t))
     }
 }

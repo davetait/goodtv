@@ -89,9 +89,10 @@ class HomeTabsTest {
     }
 
     /**
-     * The Live tab is the guide: focus starts on the first row's cell ("No guide info" here). UP goes to the
-     * genre chips, UP again to the tab whose horizontal span overlaps the chip ("Sources"), not the
-     * selected tab. LEFT then walks along the tabs and Select switches.
+     * The Live tab is the guide: focus starts on the first row's cell ("No guide info" here, as wide as the
+     * row). UP goes to the row above it (a genre chip or the search field to their right), UP again to the
+     * tab whose horizontal span overlaps it ("Sources"), not the selected tab. LEFT then walks along the
+     * tabs and Select switches.
      */
     @Test
     fun upFromTheGuideReachesTheTabsAndLeftWalksTabs() {

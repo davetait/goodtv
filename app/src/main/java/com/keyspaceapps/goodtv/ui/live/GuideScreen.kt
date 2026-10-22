@@ -157,8 +157,9 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
     }
 
     // Select on what's on now (or a row without a guide) plays it; a later programme only shows its details, which follow focus.
+    // The same reading the screen shows ("On now", the now line), so what looks on now plays.
     fun playIfOnNow(fromId: String, row: GuideRow, p: GuideProgramme?) {
-        val t = clock()
+        val t = vm.now.value
         if (p == null || (p.startMs <= t && t < p.endMs)) playRow(fromId, row)
     }
 
@@ -172,7 +173,8 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
             },
             onChannel = { line -> playRow(line.channelId, line.row) },
             onMenu = { row -> menuFor = row },
-            onCell = { line, cell -> playIfOnNow(cell.id, line.row, cell.programme) },
+            // An event slot outside the window only shows when it starts.
+            onCell = { line, cell -> if (cell.startsMs == null) playIfOnNow(cell.id, line.row, cell.programme) },
             onMore = { line -> vm.toggleMore(line.section) },
             onPage = { forward, line ->
                 val old = vm.window
@@ -209,6 +211,8 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
                     // Down from the chips goes to the first result, or to what's on now in the first row.
                     onDown = { focusOn(if (searching) results?.firstOrNull()?.let(::searchId) else defaultTarget(lines, windowStart, now)) },
                     onSelect = { f ->
+                        // A chip is a way back from a search to the grid.
+                        vm.setQuery("")
                         vm.select(f)
                         scope.launch {
                             vm.view.first { it?.filter == f }

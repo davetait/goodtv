@@ -189,7 +189,8 @@ class GuideRepository(
                 }
             }
         }
-        .shareIn(scope, SharingStarted.WhileSubscribed(5_000, replayExpirationMillis = 0), replay = 1)
+        // Kept [KEEP_MS] after the last screen leaves, so coming back to the Live tab within 5 minutes is instant.
+        .shareIn(scope, SharingStarted.WhileSubscribed(KEEP_MS, replayExpirationMillis = 0), replay = 1)
 
     private fun row(r: Resolved, favourites: Set<String>, programmes: Map<String, List<GuideProgramme>>) = GuideRow(
         key = r.base.key, name = r.base.name, logoUrl = r.logoUrl, genre = r.base.genre, feeds = r.base.feeds,
@@ -293,6 +294,7 @@ class GuideRepository(
         private const val ID_CHUNK = 500
         private const val RETRY_MS = 5_000L
         private const val SETTLE_MS = 250L
+        private const val KEEP_MS = 5 * 60_000L
         private val APP_PREFIXES = listOf("prime ", "roku ", "tubi ")
         private val PROVIDER_TAG = Regex("""^\s*[A-Z0-9&/+]{1,6}:\s*""")
     }

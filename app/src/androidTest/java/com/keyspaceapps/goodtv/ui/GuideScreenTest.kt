@@ -40,7 +40,7 @@ import com.keyspaceapps.goodtv.ui.nav.PlayerKey
 import com.keyspaceapps.goodtv.ui.sports.SportsFormats
 import com.keyspaceapps.goodtv.ui.theme.GoodTvTheme
 import java.time.Instant
-import java.time.ZoneOffset
+import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.math.abs
@@ -442,14 +442,17 @@ class GuideScreenTest {
     }
 
     /** An event slot's cell starts at the time in its name and lasts three hours; one without a time spans the window. */
+    // Event names without a zone are New York time.
+    private val newYork = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.of("America/New_York"))
+    private fun slot(key: String, name: String, feedName: String) =
+        GuideRow(key, name, null, LiveGenre.EVENTS, listOf(feed(key, feedName, "PPV EVENTS")), emptyList(), null, false)
+    private fun events(vararg rows: GuideRow) = FakeGuide(listOf(news), events = listOf(GuideSection("Events", null, rows.toList(), emptyList())))
+
     @Test fun eventsChipShowsSlotsAtTheirTime() {
-        val utc = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneOffset.UTC)
-        fun slot(key: String, name: String, feedName: String) =
-            GuideRow(key, name, null, LiveGenre.EVENTS, listOf(feed(key, feedName, "PPV EVENTS")), emptyList(), null, false)
-        val bills = slot("event bills", "NFL Bills vs Jets", "PPV 01: NFL Bills vs Jets ${utc.format(Instant.ofEpochMilli(at(19)))}")
-        val boxing = slot("event boxing", "Boxing Undercard", "PPV 02: Boxing Undercard ${utc.format(Instant.ofEpochMilli(at(17)))}")
+        val bills = slot("event bills", "NFL Bills vs Jets", "PPV 01: NFL Bills vs Jets ${newYork.format(Instant.ofEpochMilli(at(19)))}")
+        val boxing = slot("event boxing", "Boxing Undercard", "PPV 02: Boxing Undercard ${newYork.format(Instant.ofEpochMilli(at(17)))}")
         val ufc = slot("event ufc", "UFC Fight Night", "PPV 03: UFC FIGHT NIGHT")
-        val guide = show(FakeGuide(listOf(news), events = listOf(GuideSection("Events", null, listOf(bills, boxing, ufc), emptyList()))))
+        val guide = show(events(bills, boxing, ufc))
         waitFocused("Special Report")
         composeRule.onNodeWithText("Events").requestFocus()
         keys("C")
@@ -470,6 +473,39 @@ class GuideScreenTest {
         near("boxing width", cell("Boxing Undercard").size.width.toFloat(), 4 * column)
         near("ufc left", cell("UFC Fight Night").positionInRoot.x, x0)
         near("ufc width", cell("UFC Fight Night").size.width.toFloat(), 6 * column)
+    }
+
+    @Test fun choosingAChipWhileSearchingClearsTheSearch() {
+        show(FakeGuide(listOf(news, nbc), hits = searches))
+        waitFocused("Special Report")
+        searchFor("hannity")
+        waitFor("Today ${time(21, 0)}")
+        composeRule.onNodeWithText("News").requestFocus()
+        keys("C")
+        waitFor("Special Report")
+        // The grid is back and the field is empty.
+        assertEquals(0, composeRule.onAllNodes(hasText("hannity")).fetchSemanticsNodes().size)
+    }
+
+    /** A slot starting after the window is a dim "Starts …" cell, not an on-now one; Select only shows its details. */
+    @Test fun eventAfterTheWindowSaysWhenItStarts() {
+        val late = slot("event late", "UFC Main Card", "PPV 04: UFC Main Card ${newYork.format(Instant.ofEpochMilli(at(23)))}")
+        val tomorrow = slot("event next", "Boxing Rematch", "PPV 05: Boxing Rematch ${newYork.format(Instant.ofEpochMilli(at(20) + dayMs))}")
+        show(events(late, tomorrow))
+        waitFocused("Special Report")
+        composeRule.onNodeWithText("Events").requestFocus()
+        keys("C")
+        waitFor("Starts ${time(23, 0)}")
+        composeRule.onNodeWithText("Tomorrow ${time(20, 0)}").assertIsDisplayed()
+        keys("D")
+        // The details panel says when it starts too; the focused one is the cell.
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasText("Starts ${time(23, 0)}") and isFocused()).fetchSemanticsNodes().size == 1 }
+        waitFor("UFC Main Card")
+        keys("C")
+        composeRule.waitForIdle()
+        assertNull(played)
+        assertEquals(2, composeRule.onAllNodes(hasText("Starts ${time(23, 0)}")).fetchSemanticsNodes().size)
+        assertEquals(0, composeRule.onAllNodes(hasText("Select to watch")).fetchSemanticsNodes().size)
     }
 
     @Test fun chipChangeResetsTheWindowAndDownGoesToNow() {

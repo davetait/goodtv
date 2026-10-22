@@ -71,9 +71,10 @@ class GuideViewModel(
     /** Titles of the network sections whose "More" row is open. */
     val expanded: StateFlow<Set<String>> = _expanded
 
+    /** Kept five minutes after the screen leaves (another tab, the player), like the guide's shared lineup. */
     val view: StateFlow<GuideView?> = combine(_filter, windowStart, ::Pair)
         .flatMapLatest { (f, start) -> source.board(f, start).map { GuideView(f, it) } }
-        .stateIn(viewModelScope, sharing, null)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5 * 60_000L), null)
 
     /**
      * The clock, re-read every 30 s (and whenever the screen comes back) for the now line and "min left";
