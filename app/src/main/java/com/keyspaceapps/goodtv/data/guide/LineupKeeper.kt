@@ -13,6 +13,9 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.launch
@@ -36,15 +39,32 @@ class LineupKeeper(
     /** The install's PackageInfo.lastUpdateTime (AppGraph reads it; tests pass their own). */
     private val appVersion: Long,
 ) {
+    private val _building = MutableStateFlow(false)
+
+    /**
+     * True from [start] until its first check is done, and while any later check runs. With nothing saved, the guide
+     * waits for this keeper's save while it's true instead of building the lineup a second time.
+     */
+    val building: StateFlow<Boolean> = _building.asStateFlow()
+
     /** Call once per process. The first generation is checked at once, later ones after [debounceMs] without a newer one. */
+    fun start(scope: CoroutineScope): Job {
+        _building.value = true
+        return scope.launch(compute) {
+            watch()
+        }.also { job -> job.invokeOnCompletion { _building.value = false } }
+    }
+
     @OptIn(FlowPreview::class)
-    fun start(scope: CoroutineScope): Job = scope.launch(compute) {
+    private suspend fun watch() {
         var first = true
         lineups.observeGeneration()
-            // A failing generation query (a closed or locked database) is warned about and subscribed again shortly.
+            // A failing generation query (a closed or locked database) is warned about and subscribed again shortly;
+            // meanwhile the keeper isn't building, so the guide can fall back to its own build.
             .retryWhen { e, _ ->
                 if (e is CancellationException) return@retryWhen false
                 warn("Lineup generation failed: ${e.javaClass.simpleName}")
+                _building.value = false
                 delay(RETRY_MS)
                 true
             }
@@ -57,12 +77,15 @@ class LineupKeeper(
 
     /** Any failure (a store error, a full disk, even running out of memory on a big lineup) keeps the old lineup until the next generation. */
     private suspend fun check() {
+        _building.value = true
         try {
             keepCurrent()
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
             warn("Lineup build failed: ${e.javaClass.simpleName}")
+        } finally {
+            _building.value = false
         }
     }
 

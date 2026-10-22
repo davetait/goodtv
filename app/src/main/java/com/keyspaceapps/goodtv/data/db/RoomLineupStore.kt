@@ -33,7 +33,9 @@ class RoomLineupStore(private val db: GoodTvDatabase) : LineupStore {
     }
 
     override suspend fun save(lineup: SavedLineup) = db.withTransaction {
-        dao.deleteRows() // feeds cascade
+        // Feeds first, explicitly: the foreign key's cascade would do it only while foreign keys are on.
+        dao.deleteFeeds()
+        dao.deleteRows()
         dao.deleteMeta()
         lineup.rows.chunked(BATCH).forEach { chunk -> dao.insertRows(chunk.map { it.toEntity() }) }
         lineup.rows.asSequence()

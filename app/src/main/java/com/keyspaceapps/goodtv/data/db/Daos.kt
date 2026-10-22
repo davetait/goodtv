@@ -436,6 +436,7 @@ data class HiddenLiveRow(val sourceId: Long, val categoryId: String)
 
 @Dao
 interface LineupDao {
+    @Query("DELETE FROM lineup_feeds") suspend fun deleteFeeds()
     @Query("DELETE FROM lineup_rows") suspend fun deleteRows()
     @Query("DELETE FROM lineup_meta") suspend fun deleteMeta()
     @Insert suspend fun insertRows(rows: List<LineupRowEntity>)

@@ -11,6 +11,7 @@ import com.keyspaceapps.goodtv.testing.InMemoryGuideStore
 import com.keyspaceapps.goodtv.testing.InMemoryLineupStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
@@ -20,6 +21,7 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -68,10 +70,11 @@ class GuideRepositoryTest {
         lineups: LineupStore? = null,
         refresher: GuideRefresher = GuideRefresher(guide, refresherLibrary, SourceRegistry(emptyList()), EpgShareSource(OkHttpClient()), PlaybackState(), { now }, dispatcher, tmp.newFolder()),
         store: GuideStore = limited,
+        building: StateFlow<Boolean>? = null,
     ) = GuideRepository(
         lib, store, refresher,
         LiveRefresher(lib, SourceRegistry(listOf(FakeChannelSource())), { false }, { now }),
-        { now }, dispatcher, { warnings += it }, { timings += it }, lineups,
+        { now }, dispatcher, { warnings += it }, { timings += it }, lineups, building,
     )
     private val warnings = ArrayList<String>()
     private val timings = java.util.concurrent.CopyOnWriteArrayList<String>()
@@ -485,6 +488,59 @@ class GuideRepositoryTest {
         assertEquals(listOf("CNN"), repo.board(GuideFilter.ALL, windowStart).first { it.programmesLoaded }.names())
         assertEquals(1, lineupCollections)
         assertTrue(timings.toString(), timings.none { it.startsWith("first board (saved)") })
+    }
+
+    /** The library's lineup, read 200 ms late (a big query); every read is counted in lineupCollections. */
+    private val slowLibrary: LibraryStore = object : LibraryStore by fake {
+        override fun observeSportsCandidates() = flow { lineupCollections++; delay(200); emitAll(lineup) }
+    }
+
+    /** First launch after install: the repository waits for the keeper's save instead of building the lineup a second time. */
+    @Test fun freshInstallBuildsOnce() = runBlocking {
+        lineup.value = listOf(feed("US: CNN HD", NEWS))
+        val lineups = InMemoryLineupStore(Visibility(setOf(1L), emptySet()))
+        val keeper = LineupKeeper(slowLibrary, lineups, Dispatchers.Default, warn = { warnings += it }, debug = {}, appVersion = 1)
+        val job = keeper.start(this)
+        val repo = repoFor(slowLibrary, Dispatchers.Default, lineups, building = keeper.building)
+        val b = withTimeout(5_000) { repo.board(GuideFilter.ALL, windowStart).first { it.programmesLoaded } }
+        job.cancel()
+        assertEquals(listOf("CNN"), b.names())
+        assertEquals(1, lineupCollections)
+        assertTrue(lineups.saved() != null)
+        assertTrue(timings.toString(), timings.any { it.startsWith("first board (saved)") })
+    }
+
+    /** A keeper whose build failed (nothing saved) leaves the lineup to the repository's own build. */
+    @Test fun failedKeeperBuildFallsBackToMemory() = runBlocking {
+        lineup.value = listOf(feed("US: CNN HD", NEWS))
+        val failing: LibraryStore = object : LibraryStore by fake {
+            override fun observeSportsCandidates() = flow<List<ChannelCandidate>> { throw java.io.IOException("boom") }
+        }
+        val lineups = InMemoryLineupStore(Visibility(setOf(1L), emptySet()))
+        val keeper = LineupKeeper(failing, lineups, Dispatchers.Default, warn = { warnings += it }, debug = {}, appVersion = 1)
+        val job = keeper.start(this)
+        val repo = repoFor(library, Dispatchers.Default, lineups, building = keeper.building)
+        val b = withTimeout(5_000) { repo.board(GuideFilter.ALL, windowStart).first { it.programmesLoaded } }
+        job.cancel()
+        assertEquals(listOf("CNN"), b.names())
+        assertEquals(1, lineupCollections)
+        assertEquals(listOf("Lineup build failed: IOException"), warnings)
+    }
+
+    /** Once the saved lineup is in use, the in-memory fallback build isn't kept. */
+    @Test fun savedRowsReleaseTheFallbackBuild() {
+        lineup.value = listOf(feed("US: CNN HD", NEWS))
+        val lineups = InMemoryLineupStore(Visibility(setOf(1L), emptySet()))
+        val repo = repoFor(library, Dispatchers.Default, lineups)
+        val cache = GuideRepository::class.java.getDeclaredField("lineupCache").apply { isAccessible = true }
+        var cachedWhileInUse = false
+        val boards = boardsUntil(repo.board(GuideFilter.ALL, windowStart), {
+            cachedWhileInUse = cache.get(repo) != null
+            lineups.save(savedOf(feed("US: A&E HD", ENT)))
+        }) { bs -> bs.lastOrNull()?.names() == listOf("A&E") }
+        assertTrue("the fallback build is cached while in use", cachedWhileInUse)
+        assertEquals(listOf("A&E"), boards.last().names())
+        assertNull(cache.get(repo))
     }
 
     /** The guide store, with every programme query answering [ms] late (virtual time). */

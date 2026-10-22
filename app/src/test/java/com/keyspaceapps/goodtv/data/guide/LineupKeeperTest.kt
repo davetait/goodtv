@@ -82,6 +82,27 @@ class LineupKeeperTest {
         assertEquals(0, savedReads)
     }
 
+    /** Building from start until the first check ends (saved or failed), and again while a later check runs. */
+    @Test fun buildingCoversEachCheck() = runTest {
+        stall = true
+        val keeper = keeper()
+        assertEquals(false, keeper.building.value)
+        val job = keeper.start(backgroundScope)
+        assertEquals("from start, before the first check runs", true, keeper.building.value)
+        advanceTimeBy(DEBOUNCE * 10)
+        assertEquals(true, keeper.building.value)
+        job.cancel()
+        runCurrent()
+        assertEquals(false, keeper.building.value)
+
+        stall = false
+        failure = java.io.IOException("x")
+        val failing = keeper()
+        failing.start(backgroundScope)
+        settle()
+        assertEquals("a failed build isn't building", false, failing.building.value)
+    }
+
     @Test fun firstCheckRunsAtOnce() = runTest {
         keeper().start(backgroundScope)
         runCurrent()

@@ -84,6 +84,16 @@ class LineupStoreTest {
         db.query("SELECT COUNT(*) FROM lineup_feeds", null).use { c -> c.moveToFirst(); assertEquals(3, c.getInt(0)) }
     }
 
+    /** Saving clears the old feeds itself, not only through the foreign key's cascade. */
+    @Test
+    fun saveClearsOldFeedsWithoutTheCascade() = runBlocking {
+        db.openHelper.writableDatabase.execSQL("PRAGMA foreign_keys = OFF")
+        lineup.save(SavedLineup(listOf(row("a", 0, true), row("b", 1, false)), 1, 1))
+        lineup.save(SavedLineup(listOf(row("c", 0, false)), 2, 2))
+        db.query("SELECT COUNT(*) FROM lineup_feeds", null).use { c -> c.moveToFirst(); assertEquals(3, c.getInt(0)) }
+        assertEquals(listOf("c"), lineup.saved()!!.rows.map { it.key })
+    }
+
     @Test
     fun saveHandlesALineupLargerThanOneBatch() = runBlocking {
         val rows = (0 until 1200).map { i -> row("r%04d".format(i), i, full = false).copy(feeds = listOf(feed(0, "r%04d".format(i)))) }

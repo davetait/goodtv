@@ -14,7 +14,8 @@ class GoodTvApp : Application() {
         graph = AppGraph(this)
         graph.startGenreFillAfterSyncs()
         graph.startGuideRefreshAfterSyncs()
-        graph.lineupKeeper.start(graph.appScope)
+        // Off Main: resolving the keeper starts it, opening the database (Room's build) and reading the package info.
+        graph.appScope.launch { graph.lineupKeeper }
         graph.appScope.launch {
             graph.repository.ensureDebugSource(
                 DebugSource.fromBuildConfig(BuildConfig.XTREAM_SERVER, BuildConfig.XTREAM_USERNAME, BuildConfig.XTREAM_PASSWORD, skipDebugSource),

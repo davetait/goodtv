@@ -132,8 +132,11 @@ class AppGraph(val context: Context) {
     val guideStore: GuideStore by lazy { RoomGuideStore(db) }
     val lineupStore: LineupStore by lazy { RoomLineupStore(db) }
 
-    /** Rebuilds and saves the guide lineup in the background whenever the library changes; started once per process. */
-    val lineupKeeper: LineupKeeper by lazy { LineupKeeper(store, lineupStore, Dispatchers.Default, appVersion = installedAt()) }
+    /** Rebuilds and saves the guide lineup in the background whenever the library changes; started on first use, once per process. */
+    val lineupKeeper: LineupKeeper by lazy {
+        // Started as it's created, so whoever gets it (the guide included) sees it building before its first check.
+        LineupKeeper(store, lineupStore, Dispatchers.Default, appVersion = installedAt()).also { it.start(appScope) }
+    }
 
     /** When this install was last installed or updated: a saved lineup from another install rebuilds. */
     private fun installedAt(): Long {
@@ -189,7 +192,7 @@ class AppGraph(val context: Context) {
     private val liveRefresher: LiveRefresher by lazy { LiveRefresher(store, sourceRegistry, { syncManager.state.value is SyncState.Syncing }) }
 
     /** The Live TV guide: the lineup with its programmes, favourites and search. */
-    val guide: GuideRepository by lazy { GuideRepository(store, guideStore, guideRefresher, liveRefresher, System::currentTimeMillis, Dispatchers.Default, lineups = lineupStore) }
+    val guide: GuideRepository by lazy { GuideRepository(store, guideStore, guideRefresher, liveRefresher, System::currentTimeMillis, Dispatchers.Default, lineups = lineupStore, lineupBuilding = lineupKeeper.building) }
 
     /** Background TMDB genre fill for movies; started on launch after stale sources refresh. */
     val genreFetcher: TmdbGenreFetcher by lazy {

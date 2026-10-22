@@ -17,6 +17,8 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.shareIn
@@ -77,7 +79,7 @@ interface GuideSource {
 /**
  * Turns the lineup, the stored guide links and programmes and the favourites into the guide screen's board.
  * The rows come from the lineup the [LineupKeeper] saved in [lineups], filtered by the current [Visibility];
- * only when nothing is saved (or there is no [lineups]) is the visible lineup merged here ([LineupBuilder]:
+ * only when nothing is saved and the keeper isn't building (or there is no [lineups]) is the visible lineup merged here ([LineupBuilder]:
  * identities of ~12.6k channels, grouping, placeholder logos), on [compute], once per lineup. Moving the window
  * or switching filters only re-queries programmes. A board whose programmes take longer than
  * [CHANNELS_FIRST_DELAY_MS] comes channels first: the rows without programmes, then the same rows once they are read.
@@ -92,6 +94,8 @@ class GuideRepository(
     private val warn: (String) -> Unit = { Log.w("GoodTV", it) },
     private val debug: (String) -> Unit = { Log.d("GoodTvGuide", it) },
     private val lineups: LineupStore? = null,
+    /** [LineupKeeper.building]: while it's true and nothing is saved, the rows wait for the keeper's save. */
+    private val lineupBuilding: StateFlow<Boolean>? = null,
 ) : GuideSource {
     /** A row before guide data: the part that depends on the lineup alone. */
     private class Base(
@@ -154,7 +158,7 @@ class GuideRepository(
             .map { Rows(lineupOf(it).rows, fromSaved = false) }
 
     /**
-     * The saved lineup filtered by the current visibility; [builtRows] only while nothing is saved, never both.
+     * The saved lineup filtered by the current visibility; [unsavedRows] only while nothing is saved, never both.
      * Room re-emits an equal [Visibility] on every sync, and an equal lineup converts nothing.
      */
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -163,7 +167,22 @@ class GuideRepository(
         lineups.observeVisibility().distinctUntilChanged(),
     ) { saved, visibility -> saved?.let { it to visibility } }
         .distinctUntilChanged()
-        .flatMapLatest { shown -> if (shown == null) builtRows() else flowOf(Rows(visibleRows(shown.first, shown.second), fromSaved = true)) }
+        .flatMapLatest { shown ->
+            if (shown == null) return@flatMapLatest unsavedRows(lineups)
+            // The fallback build is never used again once a lineup is saved.
+            lineupCache = null
+            flowOf(Rows(visibleRows(shown.first, shown.second), fromSaved = true))
+        }
+
+    /**
+     * Nothing saved yet: while the keeper builds (the first launch after install), nothing until its save arrives,
+     * so the lineup is built once; [builtRows] only when the keeper is idle or its build failed. A save that has
+     * landed but not yet reached [LineupStore.observeSaved] is waited for too.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun unsavedRows(lineups: LineupStore): Flow<Rows> = lineupBuilding?.flatMapLatest { building ->
+        if (building || lineups.savedStamp() != null) emptyFlow() else builtRows()
+    } ?: builtRows()
 
     private fun resolve(rows: List<Base>, links: List<ChannelGuideLink>, channels: List<GuideChannel>): List<Resolved> {
         val started = System.nanoTime()
