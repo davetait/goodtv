@@ -483,6 +483,27 @@ class GuideRefresherTest {
         assertEquals(now, guide.fetchedAt(GuideOrigin.EPGSHARE))
     }
 
+    /** Hiding a category shrinks the lineup, not the guide: the rest is accepted, not taken for a collapse. */
+    @Test fun hidingMostLinkedChannelsIsNotACollapse() = runBlocking {
+        val names = (1..120).map { "Chan $it" }
+        files[EpgShareFiles.CABLE] = gz("<tv>" + names.joinToString(" ") { channel("${it.replace(' ', '.')}.us2", it) } +
+            names.joinToString(" ") { programme("${it.replace(' ', '.')}.us2", "Show", 3_600_000) } + "</tv>")
+        library.replaceCatalog(sourceId, Catalog(
+            listOf(Category(sourceId, ContentKind.LIVE, "c1", "US| TV"), Category(sourceId, ContentKind.LIVE, "c2", "US| MORE")),
+            names.mapIndexed { i, n -> LiveChannel(sourceId, "${i + 1}", if (i < 50) "c1" else "c2", "US: ${n.uppercase()} HD", null, null) },
+            emptyList(), emptyList(),
+        ))
+        refresher.refreshIfStale()
+        assertEquals(120, guide.observeLinks().first().size)
+        // Dave hides the category holding 70 of the 120 linked channels.
+        library.setCategoriesHidden(sourceId, ContentKind.LIVE, listOf("c2"), hidden = true)
+        now += GUIDE_MAX_AGE_MS
+        refresher.refreshIfStale()
+        assertEquals(now, guide.fetchedAt(GuideOrigin.EPGSHARE))
+        assertEquals(50, guide.observeLinks().first().size)
+        assertTrue(warnings.none { "matched channels fell" in it })
+    }
+
     @Test fun smallGuidesMayShrink() = runBlocking {
         refresher.refreshIfStale()
         assertEquals(2, guide.observeLinks().first().size)
