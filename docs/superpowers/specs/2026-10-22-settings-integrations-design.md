@@ -4,11 +4,11 @@ Status: draft for Dave's approval, 2026-10-22.
 
 ## Why
 
-GoodTV's TMDB and OpenSubtitles keys are currently built into the app from Dave's `local.properties`. That works for development but means nobody else can install GoodTV with their own keys. Dave wants the app installable by someone else, who enters their own keys on the TV.
+GoodTV's TMDB and OpenSubtitles keys can only come from `local.properties` at build time. A build without that file (someone else's, or one from GitHub) has no way to get keys, so nobody else can use TMDB or subtitles. Dave wants the app installable by someone else, who enters their own keys on the TV. His own keys must stay out of GitHub.
 
 ## What Dave decided
 
-1. **No keys are built into the app, ever.** That covers every build, including Dave's own. The `local.properties` keys exist only to support development (for example, the live TMDB test). Keys entered in the app are the only ones the app uses.
+1. **Local builds keep their built-in keys.** A build made on Dave's machine includes the TMDB and OpenSubtitles keys from `local.properties`, as today. `local.properties` stays git-ignored, so the keys never reach GitHub. A build without those entries has no built-in keys and relies on Integrations. (Dave first said no keys should ever be built in, then clarified that what he wants is keeping them out of GitHub.)
 2. **A Settings tab replaces the Sources tab** at the end of the top row (Home, Live, Sports, Movies, Series, Settings).
 3. **Settings holds two entries:** Sources (the existing screen) and Integrations (new).
 4. **Integrations** lets the user enter:
@@ -79,15 +79,20 @@ Layout reference: `.superpowers/brainstorm/78805-1792719238/content/settings-and
   - The values are saved on the device in the app's private storage, like source passwords today.
   - **They're kept out of cloud backup and device transfer**, as source credentials already are. GoodTV's app settings live in DataStore files, which today's backup rules don't exclude, so the rules must cover wherever these values live.
   - Nothing is ever logged.
-- **Development**
-  - The `GOODTV_TMDB_API_KEY` and `GOODTV_OPENSUBTITLES_*` entries in `local.properties` stop flowing into the app (no BuildConfig fields). They stay usable by tests that need them, such as the opt-in live TMDB test.
-  - Dave enters his keys once on each device, using the phone keyboard.
+- **Built-in keys and typed keys**
+  - The `GOODTV_TMDB_API_KEY` and `GOODTV_OPENSUBTITLES_*` entries in `local.properties` keep flowing into the build as BuildConfig defaults, as today.
+  - **Order:** a value typed in Integrations wins. With none typed, the build's value is used. With neither, the service is off.
+  - **On the screen:** a card using the build's values shows them masked like any saved value, with the label "From this build", and is checked like a typed key. The check runs once on first use, and its result is stored as for typed keys.
+  - **Typing new values** replaces them for this device.
+  - **Remove** on a typed value goes back to the build's value if there is one. The build's own values can't be removed, only replaced.
+  - So Dave's emulator and Streamer keep working with no typing after this ships.
   - The debug-only developer Xtream source in `local.properties` is outside this change.
 
 ## Goals, non-goals, anti-goals
 
 - **Goals:**
-  - Someone else can install GoodTV, open Settings → Integrations, follow the domains to create keys, paste them from their phone, and see "Connected".
+  - Someone else can install a build without built-in keys, open Settings → Integrations, follow the domains to create keys, paste them from their phone, and see "Connected".
+  - Dave's own builds keep working with the keys from `local.properties`, with no typing.
   - Sources remains one press from Settings.
 - **Non-goals:**
   - A QR-code or web-page way to enter keys.
@@ -96,7 +101,7 @@ Layout reference: `.superpowers/brainstorm/78805-1792719238/content/settings-and
   - Moving the developer Xtream source.
 - **Anti-goals:**
   - A key or password appears in full on screen, in logs, or in a cloud backup.
-  - Any APK contains Dave's keys.
+  - Dave's keys reach GitHub (source, docs, tests or CI output).
   - A wrong key saves quietly and the app silently stops showing posters or subtitles.
   - Entering a key needs an app restart.
   - Existing Sources behaviour or first-run setup gets harder.
@@ -108,7 +113,8 @@ Layout reference: `.superpowers/brainstorm/78805-1792719238/content/settings-and
   - TV focus gets instrumented tests. Request focus from `onPlaced`.
   - Back up and restore Dave's emulator data around connected runs.
   - Tests that enter keys use fake TMDB / OpenSubtitles servers; real keys never go into test sources.
-- **Dave's devices:** after this ships, his emulator and Streamer have no TMDB or OpenSubtitles until he enters keys in Integrations.
+- **Dave's devices:** after this ships, his emulator and Streamer keep their keys from the build; nothing needs entering.
+- **An APK Dave builds and hands to someone else carries his keys**, as today. They aren't readable on screen, but they can be pulled out of the APK. To give someone a build without his keys, build without those `local.properties` entries. (Claude's note, not a decision; how such a build is made is outside this change.)
 
 ## Left to the builder
 
