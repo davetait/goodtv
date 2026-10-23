@@ -7,6 +7,8 @@ import android.util.Log
 import androidx.annotation.VisibleForTesting
 import androidx.datastore.preferences.preferencesDataStore
 import com.keyspaceapps.goodtv.data.settings.AppSettings
+import com.keyspaceapps.goodtv.data.settings.BuildDefaults
+import com.keyspaceapps.goodtv.data.settings.Integrations
 import com.keyspaceapps.goodtv.data.db.GoodTvDatabase
 import com.keyspaceapps.goodtv.data.db.RoomLibraryStore
 import com.keyspaceapps.goodtv.data.db.RoomPopularStore
@@ -73,6 +75,7 @@ import java.util.concurrent.TimeUnit
 const val USER_AGENT = "GoodTV/0.2"
 
 private val Context.settingsDataStore by preferencesDataStore(name = "settings")
+private val Context.integrationsDataStore by preferencesDataStore(name = "integrations")
 
 /** Manual dependency graph. One instance per process, owned by [GoodTvApp]. */
 class AppGraph(val context: Context) {
@@ -92,6 +95,22 @@ class AppGraph(val context: Context) {
         .build()
 
     val settings: AppSettings by lazy { AppSettings(context.settingsDataStore) }
+
+    /** Keys typed in Settings over the build's defaults; a service switched off for tests gets no defaults. */
+    val integrations: Integrations by lazy {
+        val tmdb = if (GoodTvApp.disableTmdb) "" else BuildConfig.TMDB_API_KEY
+        val os = !GoodTvApp.disableOpenSubtitles
+        Integrations(
+            context.integrationsDataStore,
+            BuildDefaults(
+                tmdbKey = tmdb,
+                osKey = if (os) BuildConfig.OPENSUBTITLES_API_KEY else "",
+                osUsername = if (os) BuildConfig.OPENSUBTITLES_USERNAME else "",
+                osPassword = if (os) BuildConfig.OPENSUBTITLES_PASSWORD else "",
+            ),
+            appScope,
+        )
+    }
 
     val db: GoodTvDatabase by lazy { GoodTvDatabase.create(context) }
     val store: LibraryStore by lazy { RoomLibraryStore(db, json) }
