@@ -287,12 +287,6 @@ class IntegrationsViewModelTest {
         assertEquals(R.string.tmdb_rejected, vm.tmdb.value.message)
         assertEquals(R.string.os_key_rejected, vm.openSubtitles.value.message)
 
-        vm.saveOpenSubtitles("os-key-5678", "some\none", "secret-pw")
-        advanceUntilIdle()
-        assertEquals(R.string.os_login_rejected, vm.openSubtitles.value.message)
-        vm.saveOpenSubtitles("os-key-5678", "someone", "s\u00e9cret")
-        advanceUntilIdle()
-        assertEquals(R.string.os_login_rejected, vm.openSubtitles.value.message)
 
         assertTrue(checks.tmdbCalls.isEmpty())
         assertTrue(checks.osCalls.isEmpty())
@@ -300,6 +294,21 @@ class IntegrationsViewModelTest {
         assertNull(i.openSubtitles.value.access)
         assertEquals(0, vm.tmdb.value.saves)
         assertEquals(0, vm.openSubtitles.value.saves)
+    }
+
+    /** The login goes in the JSON body, not a header, so a non-ASCII username or password is checked like any other. */
+    @Test fun nonAsciiLoginIsCheckedAndSaved() = runTest(dispatcher) {
+        val i = integrations()
+        val vm = IntegrationsViewModel(i, checks, appScope)
+        advanceUntilIdle()
+
+        vm.saveOpenSubtitles("os-key-5678", "Jos\u00e9", "s\u00e9cret-\u00a3\u00df")
+        advanceUntilIdle()
+
+        assertEquals(listOf(access("os-key-5678", "Jos\u00e9", "s\u00e9cret-\u00a3\u00df")), checks.osCalls)
+        assertEquals(access("os-key-5678", "Jos\u00e9", "s\u00e9cret-\u00a3\u00df"), i.openSubtitles.value.access)
+        assertEquals(KeyStatus.CONNECTED, i.openSubtitles.value.status)
+        assertNull(vm.openSubtitles.value.message)
     }
 
     /** Review R7: with a login saved, typing only one half of it fills the other half from the saved login. */

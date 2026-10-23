@@ -52,7 +52,8 @@ data class CardUi(
 
 /**
  * Whether every character is printable ASCII. OkHttp refuses anything else in a header (a pasted
- * zero-width space or newline), so no service could ever accept such a value.
+ * zero-width space or newline), so no service could ever accept such a key. Only keys travel in
+ * headers; an OpenSubtitles login goes in the JSON body, so any username or password is allowed.
  */
 private fun String.sendable(): Boolean = all { it in ' '..'~' }
 
@@ -212,10 +213,6 @@ class IntegrationsViewModel(
         if (typedKey.isEmpty() && typedUser.isEmpty() && typedPassword.isEmpty()) return
         if (!typedKey.sendable()) {
             osAttempt.update { it.copy(message = R.string.os_key_rejected) }
-            return
-        }
-        if (!typedUser.sendable() || !typedPassword.sendable()) {
-            osAttempt.update { it.copy(message = R.string.os_login_rejected) }
             return
         }
         osAttempt.update { it.copy(busy = true, message = null) }
