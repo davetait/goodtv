@@ -10,7 +10,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import com.keyspaceapps.goodtv.MainActivity
 import com.keyspaceapps.goodtv.appGraph
-import kotlinx.coroutines.runBlocking
+import com.keyspaceapps.goodtv.testing.clearDatabaseForTest
 import org.junit.After
 import org.junit.Rule
 import org.junit.Test
@@ -29,7 +29,7 @@ class ProcessDeathTest {
 
     @Test
     fun pushedScreenSurvivesRecreate() {
-        runBlocking { ApplicationProvider.getApplicationContext<android.content.Context>().appGraph().db.clearAllTables() }
+        ApplicationProvider.getApplicationContext<android.content.Context>().appGraph().clearDatabaseForTest()
         scenario = ActivityScenario.launch(MainActivity::class.java)
         // No sources: the app opens on Settings; its Sources row opens the sources list.
         composeRule.waitUntil(10_000) { composeRule.onAllNodes(hasText("Sources")).fetchSemanticsNodes().isNotEmpty() }

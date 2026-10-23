@@ -21,6 +21,7 @@ import com.keyspaceapps.goodtv.domain.Category
 import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.domain.LiveChannel
 import com.keyspaceapps.goodtv.domain.SourceRecord
+import com.keyspaceapps.goodtv.testing.clearDatabaseForTest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -41,7 +42,7 @@ class CategoriesScreenTest {
     private fun seedAndLaunch(liveCategories: List<Pair<String, String>>) {
         runBlocking {
             val graph = ApplicationProvider.getApplicationContext<android.content.Context>().appGraph()
-            graph.db.clearAllTables()
+            graph.clearDatabaseForTest()
             graph.settings.setLastTab("SOURCES")
             sourceId = graph.store.insertSource(SourceRecord(0, SourceType.XTREAM, "A", SourceConfig.Xtream("http://s", "u", "p"), true, System.currentTimeMillis(), null))
             graph.store.replaceCatalog(

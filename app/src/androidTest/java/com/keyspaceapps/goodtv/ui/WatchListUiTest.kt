@@ -40,6 +40,7 @@ import com.keyspaceapps.goodtv.ui.nav.SeriesDetailKey
 import com.keyspaceapps.goodtv.ui.series.SeriesDetailScreen
 import com.keyspaceapps.goodtv.ui.theme.GoodTvTheme
 import com.keyspaceapps.goodtv.ui.watchlist.WatchListHost
+import com.keyspaceapps.goodtv.testing.clearDatabaseForTest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -64,7 +65,7 @@ class WatchListUiTest {
 
     @Before
     fun seed() = runBlocking {
-        graph.db.clearAllTables()
+        graph.clearDatabaseForTest()
         sid = graph.store.insertSource(SourceRecord(0, SourceType.XTREAM, "A", SourceConfig.Xtream("http://s", "u", "p"), true, 1L, null))
         graph.store.replaceCatalog(
             sid,

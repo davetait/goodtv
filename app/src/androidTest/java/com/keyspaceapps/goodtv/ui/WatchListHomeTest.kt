@@ -27,6 +27,7 @@ import com.keyspaceapps.goodtv.domain.Category
 import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.domain.Movie
 import com.keyspaceapps.goodtv.domain.SourceRecord
+import com.keyspaceapps.goodtv.testing.clearDatabaseForTest
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Before
@@ -48,7 +49,7 @@ class WatchListHomeTest {
 
     @Before
     fun seed() = runBlocking {
-        graph.db.clearAllTables()
+        graph.clearDatabaseForTest()
         graph.settings.setLastTab("HOME")
         val sid = graph.store.insertSource(SourceRecord(0, SourceType.XTREAM, "A", SourceConfig.Xtream("http://s", "u", "p"), true, System.currentTimeMillis(), null))
         graph.store.replaceCatalog(

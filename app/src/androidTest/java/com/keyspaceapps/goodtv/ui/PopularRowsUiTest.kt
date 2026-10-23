@@ -26,6 +26,7 @@ import com.keyspaceapps.goodtv.domain.Catalog
 import com.keyspaceapps.goodtv.domain.Movie
 import com.keyspaceapps.goodtv.domain.Series
 import com.keyspaceapps.goodtv.domain.SourceRecord
+import com.keyspaceapps.goodtv.testing.clearDatabaseForTest
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Before
@@ -44,7 +45,7 @@ class PopularRowsUiTest {
     fun seedAndLaunch() {
         runBlocking {
             val graph = ApplicationProvider.getApplicationContext<android.content.Context>().appGraph()
-            graph.db.clearAllTables()
+            graph.clearDatabaseForTest()
             graph.settings.setLastTab("HOME")
             val sid = graph.store.insertSource(SourceRecord(0, SourceType.XTREAM, "A", SourceConfig.Xtream("http://s", "u", "p"), true, System.currentTimeMillis(), null))
             fun movie(id: String, tmdbId: Long, title: String, language: String?) =

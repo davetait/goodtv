@@ -22,6 +22,7 @@ import com.keyspaceapps.goodtv.appGraph
 import com.keyspaceapps.goodtv.data.source.SourceConfig
 import com.keyspaceapps.goodtv.data.source.SourceType
 import com.keyspaceapps.goodtv.domain.SourceRecord
+import com.keyspaceapps.goodtv.testing.clearDatabaseForTest
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -44,7 +45,7 @@ class SettingsScreenTest {
 
     @Before
     fun clearState() = runBlocking {
-        graph.db.clearAllTables()
+        graph.clearDatabaseForTest()
         graph.integrations.removeTmdb()
         graph.integrations.removeOpenSubtitles()
         graph.settings.setLastTab("SETTINGS")

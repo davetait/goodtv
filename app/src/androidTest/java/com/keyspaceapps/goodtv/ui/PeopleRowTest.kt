@@ -49,6 +49,7 @@ import com.keyspaceapps.goodtv.ui.nav.PersonSearchKey
 import com.keyspaceapps.goodtv.ui.nav.SeriesDetailKey
 import com.keyspaceapps.goodtv.ui.series.SeriesDetailScreen
 import com.keyspaceapps.goodtv.ui.theme.GoodTvTheme
+import com.keyspaceapps.goodtv.testing.clearDatabaseForTest
 import kotlinx.coroutines.runBlocking
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
@@ -97,7 +98,7 @@ class PeopleRowTest {
         }
         server.start()
         graph = ApplicationProvider.getApplicationContext<android.content.Context>().appGraph()
-        graph.db.clearAllTables()
+        graph.clearDatabaseForTest()
         val api = TmdbApi(OkHttpClient(), TmdbCredential.ApiKey("test"), baseUrl = server.url("/3/"))
         graph.tmdbOverride = TmdbRepository(api, RoomTmdbCache(graph.db.tmdb()), language = { "en-US" })
         graph.peopleOverride = PeopleRepository(api, RoomPeopleCache(graph.db.people()), language = { "en-US" })
