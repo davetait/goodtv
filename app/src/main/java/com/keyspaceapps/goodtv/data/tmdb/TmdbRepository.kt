@@ -47,7 +47,7 @@ data class TitleMatch(val tmdbId: Long?, val fetchedAt: Long)
  *
  * [lookup] returns success(null) for "TMDB doesn't know this title" (cached, not retried for
  * [NO_MATCH_TTL_MS]) and failure for anything temporary (network, rate limit, bad key), which is
- * never cached. With no API configured ([api] null) every lookup is success(null).
+ * never cached. With no API configured ([api] null, or no key in effect) every lookup is success(null).
  */
 class TmdbRepository(
     private val api: TmdbApi?,
@@ -55,7 +55,7 @@ class TmdbRepository(
     private val language: () -> String,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
-    val isEnabled: Boolean get() = api != null
+    val isEnabled: Boolean get() = api?.isConfigured == true
 
     // Process-wide memo over the Room cache so posters scrolled past again resolve instantly.
     // Failures are remembered briefly so a dead network isn't asked again by every poster.
@@ -79,8 +79,11 @@ class TmdbRepository(
         return result
     }
 
+    /** Drops the in-memory answers (the key changed: what it couldn't find, a new key may). */
+    fun forgetMemo() = synchronized(memo) { memo.clear() }
+
     private suspend fun lookupUncached(kind: TmdbKind, tmdbId: Long?, rawTitle: String): Result<TmdbMeta?> {
-        val api = api ?: return Result.success(null)
+        val api = api?.takeIf { it.isConfigured } ?: return Result.success(null)
         return try {
             val lang = language()
             val id = tmdbId?.takeIf { it > 0 } ?: findId(api, kind, rawTitle, lang) ?: return Result.success(null)

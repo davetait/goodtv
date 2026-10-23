@@ -10,6 +10,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -46,16 +47,36 @@ class TmdbException(message: String, val reason: Reason, cause: Throwable? = nul
  * Thin client for the TMDB v3 API. Details calls return null for an unknown id (HTTP 404); every
  * other failure is a [TmdbException]. At most [maxConcurrent] requests are in flight; HTTP 429 is
  * retried after `Retry-After` (or a short backoff) up to [maxAttempts] times.
+ *
+ * Each request asks [credential] for the credential in effect (null fails as [TmdbException.Reason.AUTH]
+ * without a request) and tells [onCredentialResult] whether TMDB accepted it (2xx) or rejected it (401).
+ * [configured] is a non-blocking hint for [isConfigured]: whether a credential is in effect right now.
  */
 class TmdbApi(
     private val client: OkHttpClient,
-    private val credential: TmdbCredential,
+    private val credential: suspend () -> TmdbCredential?,
+    private val configured: () -> Boolean,
+    private val onCredentialResult: (TmdbCredential, accepted: Boolean) -> Unit = { _, _ -> },
     private val baseUrl: HttpUrl = DEFAULT_BASE_URL.toHttpUrl(),
     private val io: CoroutineDispatcher = Dispatchers.IO,
     maxConcurrent: Int = 8,
     private val maxAttempts: Int = 3,
     private val sleep: suspend (Long) -> Unit = { delay(it) },
 ) {
+    /** A fixed credential (tests, the live check script). */
+    constructor(
+        client: OkHttpClient,
+        credential: TmdbCredential,
+        baseUrl: HttpUrl = DEFAULT_BASE_URL.toHttpUrl(),
+        io: CoroutineDispatcher = Dispatchers.IO,
+        maxConcurrent: Int = 8,
+        maxAttempts: Int = 3,
+        sleep: suspend (Long) -> Unit = { delay(it) },
+    ) : this(client, { credential }, { true }, { _, _ -> }, baseUrl, io, maxConcurrent, maxAttempts, sleep)
+
+    /** True when a credential is in effect; requests made while false fail as [TmdbException.Reason.AUTH]. */
+    val isConfigured: Boolean get() = configured()
+
     private val permits = Semaphore(maxConcurrent)
 
     suspend fun movie(id: Long, language: String): TmdbMovieDetails? =
@@ -90,6 +111,18 @@ class TmdbApi(
             url("search/person", language) { addQueryParameter("query", query) },
             TmdbSearchPage.serializer(TmdbPersonResult.serializer()),
         )?.results.orEmpty()
+
+    /**
+     * Whether TMDB accepts [candidate] (a cheap `configuration` call): true on 2xx, false on 401,
+     * else a [TmdbException]. Doesn't touch [credential] or [onCredentialResult].
+     */
+    suspend fun check(candidate: TmdbCredential): Boolean =
+        try {
+            get(url("configuration", null), JsonObject.serializer(), candidate = candidate)
+            true
+        } catch (e: TmdbException) {
+            if (e.reason == TmdbException.Reason.AUTH) false else throw e
+        }
 
     /**
      * Discover movies on subscription ([flatrate]) streaming in [region] on any of [providers]
@@ -152,44 +185,69 @@ class TmdbApi(
             TmdbSearchPage.serializer(TmdbTvResult.serializer()),
         ) ?: TmdbSearchPage()
 
-    private fun url(path: String, language: String, extra: HttpUrl.Builder.() -> Unit = {}): HttpUrl =
+    private fun url(path: String, language: String?, extra: HttpUrl.Builder.() -> Unit = {}): HttpUrl =
         baseUrl.newBuilder().addPathSegments(path).apply {
-            addQueryParameter("language", language)
-            addQueryParameter("include_adult", "false")
-            (credential as? TmdbCredential.ApiKey)?.let { addQueryParameter("api_key", it.key) }
+            if (language != null) {
+                addQueryParameter("language", language)
+                addQueryParameter("include_adult", "false")
+            }
             extra()
         }.build()
 
-    // Holds its permit while backing off, so a 429 slows every caller down, not just this one.
-    private suspend fun <T> get(url: HttpUrl, strategy: DeserializationStrategy<T>, nullOn404: Boolean = false): T? =
-        permits.withPermit {
+    /**
+     * One request: the credential is read once (or is the [candidate] being checked, which isn't
+     * reported). Holds its permit while backing off, so a 429 slows every caller down, not just this one.
+     */
+    private suspend fun <T> get(
+        url: HttpUrl,
+        strategy: DeserializationStrategy<T>,
+        nullOn404: Boolean = false,
+        candidate: TmdbCredential? = null,
+    ): T? {
+        val cred = candidate ?: credential() ?: throw TmdbException("No TMDB key is set", TmdbException.Reason.AUTH)
+        val report: (Boolean) -> Unit = if (candidate != null) { _ -> } else { accepted -> onCredentialResult(cred, accepted) }
+        return permits.withPermit {
             repeat(maxAttempts) { attempt ->
-                when (val outcome = call(url, strategy, nullOn404)) {
-                    is Outcome.Done -> return outcome.value
+                when (val outcome = call(url, cred, strategy, nullOn404, report)) {
+                    is Outcome.Done -> return@withPermit outcome.value
                     is Outcome.RetryAfter -> if (attempt < maxAttempts - 1) sleep(outcome.millis ?: (1_000L shl attempt))
                 }
             }
             throw TmdbException("TMDB is rate limiting requests", TmdbException.Reason.RATE_LIMITED)
         }
+    }
 
     private sealed interface Outcome<out T> {
         data class Done<T>(val value: T?) : Outcome<T>
         data class RetryAfter(val millis: Long?) : Outcome<Nothing>
     }
 
-    private suspend fun <T> call(url: HttpUrl, strategy: DeserializationStrategy<T>, nullOn404: Boolean): Outcome<T> = withContext(io) {
-        val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).header("Accept", "application/json").apply {
+    private suspend fun <T> call(
+        url: HttpUrl,
+        credential: TmdbCredential,
+        strategy: DeserializationStrategy<T>,
+        nullOn404: Boolean,
+        report: (accepted: Boolean) -> Unit,
+    ): Outcome<T> = withContext(io) {
+        val authed = (credential as? TmdbCredential.ApiKey)?.let { url.newBuilder().addQueryParameter("api_key", it.key).build() } ?: url
+        val request = Request.Builder().url(authed).header("User-Agent", USER_AGENT).header("Accept", "application/json").apply {
             (credential as? TmdbCredential.Bearer)?.let { header("Authorization", "Bearer ${it.token}") }
         }.build()
         try {
             client.newCall(request).execute().use { response ->
                 when {
                     response.code == 404 && nullOn404 -> Outcome.Done(null)
-                    response.code == 401 -> throw TmdbException("TMDB rejected the API key", TmdbException.Reason.AUTH)
+                    response.code == 401 -> {
+                        report(false)
+                        throw TmdbException("TMDB rejected the API key", TmdbException.Reason.AUTH)
+                    }
                     response.code == 429 -> Outcome.RetryAfter(response.header("Retry-After")?.toLongOrNull()?.times(1_000))
                     response.code >= 500 -> throw TmdbException("TMDB returned HTTP ${response.code}", TmdbException.Reason.SERVER)
                     !response.isSuccessful -> throw TmdbException("TMDB returned HTTP ${response.code}", TmdbException.Reason.BAD_RESPONSE)
-                    else -> Outcome.Done(json.decodeFromString(strategy, response.body.string()))
+                    else -> {
+                        report(true)
+                        Outcome.Done(json.decodeFromString(strategy, response.body.string()))
+                    }
                 }
             }
         } catch (e: IOException) {

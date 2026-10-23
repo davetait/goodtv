@@ -151,6 +151,24 @@ class TmdbRepositoryTest {
     }
 
     @Test
+    fun memoForgottenWhenCredentialChanges() = runTest {
+        var credential: TmdbCredential? = null
+        val repo = TmdbRepository(
+            api = TmdbApi(OkHttpClient(), { credential }, configured = { credential != null }, baseUrl = server.url("/3/"), sleep = {}),
+            cache = cache, language = { lang }, clock = { now },
+        )
+        assertTrue(!repo.isEnabled)
+        assertNull(repo.lookup(TmdbKind.MOVIE, 603, "The Matrix").getOrThrow())
+        assertEquals("no key, no request", emptyList<String>(), requests)
+
+        credential = TmdbCredential.ApiKey("k")
+        assertTrue(repo.isEnabled)
+        repo.forgetMemo()
+        assertEquals("The Matrix", repo.lookup(TmdbKind.MOVIE, 603, "The Matrix").getOrThrow()!!.title)
+        assertEquals(listOf("/3/movie/603"), requests)
+    }
+
+    @Test
     fun pruneDropsRowsPastTmdbsSixMonthLimit() = runTest {
         repo().lookup(TmdbKind.MOVIE, 603, "x")
         now += TmdbRepository.MAX_CACHE_AGE_MS + 1

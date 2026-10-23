@@ -65,7 +65,7 @@ class TmdbGenreFetcher(
     private class Halt(val reason: String?) : Exception()
 
     private suspend fun run() {
-        val api = api ?: return
+        val api = api?.takeIf { it.isConfigured } ?: return
         val pending = store.pendingMovieTmdbIds(before = clock() - TmdbRepository.MAX_CACHE_AGE_MS)
         if (pending.isEmpty()) { _state.value = State.Idle; return }
         val total = store.movieTmdbIdCount().coerceAtLeast(pending.size)

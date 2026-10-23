@@ -7,6 +7,7 @@ import okhttp3.Headers
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -179,6 +180,80 @@ class TmdbApiTest {
         assertEquals("/3/search/person", searchUrl.encodedPath)
         assertEquals("Tom Cruise", searchUrl.queryParameter("query"))
         assertEquals(listOf(500L, 777L), found.map { it.id })
+    }
+
+    private fun liveApi(credential: suspend () -> TmdbCredential?, reports: MutableList<Pair<TmdbCredential, Boolean>> = mutableListOf()) =
+        TmdbApi(
+            OkHttpClient(), credential, configured = { true }, onCredentialResult = { c, ok -> reports += c to ok },
+            baseUrl = server.url("/3/"), maxAttempts = 1, sleep = {},
+        )
+
+    @Test fun credentialIsReadPerRequest() = runTest {
+        var current: TmdbCredential? = TmdbCredential.ApiKey("first")
+        val api = liveApi({ current })
+        repeat(2) { server.enqueue(ok(fixture("movie_603.json"))) }
+        api.movie(603, "en-US")
+        current = TmdbCredential.Bearer("eyJ.second.token")
+        api.movie(603, "en-US")
+        val first = server.takeRequest()
+        assertEquals("first", first.url.queryParameter("api_key"))
+        assertNull(first.headers["Authorization"])
+        val second = server.takeRequest()
+        assertNull(second.url.queryParameter("api_key"))
+        assertEquals("Bearer eyJ.second.token", second.headers["Authorization"])
+    }
+
+    @Test fun noCredentialFailsAsAuth() = runTest {
+        val api = TmdbApi(OkHttpClient(), { null }, configured = { false }, baseUrl = server.url("/3/"))
+        assertFalse(api.isConfigured)
+        expectFailure(TmdbException.Reason.AUTH) { api.movie(603, "en-US") }
+        assertEquals("nothing was requested", 0, server.requestCount)
+    }
+
+    @Test fun isConfiguredFollowsTheHint() {
+        var on = false
+        val api = TmdbApi(OkHttpClient(), { null }, configured = { on }, baseUrl = server.url("/3/"))
+        assertFalse(api.isConfigured)
+        on = true
+        assertTrue(api.isConfigured)
+        assertTrue(api(TmdbCredential.ApiKey("k")).isConfigured)
+    }
+
+    @Test fun resultsAreReported() = runTest {
+        val key = TmdbCredential.ApiKey("k3y")
+        val reports = mutableListOf<Pair<TmdbCredential, Boolean>>()
+        val api = liveApi({ key }, reports)
+        server.enqueue(ok(fixture("movie_603.json")))
+        api.movie(603, "en-US")
+        server.enqueue(MockResponse(code = 401, body = """{"success":false,"status_code":7}"""))
+        expectFailure(TmdbException.Reason.AUTH) { api.movie(603, "en-US") }
+        server.enqueue(MockResponse(code = 503))
+        expectFailure(TmdbException.Reason.SERVER) { api.movie(603, "en-US") }
+        assertEquals(listOf<Pair<TmdbCredential, Boolean>>(key to true, key to false), reports)
+    }
+
+    @Test fun checkUsesTheCandidateNotTheProvider() = runTest {
+        val reports = mutableListOf<Pair<TmdbCredential, Boolean>>()
+        val api = liveApi({ TmdbCredential.ApiKey("live") }, reports)
+        server.enqueue(ok("""{"images":{"base_url":"http://image.tmdb.org/t/p/"}}"""))
+        assertTrue(api.check(TmdbCredential.ApiKey("candidate")))
+        val req = server.takeRequest()
+        assertEquals("/3/configuration", req.url.encodedPath)
+        assertEquals("candidate", req.url.queryParameter("api_key"))
+
+        server.enqueue(MockResponse(code = 401, body = """{"success":false,"status_code":7}"""))
+        assertFalse(api.check(TmdbCredential.Bearer("eyJ.bad.token")))
+        assertEquals("Bearer eyJ.bad.token", server.takeRequest().headers["Authorization"])
+
+        server.enqueue(MockResponse(code = 500))
+        expectFailure(TmdbException.Reason.SERVER) { api.check(TmdbCredential.ApiKey("candidate")) }
+        assertEquals("checks never report", emptyList<Pair<TmdbCredential, Boolean>>(), reports)
+    }
+
+    @Test fun checkThatCannotReachTmdbIsANetworkError() = runTest {
+        val api = liveApi({ null })
+        server.close()
+        expectFailure(TmdbException.Reason.NETWORK) { api.check(TmdbCredential.ApiKey("candidate")) }
     }
 
     @Test fun unknownPeopleDetailsAreNull() = runTest {
