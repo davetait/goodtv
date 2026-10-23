@@ -1,11 +1,14 @@
 package com.keyspaceapps.goodtv.data.subtitles
 
+import com.keyspaceapps.goodtv.data.settings.KeyStatus
+import com.keyspaceapps.goodtv.data.settings.OpenSubtitlesAccess
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -153,5 +156,169 @@ class OpenSubtitlesApiTest {
         val api = OpenSubtitlesApi(OkHttpClient(), "k3y", OpenSubtitlesLogin("u", "p"), baseUrl = server.url("/api/v1/"), loginScheme = "http")
         assertEquals(emptyList<OsSubtitle>(), api.search(SubtitleQuery(1)))
     }
-}
 
+    private val reports = mutableListOf<Pair<OpenSubtitlesAccess, KeyStatus>>()
+    private fun liveApi(access: () -> OpenSubtitlesAccess?) = OpenSubtitlesApi(
+        OkHttpClient(), access = { access() }, configured = { access() != null }, onResult = { a, s -> reports += a to s },
+        baseUrl = server.url("/api/v1/"), loginScheme = "http",
+    )
+    private fun loginOk(token: String) = ok("""{"token":"$token","base_url":"${server.hostName}:${server.port}"}""")
+    private val noResults = """{"total_count":0,"data":[]}"""
+
+    @Test fun isConfiguredFollowsTheHint() {
+        var current: OpenSubtitlesAccess? = null
+        val api = liveApi { current }
+        assertFalse(api.isConfigured)
+        current = OpenSubtitlesAccess("k", null)
+        assertTrue(api.isConfigured)
+        assertTrue(api().isConfigured)
+    }
+
+    @Test fun noAccessFailsAsAuthWithoutARequest() = runTest {
+        expectFailure(OpenSubtitlesException.Reason.AUTH) { liveApi { null }.search(SubtitleQuery(1)) }
+        assertEquals(0, server.requestCount)
+        assertEquals(emptyList<Any>(), reports)
+    }
+
+    @Test fun accessChangeDropsTheSession() = runTest {
+        var current = OpenSubtitlesAccess("key-a", OpenSubtitlesLogin("user-a", "pass-a"))
+        val api = liveApi { current }
+        server.enqueue(loginOk("token-a"))
+        server.enqueue(ok(noResults))
+        server.enqueue(ok(noResults))
+        api.search(SubtitleQuery(1))
+        api.search(SubtitleQuery(1))
+        current = OpenSubtitlesAccess("key-b", OpenSubtitlesLogin("user-b", "pass-b"))
+        server.enqueue(loginOk("token-b"))
+        server.enqueue(ok(noResults))
+        api.search(SubtitleQuery(1))
+        val seen = (1..5).map { server.takeRequest() }.map { Triple(it.url.encodedPath, it.headers["Api-Key"], it.headers["Authorization"]) }
+        assertEquals(
+            listOf(
+                Triple("/api/v1/login", "key-a", null),
+                Triple("/api/v1/subtitles", "key-a", "Bearer token-a"),
+                Triple("/api/v1/subtitles", "key-a", "Bearer token-a"),
+                Triple("/api/v1/login", "key-b", null),
+                Triple("/api/v1/subtitles", "key-b", "Bearer token-b"),
+            ),
+            seen,
+        )
+    }
+
+    @Test fun loginRejectionReportsRejectedLogin() = runTest {
+        val access = OpenSubtitlesAccess("k3y", OpenSubtitlesLogin("u", "wrong"))
+        server.enqueue(MockResponse(code = 401, body = """{"message":"Invalid username/password"}"""))
+        expectFailure(OpenSubtitlesException.Reason.AUTH) { liveApi { access }.search(SubtitleQuery(1)) }
+        assertEquals(listOf(access to KeyStatus.REJECTED_LOGIN), reports)
+    }
+
+    /** Review R5: OpenSubtitles answers a bad Api-Key with 403, even on /login. */
+    @Test fun loginForbiddenReportsRejectedKey() = runTest {
+        val access = OpenSubtitlesAccess("bad-key", OpenSubtitlesLogin("u", "p"))
+        server.enqueue(MockResponse(code = 403, body = "{}"))
+        expectFailure(OpenSubtitlesException.Reason.AUTH) { liveApi { access }.search(SubtitleQuery(1)) }
+        assertEquals(listOf(access to KeyStatus.REJECTED_KEY), reports)
+    }
+
+    /** Final review: a pasted key with a character OkHttp can't send in a header is the key rejected, and never in a message. */
+    @Test fun keyWithAnUnsendableCharacterIsRejectedAndNeverInAMessage() = runTest {
+        val keyOnly = OpenSubtitlesAccess("made-up\u200bkey", null)
+        val e = expectFailure(OpenSubtitlesException.Reason.AUTH) { liveApi { keyOnly }.search(SubtitleQuery(1)) }
+        assertFalse("no value in the message", e.message!!.contains("made-up"))
+        val withLogin = OpenSubtitlesAccess("made-up\u200bkey", OpenSubtitlesLogin("u", "p"))
+        val e2 = expectFailure(OpenSubtitlesException.Reason.AUTH) { liveApi { withLogin }.search(SubtitleQuery(1)) }
+        assertFalse("no value in the message", e2.message!!.contains("made-up"))
+        assertEquals(listOf(keyOnly to KeyStatus.REJECTED_KEY, withLogin to KeyStatus.REJECTED_KEY), reports)
+        assertEquals(KeyStatus.REJECTED_KEY, liveApi { null }.check(keyOnly))
+        assertEquals(KeyStatus.REJECTED_KEY, liveApi { null }.check(withLogin))
+        assertEquals("nothing was requested", 0, server.requestCount)
+    }
+
+    @Test fun checkWithLoginForbiddenIsRejectedKey() = runTest {
+        server.enqueue(ok(noResults))
+        server.enqueue(MockResponse(code = 403, body = "{}"))
+        assertEquals(KeyStatus.REJECTED_KEY, liveApi { null }.check(OpenSubtitlesAccess("cand-key", OpenSubtitlesLogin("u", "p"))))
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test fun keyRejectionReportsRejectedKey() = runTest {
+        val access = OpenSubtitlesAccess("bad-key", null)
+        val api = liveApi { access }
+        server.enqueue(MockResponse(code = 403, body = "{}"))
+        expectFailure(OpenSubtitlesException.Reason.AUTH) { api.search(SubtitleQuery(1)) }
+        server.enqueue(MockResponse(code = 503, body = "{}"))
+        expectFailure(OpenSubtitlesException.Reason.SERVER) { api.search(SubtitleQuery(1)) }
+        server.enqueue(ok(noResults))
+        api.search(SubtitleQuery(1))
+        assertEquals(listOf(access to KeyStatus.REJECTED_KEY, access to KeyStatus.CONNECTED), reports)
+    }
+
+    @Test fun anExpiredTokenThatLogsInAgainIsConnected() = runTest {
+        val access = OpenSubtitlesAccess("k3y", OpenSubtitlesLogin("u", "p"))
+        server.enqueue(loginOk("old"))
+        server.enqueue(MockResponse(code = 401, body = "{}"))
+        server.enqueue(loginOk("new"))
+        server.enqueue(ok(noResults))
+        liveApi { access }.search(SubtitleQuery(1))
+        assertEquals(listOf(access to KeyStatus.CONNECTED), reports)
+    }
+
+    @Test fun checkReportsEachOutcome() = runTest {
+        val live = OpenSubtitlesAccess("live-key", OpenSubtitlesLogin("live-user", "live-pass"))
+        val api = liveApi { live }
+        val candidate = OpenSubtitlesAccess("cand-key", OpenSubtitlesLogin("cand-user", "cand-pass"))
+        val formats = noResults
+
+        server.enqueue(MockResponse(code = 403, body = "{}"))
+        assertEquals(KeyStatus.REJECTED_KEY, api.check(candidate))
+        server.takeRequest().let {
+            // A bad key still gets 200 from infos/formats; a subtitle search (no download spent) answers 403.
+            assertEquals("/api/v1/subtitles", it.url.encodedPath)
+            assertEquals("603", it.url.queryParameter("tmdb_id"))
+            assertEquals("en", it.url.queryParameter("languages"))
+            assertEquals("GET", it.method)
+            assertEquals("cand-key", it.headers["Api-Key"])
+        }
+
+        server.enqueue(ok(formats))
+        server.enqueue(MockResponse(code = 401, body = """{"message":"Invalid username/password"}"""))
+        assertEquals(KeyStatus.REJECTED_LOGIN, api.check(candidate))
+        server.takeRequest()
+        server.takeRequest().let {
+            assertEquals("/api/v1/login", it.url.encodedPath)
+            assertEquals("POST", it.method)
+            assertEquals("cand-key", it.headers["Api-Key"])
+            assertTrue(it.body!!.utf8().contains("\"username\":\"cand-user\""))
+        }
+
+        server.enqueue(ok(formats))
+        server.enqueue(loginOk("cand-token"))
+        assertEquals(KeyStatus.CONNECTED, api.check(candidate))
+        server.takeRequest(); server.takeRequest()
+
+        server.enqueue(ok(formats))
+        assertEquals("key only: no login", KeyStatus.CONNECTED, api.check(OpenSubtitlesAccess("cand-key", null)))
+        assertEquals("/api/v1/subtitles", server.takeRequest().url.encodedPath)
+
+        server.enqueue(MockResponse(code = 500, body = "{}"))
+        expectFailure(OpenSubtitlesException.Reason.SERVER) { api.check(candidate) }
+        server.takeRequest()
+
+        server.enqueue(ok(formats))
+        server.enqueue(MockResponse(code = 503, body = "{}"))
+        expectFailure(OpenSubtitlesException.Reason.SERVER) { api.check(candidate) }
+        server.takeRequest(); server.takeRequest()
+
+        assertEquals("checks never report", emptyList<Any>(), reports)
+
+        // The check's login is not the live session: a live call logs in with the live access.
+        server.enqueue(loginOk("live-token"))
+        server.enqueue(ok(noResults))
+        api.search(SubtitleQuery(1))
+        server.takeRequest().let {
+            assertEquals("/api/v1/login", it.url.encodedPath)
+            assertEquals("live-key", it.headers["Api-Key"])
+        }
+        assertEquals("Bearer live-token", server.takeRequest().headers["Authorization"])
+    }
+}

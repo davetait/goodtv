@@ -65,7 +65,7 @@ class TmdbGenreFetcher(
     private class Halt(val reason: String?) : Exception()
 
     private suspend fun run() {
-        val api = api ?: return
+        val api = api?.takeIf { it.isConfigured } ?: return
         val pending = store.pendingMovieTmdbIds(before = clock() - TmdbRepository.MAX_CACHE_AGE_MS)
         if (pending.isEmpty()) { _state.value = State.Idle; return }
         val total = store.movieTmdbIdCount().coerceAtLeast(pending.size)
@@ -122,7 +122,8 @@ class TmdbGenreFetcher(
                 return details.genres.mapNotNull { Genre.fromTmdbMovieGenre(it.id) }.toSet()
             } catch (e: TmdbException) {
                 when (e.reason) {
-                    TmdbException.Reason.AUTH -> throw Halt(e.message)
+                    // No key after all (started before it loaded) ends quietly; a rejected one stops the run.
+                    TmdbException.Reason.AUTH -> throw Halt(e.message.takeIf { api.isConfigured })
                     TmdbException.Reason.RATE_LIMITED -> if (attempt == 0) sleep(RATE_LIMIT_PAUSE_MS)
                     TmdbException.Reason.BAD_RESPONSE -> return null
                     TmdbException.Reason.NETWORK, TmdbException.Reason.SERVER -> throw Halt(null)

@@ -1,12 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android 12+ rules: keep source credentials out of cloud backup and device transfer. -->
+<!-- Android 12+ rules: keep source credentials and user-entered API keys out of cloud backup and device transfer. -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="database" path="." />
         <exclude domain="sharedpref" path="." />
+        <exclude domain="file" path="datastore/integrations.preferences_pb" />
+        <exclude domain="file" path="datastore/integrations.preferences_pb.tmp" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="database" path="." />
         <exclude domain="sharedpref" path="." />
+        <exclude domain="file" path="datastore/integrations.preferences_pb" />
+        <exclude domain="file" path="datastore/integrations.preferences_pb.tmp" />
     </device-transfer>
 </data-extraction-rules>

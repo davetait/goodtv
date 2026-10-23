@@ -6,7 +6,8 @@ import kotlinx.coroutines.flow.Flow
 /**
  * TMDB people for the library: who is on a title, which library titles a person counts for, and
  * name search. Every TMDB result is cached (see [PeopleCache]); temporary failures are returned as
- * failures and never cached. With no API configured ([api] null) the lists are empty successes.
+ * failures and never cached. With no API configured ([api] null, or no key in effect) the lists are
+ * empty successes.
  */
 class PeopleRepository(
     private val api: TmdbApi?,
@@ -14,7 +15,9 @@ class PeopleRepository(
     private val language: () -> String,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
-    val isEnabled: Boolean get() = api != null
+    val isEnabled: Boolean get() = api?.isConfigured == true
+
+    private val liveApi: TmdbApi? get() = api?.takeIf { it.isConfigured }
 
     private class Memo(val matches: List<PersonMatch>, val at: Long)
     private val memo = object : LinkedHashMap<String, Memo>(32, 0.75f, true) {
@@ -26,7 +29,7 @@ class PeopleRepository(
      * cached. A failed refresh of an expired entry returns the stale people.
      */
     suspend fun titlePeople(kind: TmdbKind, tmdbId: Long): Result<List<TmdbPerson>> {
-        val api = api ?: return Result.success(emptyList())
+        val api = liveApi ?: return Result.success(emptyList())
         val cached = cache.titlePeople(kind, tmdbId)
         if (cached != null && clock() - cached.second < TITLE_PEOPLE_TTL_MS) return Result.success(cached.first)
         val fetched = call {
@@ -38,6 +41,7 @@ class PeopleRepository(
             cache.putTitlePeople(kind, tmdbId, people, clock())
             people
         }
+        if (fetched.isFailure && !api.isConfigured) return Result.success(cached?.first.orEmpty())
         return if (fetched.isFailure && cached != null) Result.success(cached.first) else fetched
     }
 
@@ -48,7 +52,7 @@ class PeopleRepository(
     suspend fun ensureCredits(personId: Long, name: String): Result<Unit> {
         val cachedAt = cache.creditsFetchedAt(personId)
         if (cachedAt != null && clock() - cachedAt < CREDITS_TTL_MS) return Result.success(Unit)
-        val fetched = api?.let { api ->
+        val fetched = liveApi?.let { api ->
             call {
                 val credits = api.personCredits(personId, language())?.let(PeopleRules::countedCredits).orEmpty()
                 cache.putCredits(personId, name, credits, clock())
@@ -60,13 +64,17 @@ class PeopleRepository(
 
     /** Confident matches for a typed name; failure when TMDB is unreachable. Memoised per normalized query. */
     suspend fun findPeople(query: String): Result<List<PersonMatch>> {
-        val api = api ?: return Result.success(emptyList())
+        val api = liveApi ?: return Result.success(emptyList())
         val lang = language()
         val key = "$lang|${TitleCleaner.normalize(query)}"
         synchronized(memo) { memo[key] }?.takeIf { clock() - it.at < MEMO_TTL_MS }?.let { return Result.success(it.matches) }
         return call { PeopleRules.confidentPeople(query, api.searchPerson(query.trim(), lang)) }
             .onSuccess { matches -> synchronized(memo) { memo[key] = Memo(matches, clock()) } }
+            .let { if (it.isFailure && !api.isConfigured) Result.success(emptyList()) else it }
     }
+
+    /** Drops the in-memory search answers (the key changed). */
+    fun forgetMemo() = synchronized(memo) { memo.clear() }
 
     fun observeTitles(personId: Long): Flow<List<PersonTitle>> = cache.observeTitles(personId)
 

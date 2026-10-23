@@ -2,6 +2,7 @@ package com.keyspaceapps.goodtv.ui.nav
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -12,6 +13,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
@@ -28,10 +30,12 @@ import com.keyspaceapps.goodtv.ui.home.HomeScreen
 import com.keyspaceapps.goodtv.ui.home.PersonSearchScreen
 import com.keyspaceapps.goodtv.ui.movies.MovieDetailScreen
 import com.keyspaceapps.goodtv.ui.series.NextEpisode
+import com.keyspaceapps.goodtv.ui.settings.IntegrationsScreen
 import com.keyspaceapps.goodtv.ui.series.NextEpisodes
 import com.keyspaceapps.goodtv.ui.series.SeriesDetailScreen
 import com.keyspaceapps.goodtv.ui.player.PlayerScreen
 import com.keyspaceapps.goodtv.ui.sources.EditSourceScreen
+import com.keyspaceapps.goodtv.ui.sources.SourcesScreen
 import com.keyspaceapps.goodtv.ui.watchlist.WatchListHost
 import kotlinx.coroutines.launch
 
@@ -54,6 +58,9 @@ fun GoodTvNavigation() {
                 entry<HomeKey> { HomeScreen(onNavigate = { backStack.add(it) }) }
                 entry<EditSourceKey>(stackKey) { key -> EditSourceScreen(sourceId = key.sourceId, onDone = pop) }
                 entry<CategoriesKey>(stackKey) { key -> CategoriesScreen(key = key) }
+                // A full screen now, not a tab: its own top padding replaces the tab row's.
+                entry<SourcesKey>(stackKey) { Box(Modifier.padding(top = 24.dp)) { SourcesScreen(onNavigate = { backStack.add(it) }) } }
+                entry<IntegrationsKey>(stackKey) { IntegrationsScreen() }
                 entry<PlayerKey>(stackKey) { key ->
                     val graph = LocalContext.current.appGraph()
                     var item by remember(key) { mutableStateOf<PlayableItem?>(null) }

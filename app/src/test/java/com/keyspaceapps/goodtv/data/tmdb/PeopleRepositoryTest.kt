@@ -127,6 +127,24 @@ class PeopleRepositoryTest {
     }
 
     @Test
+    fun forgetMemoAsksTmdbAgainAndNoKeyMakesNoRequests() = runTest {
+        var credential: TmdbCredential? = null
+        val r = PeopleRepository(
+            api = TmdbApi(OkHttpClient(), { credential }, configured = { credential != null }, baseUrl = server.url("/3/"), sleep = {}),
+            cache = cache, language = { "en-US" }, clock = { now },
+        )
+        assertTrue(!r.isEnabled)
+        assertEquals(emptyList<PersonMatch>(), r.findPeople("Tom Cruise").getOrThrow())
+        assertEquals(emptyList<String>(), requests)
+        credential = TmdbCredential.ApiKey("k")
+        r.findPeople("Tom Cruise")
+        r.findPeople("Tom Cruise")
+        r.forgetMemo()
+        r.findPeople("Tom Cruise")
+        assertEquals(listOf("/3/search/person?Tom Cruise", "/3/search/person?Tom Cruise"), requests)
+    }
+
+    @Test
     fun findPeopleUsesRulesAndMemo() = runTest {
         assertEquals(listOf(PersonMatch(500, "Tom Cruise")), repo().findPeople("Tom Cruise").getOrThrow())
         val r = repo()

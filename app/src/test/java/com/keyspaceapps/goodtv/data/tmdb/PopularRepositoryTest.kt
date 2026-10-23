@@ -124,6 +124,21 @@ class PopularRepositoryTest {
         assertEquals(listOf(30L), ids)
     }
 
+    /** Review fix 1: a fixed key shouldn't wait out the back-off left by the rejected one. */
+    @Test fun forgetFailureRetriesAtOnce() = runTest {
+        val repo = repo()
+        failWith = 401
+        assertTrue(repo.refreshIfStale().isFailure)
+        failWith = null
+        pages[1] = page(1, 40)
+        val asked = server.requestCount
+        repo.refreshIfStale()
+        assertEquals("still backing off", asked, server.requestCount)
+        repo.forgetFailure()
+        assertTrue(repo.refreshIfStale().isSuccess)
+        assertEquals(listOf(40L), ids)
+    }
+
     @Test fun withoutTmdbNothingIsFetched() = runTest {
         assertTrue(PopularRepository(null, store, PopularMoviesQuery, { "en-US" }).refreshIfStale().isSuccess)
         assertNull(ids)

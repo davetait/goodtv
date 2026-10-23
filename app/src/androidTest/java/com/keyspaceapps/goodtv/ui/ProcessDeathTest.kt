@@ -31,6 +31,9 @@ class ProcessDeathTest {
     fun pushedScreenSurvivesRecreate() {
         runBlocking { ApplicationProvider.getApplicationContext<android.content.Context>().appGraph().db.clearAllTables() }
         scenario = ActivityScenario.launch(MainActivity::class.java)
+        // No sources: the app opens on Settings; its Sources row opens the sources list.
+        composeRule.waitUntil(10_000) { composeRule.onAllNodes(hasText("Sources")).fetchSemanticsNodes().isNotEmpty() }
+        composeRule.onNodeWithText("Sources").performSemanticsAction(SemanticsActions.OnClick)
         composeRule.waitUntil(10_000) { composeRule.onAllNodes(hasText("Add source")).fetchSemanticsNodes().isNotEmpty() }
         composeRule.onNodeWithText("Add source").performSemanticsAction(SemanticsActions.OnClick)
         composeRule.waitUntil(10_000) { composeRule.onAllNodes(hasText("Test & save")).fetchSemanticsNodes().isNotEmpty() }

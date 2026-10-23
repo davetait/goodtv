@@ -13,6 +13,7 @@ class GoodTvApp : Application() {
         super.onCreate()
         graph = AppGraph(this)
         graph.startGenreFillAfterSyncs()
+        graph.startFollowingTmdbKey()
         graph.startGuideRefreshAfterSyncs()
         // Off Main: resolving the keeper starts it, opening the database (Room's build) and reading the package info.
         graph.appScope.launch { graph.lineupKeeper }

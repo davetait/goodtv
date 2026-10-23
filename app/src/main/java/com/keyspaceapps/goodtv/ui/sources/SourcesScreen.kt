@@ -95,13 +95,17 @@ private fun SourceRow(source: SourceSummary, syncing: Boolean, onRefresh: () -> 
     }
 }
 
+/** How long ago a sync was, as Sources and Settings show it ("5 minutes ago"). */
+internal fun syncedAgo(at: Long): CharSequence =
+    DateUtils.getRelativeTimeSpanString(at, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS)
+
 private fun statusLine(s: SourceSummary, syncing: Boolean): String {
     val counts = "%,d live · %,d movies · %,d series".format(s.liveCount, s.movieCount, s.seriesCount)
     val state = when {
         syncing -> "syncing…"
         s.lastError != null -> "error: ${s.lastError}"
         s.lastSyncAt == null -> "not synced yet"
-        else -> "synced " + DateUtils.getRelativeTimeSpanString(s.lastSyncAt, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS)
+        else -> "synced " + syncedAgo(s.lastSyncAt)
     }
     val hidden = if (s.hiddenCount > 0) " · ${s.hiddenCount} categories hidden" else ""
     return "$counts · $state$hidden"

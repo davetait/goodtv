@@ -1,6 +1,11 @@
 package com.keyspaceapps.goodtv.ui
 
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.isFocused
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -29,6 +34,7 @@ import org.junit.Test
  * End-to-end through the real Activity against a MockWebServer that speaks Xtream.
  * The runner disables the debug prefilled source, and the database is cleared before each test.
  */
+@OptIn(ExperimentalTestApi::class)
 class SourcesFlowTest {
     @get:Rule
     val composeRule = createEmptyComposeRule()
@@ -71,15 +77,23 @@ class SourcesFlowTest {
     /** tv-material surfaces respond to D-pad keys, not touch; trigger the click action directly. */
     private fun SemanticsNodeInteraction.tvClick() = performSemanticsAction(SemanticsActions.OnClick)
 
+    /** A fresh install opens Settings with its Sources row focused; Select opens the sources list. */
+    private fun openSources() {
+        composeRule.waitUntil(10_000) { composeRule.onAllNodes(hasText("Sources") and isFocused()).fetchSemanticsNodes().isNotEmpty() }
+        composeRule.onRoot().performKeyInput { pressKey(Key.DirectionCenter) }
+        composeRule.waitUntil(10_000) { composeRule.onAllNodes(hasText("Add source")).fetchSemanticsNodes().isNotEmpty() }
+    }
+
     @Test
     fun freshInstallLandsOnSourcesWithAddFocused() {
-        composeRule.waitUntil(10_000) { composeRule.onAllNodes(hasText("Add source")).fetchSemanticsNodes().isNotEmpty() }
+        openSources()
+        composeRule.waitUntil(10_000) { composeRule.onAllNodes(hasText("Add source") and isFocused()).fetchSemanticsNodes().isNotEmpty() }
         composeRule.onNodeWithText("Add source").assertIsDisplayed().assertIsFocused()
     }
 
     @Test
     fun addSourceShowsCountsAndLiveChannels() {
-        composeRule.waitUntil(10_000) { composeRule.onAllNodes(hasText("Add source")).fetchSemanticsNodes().isNotEmpty() }
+        openSources()
         composeRule.onNodeWithText("Add source").tvClick()
         try {
             composeRule.waitUntil(10_000) { composeRule.onAllNodes(hasText("Test & save")).fetchSemanticsNodes().isNotEmpty() }
@@ -108,7 +122,9 @@ class SourcesFlowTest {
         }
         composeRule.onNodeWithText("Living Room").assertIsDisplayed()
 
-        // The Live tab's guide lists the synced channels.
+        // Back to Settings; the Live tab's guide lists the synced channels.
+        scenario!!.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        composeRule.waitUntil(10_000) { composeRule.onAllNodes(hasText("Live")).fetchSemanticsNodes().isNotEmpty() }
         composeRule.onNodeWithText("Live").tvClick()
         composeRule.waitUntil(10_000) { composeRule.onAllNodes(hasText("Sports One")).fetchSemanticsNodes().isNotEmpty() }
         composeRule.onNodeWithText("Sports One").assertIsDisplayed()

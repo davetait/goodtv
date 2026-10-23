@@ -91,7 +91,7 @@ class HomeTabsTest {
     /**
      * The Live tab is the guide: focus starts on the first row's cell ("No guide info" here, as wide as the
      * row). UP goes to the row above it (a genre chip or the search field to their right), UP again to the
-     * tab whose horizontal span overlaps it ("Sources"), not the selected tab. LEFT then walks along the
+     * tab whose horizontal span overlaps it ("Settings", the last tab), not the selected tab. LEFT then walks along the
      * tabs and Select switches.
      */
     @Test
@@ -104,7 +104,7 @@ class HomeTabsTest {
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionUp) }
         waitFocused(hasAnyChipLabel() or hasTestTag("guide_search"))
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionUp) }
-        waitFocused(hasText("Sources"))
+        waitFocused(hasText("Settings"))
         composeRule.onNodeWithText("Live").assertIsSelected()
 
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionLeft) }

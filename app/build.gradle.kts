@@ -1,4 +1,5 @@
 import java.util.Properties
+import java.util.zip.ZipFile
 
 plugins {
     alias(libs.plugins.android.application)
@@ -49,6 +50,11 @@ android {
             buildConfigField("String", "XTREAM_SERVER", "\"\"")
             buildConfigField("String", "XTREAM_USERNAME", "\"\"")
             buildConfigField("String", "XTREAM_PASSWORD", "\"\"")
+            // Release builds carry no developer keys; users enter their own in Settings.
+            buildConfigField("String", "TMDB_API_KEY", "\"\"")
+            buildConfigField("String", "OPENSUBTITLES_API_KEY", "\"\"")
+            buildConfigField("String", "OPENSUBTITLES_USERNAME", "\"\"")
+            buildConfigField("String", "OPENSUBTITLES_PASSWORD", "\"\"")
             // Debug-signed so the minified build can be installed and exercised locally. Replace
             // with a real signing config before any distribution.
             signingConfig = signingConfigs.getByName("debug")
@@ -77,6 +83,60 @@ android {
         }
     }
 }
+
+// AGP only creates the debug unit-test variant by default; ReleaseBuildConfigTest needs the release one.
+androidComponents {
+    beforeVariants(selector().withBuildType("release")) { variant ->
+        variant.hostTests[com.android.build.api.variant.HostTestBuilder.UNIT_TEST_TYPE]?.enable = true
+    }
+}
+
+// Fails assembleRelease if the release APK contains any local.properties key value. Only entry
+// names are ever logged, never values. It finalizes assembleRelease only: bundleRelease and
+// installRelease skip it. The real guard is the release build type's blanked BuildConfig fields;
+// this scan is a backstop.
+val checkReleaseApkForKeys = tasks.register("checkReleaseApkForKeys") {
+    val scanned = listOf(
+        "GOODTV_TMDB_API_KEY",
+        "GOODTV_OPENSUBTITLES_API_KEY",
+        "GOODTV_OPENSUBTITLES_USERNAME",
+        "GOODTV_OPENSUBTITLES_PASSWORD",
+    ).associateWith { localProp(it) }.filterValues { it.isNotBlank() }
+    val minLength = 6
+    val apkDir = layout.buildDirectory.dir("outputs/apk/release")
+    doLast {
+        val (scannable, tooShort) = scanned.entries.partition { it.value.length >= minLength }
+        tooShort.forEach { logger.lifecycle("checkReleaseApkForKeys: ${it.key} is too short to scan (under $minLength characters)") }
+        if (scannable.isEmpty()) {
+            logger.lifecycle("checkReleaseApkForKeys: skipped, no key values in local.properties to scan for")
+            return@doLast
+        }
+        val apks = apkDir.get().asFile.listFiles { f -> f.extension == "apk" }.orEmpty()
+        check(apks.isNotEmpty()) { "checkReleaseApkForKeys: no release APK found under ${apkDir.get().asFile}" }
+        fun ByteArray.contains(needle: ByteArray): Boolean {
+            outer@ for (i in 0..size - needle.size) {
+                for (j in needle.indices) if (this[i + j] != needle[j]) continue@outer
+                return true
+            }
+            return false
+        }
+        val needles = scannable.associate { it.key to it.value.toByteArray(Charsets.UTF_8) }
+        val hits = linkedSetOf<String>()
+        apks.forEach { apk ->
+            ZipFile(apk).use { zip ->
+                zip.entries().asSequence().filterNot { it.isDirectory }.forEach { entry ->
+                    val bytes = zip.getInputStream(entry).use { it.readBytes() }
+                    needles.forEach { (name, needle) -> if (bytes.contains(needle)) hits += name }
+                }
+            }
+        }
+        if (hits.isNotEmpty()) {
+            throw GradleException(hits.joinToString("; ") { "Release APK contains the value of $it" })
+        }
+        logger.lifecycle("checkReleaseApkForKeys: found no key values in ${apks.size} release APK(s) (scanned ${needles.keys.joinToString()})")
+    }
+}
+tasks.matching { it.name == "assembleRelease" }.configureEach { finalizedBy(checkReleaseApkForKeys) }
 
 ksp {
     arg("room.schemaLocation", "$projectDir/schemas")

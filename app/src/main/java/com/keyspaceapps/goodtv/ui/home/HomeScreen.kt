@@ -27,7 +27,7 @@ import com.keyspaceapps.goodtv.ui.series.SeriesScreen
 import com.keyspaceapps.goodtv.ui.sports.SportsScreen
 import com.keyspaceapps.goodtv.ui.nav.GoodTvKey
 import com.keyspaceapps.goodtv.ui.nav.HomeTab
-import com.keyspaceapps.goodtv.ui.sources.SourcesScreen
+import com.keyspaceapps.goodtv.ui.settings.SettingsScreen
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -35,14 +35,14 @@ import kotlinx.coroutines.launch
 
 class HomeViewModel(private val repo: LibraryRepository, private val settings: AppSettings) : ViewModel() {
     private val _tab = MutableStateFlow<HomeTab?>(null)
-    /** null until the initial tab is resolved (Sources when there are no sources, else the last used tab). */
+    /** null until the initial tab is resolved (Settings when there are no sources, else the last used tab). */
     val tab: StateFlow<HomeTab?> = _tab
 
     init {
         viewModelScope.launch {
             val count = repo.enabledSourceCount().first()
-            val last = settings.lastTab.first()?.let { name -> HomeTab.entries.firstOrNull { it.name == name } }
-            _tab.value = if (count == 0) HomeTab.SOURCES else last ?: HomeTab.HOME
+            val last = settings.lastTab.first()?.let(::savedTab)
+            _tab.value = if (count == 0) HomeTab.SETTINGS else last ?: HomeTab.HOME
         }
     }
 
@@ -52,6 +52,10 @@ class HomeViewModel(private val repo: LibraryRepository, private val settings: A
         viewModelScope.launch { settings.setLastTab(tab.name) }
     }
 }
+
+/** A saved tab name; older installs saved "SOURCES", which Settings replaced. */
+internal fun savedTab(name: String): HomeTab? =
+    if (name == "SOURCES") HomeTab.SETTINGS else HomeTab.entries.firstOrNull { it.name == name }
 
 @Composable
 fun HomeScreen(onNavigate: (GoodTvKey) -> Unit) {
@@ -88,7 +92,7 @@ fun HomeScreen(onNavigate: (GoodTvKey) -> Unit) {
                 HomeTab.SPORTS -> SportsScreen(onPlay = onNavigate)
                 HomeTab.MOVIES -> MoviesScreen(onMovie = onNavigate, onSeeAll = onNavigate)
                 HomeTab.SERIES -> SeriesScreen(onSeries = onNavigate, onSeeAll = onNavigate)
-                HomeTab.SOURCES -> SourcesScreen(onNavigate = onNavigate)
+                HomeTab.SETTINGS -> SettingsScreen(onNavigate = onNavigate)
             }
         }
     }
@@ -101,6 +105,6 @@ private val HomeTab.labelRes: Int
         HomeTab.SPORTS -> R.string.tab_sports
         HomeTab.MOVIES -> R.string.tab_movies
         HomeTab.SERIES -> R.string.tab_series
-        HomeTab.SOURCES -> R.string.tab_sources
+        HomeTab.SETTINGS -> R.string.tab_settings
     }
 

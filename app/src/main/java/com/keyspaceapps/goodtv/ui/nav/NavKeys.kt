@@ -69,4 +69,12 @@ data class EditSourceKey(val sourceId: Long?) : GoodTvKey
 @Serializable
 data class CategoriesKey(val sourceId: Long) : GoodTvKey
 
-enum class HomeTab { HOME, LIVE, SPORTS, MOVIES, SERIES, SOURCES }
+/** The sources list, opened from Settings. */
+@Serializable
+data object SourcesKey : GoodTvKey
+
+/** TMDB and OpenSubtitles keys, opened from Settings. */
+@Serializable
+data object IntegrationsKey : GoodTvKey
+
+enum class HomeTab { HOME, LIVE, SPORTS, MOVIES, SERIES, SETTINGS }

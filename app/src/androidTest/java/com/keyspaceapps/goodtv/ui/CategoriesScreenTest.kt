@@ -28,7 +28,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 
-/** Sources → Categories: everything checked by default, unchecking hides from Live, a group header clears its block. */
+/** Settings → Sources → Categories: everything checked by default, unchecking hides from Live, a group header clears its block. */
 class CategoriesScreenTest {
     @get:Rule
     val composeRule = createEmptyComposeRule()
@@ -54,6 +54,9 @@ class CategoriesScreenTest {
             )
         }
         scenario = ActivityScenario.launch(MainActivity::class.java)
+        // A saved SOURCES tab opens Settings; its Sources row opens the sources list.
+        waitFor("Sources")
+        tvClick("Sources")
     }
 
     private fun waitFor(text: String, substring: Boolean = false) =
@@ -96,7 +99,9 @@ class CategoriesScreenTest {
 
         scenario!!.onActivity { it.onBackPressedDispatcher.onBackPressed() }
         waitFor("1 categories hidden", substring = true)
+        scenario!!.onActivity { it.onBackPressedDispatcher.onBackPressed() }
         // The Live tab's guide lists the channels of visible categories only.
+        waitFor("Live")
         tvClick("Live")
         waitFor("Channel of AR| News", substring = true)
         assertEquals(0, composeRule.onAllNodes(hasText("Channel of AR| Sports", substring = true)).fetchSemanticsNodes().size)

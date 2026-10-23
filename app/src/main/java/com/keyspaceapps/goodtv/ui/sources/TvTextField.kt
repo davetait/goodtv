@@ -23,6 +23,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
@@ -36,9 +37,10 @@ import androidx.tv.material3.Text
 /**
  * Single-line text field for the TV. tv-material has no text field, so this wraps BasicTextField
  * in a focus-highlighted box. Pressing Select/Enter on the focused field opens the on-screen keyboard.
- * The label is shown uppercase above the field and as placeholder inside it. The keyboard's
- * Next/Done action (or a hardware Enter) moves focus to the next field so the whole form can be
- * filled without leaving the keyboard.
+ * The label is shown uppercase above the field and, unless [placeholder] says otherwise, inside it
+ * while empty. The keyboard's Next/Done action (or a hardware Enter) moves focus to the next field
+ * so the whole form can be filled without leaving the keyboard; D-pad Up/Down leave the field.
+ * [fieldModifier] applies to the editable field itself (focus requests, focus order, test tags).
  */
 @Composable
 fun TvTextField(
@@ -48,6 +50,8 @@ fun TvTextField(
     modifier: Modifier = Modifier,
     password: Boolean = false,
     last: Boolean = false,
+    placeholder: String = label,
+    fieldModifier: Modifier = Modifier,
 ) {
     val focusManager = LocalFocusManager.current
     val interaction = remember { MutableInteractionSource() }
@@ -73,9 +77,18 @@ fun TvTextField(
                 onNext = { focusManager.moveFocus(FocusDirection.Down) },
                 onDone = { keyboard?.hide(); focusManager.moveFocus(FocusDirection.Down) },
             ),
-            modifier = Modifier
+            modifier = fieldModifier
                 .fillMaxWidth()
                 .padding(top = 4.dp)
+                .onPreviewKeyEvent { event ->
+                    // Without the keyboard open, Up/Down move between controls rather than the cursor.
+                    val direction = when (event.key) {
+                        Key.DirectionDown -> FocusDirection.Down
+                        Key.DirectionUp -> FocusDirection.Up
+                        else -> null
+                    }
+                    if (direction != null && event.type == KeyEventType.KeyDown) focusManager.moveFocus(direction) else false
+                }
                 .onKeyEvent { event ->
                     if (event.type == KeyEventType.KeyUp && (event.key == Key.DirectionCenter || event.key == Key.Enter)) {
                         keyboard?.show(); true
@@ -90,7 +103,7 @@ fun TvTextField(
                         .border(2.dp, if (focused) colors.primary else colors.surfaceVariant, RoundedCornerShape(8.dp))
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                 ) {
-                    if (value.isEmpty()) Text(label, color = colors.onSurfaceVariant)
+                    if (value.isEmpty()) Text(placeholder, color = colors.onSurfaceVariant)
                     inner()
                 }
             },
