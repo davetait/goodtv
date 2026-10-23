@@ -6,7 +6,12 @@ import com.keyspaceapps.goodtv.data.subtitles.OpenSubtitlesLogin
 import com.keyspaceapps.goodtv.testing.InMemoryDataStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -134,6 +139,27 @@ class IntegrationsTest {
         assertEquals(first.tmdb.value, second.tmdb.value)
         assertEquals(first.openSubtitles.value, second.openSubtitles.value)
         assertEquals(KeyStatus.REJECTED_LOGIN, second.openSubtitles.value.status)
+    }
+
+    @Test fun loadedIsFalseUntilTheSavedValuesArrive() = runTest {
+        val inner = InMemoryDataStore()
+        Integrations(inner, built, CoroutineScope(UnconfinedTestDispatcher(testScheduler)))
+            .also { it.saveTmdb("typed-tmdb", KeyStatus.CONNECTED) }
+        val slow = object : DataStore<Preferences> by inner {
+            override val data = kotlinx.coroutines.flow.flow { kotlinx.coroutines.delay(1000); emitAll(inner.data) }
+        }
+        val i = Integrations(slow, built, CoroutineScope(StandardTestDispatcher(testScheduler)))
+        var returned = false
+        val waiter = CoroutineScope(StandardTestDispatcher(testScheduler)).launch { i.awaitLoaded(); returned = true }
+        advanceTimeBy(500)
+        assertFalse(i.loaded.value)
+        assertFalse(returned)
+        advanceUntilIdle()
+        assertTrue(i.loaded.value)
+        assertTrue(returned)
+        assertEquals(TmdbState("typed-tmdb", false, KeyStatus.CONNECTED), i.tmdb.value)
+        i.awaitLoaded()
+        waiter.cancel()
     }
 
     @Test fun toStringsNeverShowValues() {

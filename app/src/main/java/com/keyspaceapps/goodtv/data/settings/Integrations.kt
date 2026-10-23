@@ -6,10 +6,11 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.keyspaceapps.goodtv.data.subtitles.OpenSubtitlesLogin
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import java.security.MessageDigest
 
 enum class KeyStatus { NOT_SET, UNCHECKED, CONNECTED, REJECTED_KEY, REJECTED_LOGIN }
@@ -84,11 +85,30 @@ class Integrations(
         return OpenSubtitlesState(v.access, v.fromBuild, storedStatus(p, osStatus, osFingerprint, fingerprint(v.access)))
     }
 
-    val tmdb: StateFlow<TmdbState> = dataStore.data.map(::tmdbState)
-        .stateIn(scope, SharingStarted.Eagerly, tmdbState(androidx.datastore.preferences.core.emptyPreferences()))
+    private val empty = androidx.datastore.preferences.core.emptyPreferences()
+    private val tmdbState = MutableStateFlow(tmdbState(empty))
+    private val openSubtitlesState = MutableStateFlow(osState(empty))
+    private val loadedState = MutableStateFlow(false)
 
-    val openSubtitles: StateFlow<OpenSubtitlesState> = dataStore.data.map(::osState)
-        .stateIn(scope, SharingStarted.Eagerly, osState(androidx.datastore.preferences.core.emptyPreferences()))
+    /** Until [loaded] is true these hold the build defaults, not what the user saved. */
+    val tmdb: StateFlow<TmdbState> = tmdbState.asStateFlow()
+    val openSubtitles: StateFlow<OpenSubtitlesState> = openSubtitlesState.asStateFlow()
+
+    /** False until the saved values have first been applied to [tmdb] and [openSubtitles]. */
+    val loaded: StateFlow<Boolean> = loadedState.asStateFlow()
+
+    /** Suspends until [loaded]; returns at once afterwards. */
+    suspend fun awaitLoaded() { loadedState.first { it } }
+
+    init {
+        scope.launch {
+            dataStore.data.collect {
+                tmdbState.value = tmdbState(it)
+                openSubtitlesState.value = osState(it)
+                loadedState.value = true
+            }
+        }
+    }
 
     suspend fun saveTmdb(key: String, status: KeyStatus) {
         if (key.isBlank()) return removeTmdb()
