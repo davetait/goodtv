@@ -76,6 +76,21 @@ class TmdbApi(
             TmdbSearchPage.serializer(TmdbTvResult.serializer()),
         )?.results.orEmpty()
 
+    suspend fun movieCredits(id: Long, language: String): TmdbCredits? =
+        get(url("movie/$id/credits", language), TmdbCredits.serializer(), nullOn404 = true)
+
+    suspend fun tvPeople(id: Long, language: String): TmdbTvPeople? =
+        get(url("tv/$id", language) { addQueryParameter("append_to_response", "aggregate_credits") }, TmdbTvPeople.serializer(), nullOn404 = true)
+
+    suspend fun personCredits(personId: Long, language: String): TmdbPersonCredits? =
+        get(url("person/$personId/combined_credits", language), TmdbPersonCredits.serializer(), nullOn404 = true)
+
+    suspend fun searchPerson(query: String, language: String): List<TmdbPersonResult> =
+        get(
+            url("search/person", language) { addQueryParameter("query", query) },
+            TmdbSearchPage.serializer(TmdbPersonResult.serializer()),
+        )?.results.orEmpty()
+
     /**
      * Discover movies on subscription ([flatrate]) streaming in [region] on any of [providers]
      * (TMDB watch-provider ids, which differ by region), released between [releasedFrom] and

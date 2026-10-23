@@ -21,12 +21,36 @@ import com.keyspaceapps.goodtv.data.tmdb.TmdbKind
 import com.keyspaceapps.goodtv.data.tmdb.TmdbMeta
 import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.ui.browse.Formats
+import com.keyspaceapps.goodtv.data.tmdb.PeopleRepository
+import com.keyspaceapps.goodtv.data.tmdb.TmdbPerson
+import com.keyspaceapps.goodtv.data.tmdb.TmdbRepository
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 
 fun ContentKind.tmdbKind(): TmdbKind? = when (this) {
     ContentKind.MOVIE -> TmdbKind.MOVIE
     ContentKind.SERIES -> TmdbKind.TV
     ContentKind.LIVE -> null
+}
+
+/**
+ * A detail page's TMDB meta and people, fetched together. People use the provider's [providerTmdbId]
+ * when it has one (in parallel with the meta), else the id the meta lookup found; a failed people
+ * fetch is an empty list.
+ */
+suspend fun detailTmdb(
+    tmdbRepo: TmdbRepository?,
+    peopleRepo: PeopleRepository?,
+    kind: TmdbKind,
+    providerTmdbId: Long?,
+    title: String,
+): Pair<TmdbMeta?, List<TmdbPerson>> = coroutineScope {
+    suspend fun people(id: Long) = peopleRepo?.titlePeople(kind, id)?.getOrNull().orEmpty()
+    val known = providerTmdbId?.takeIf { it > 0 }
+    val early = known?.let { async { people(it) } }
+    val meta = tmdbRepo?.lookup(kind, providerTmdbId, title)?.getOrNull()
+    meta to (early?.await() ?: meta?.tmdbId?.let { people(it) }.orEmpty())
 }
 
 /** Posters wait this long on screen before asking TMDB, so a fast scroll past a row costs nothing. */
@@ -58,12 +82,13 @@ fun detailRating(tmdb: TmdbMeta?, providerRating: Double?): String? =
     tmdb?.reliableRating?.let { stringResource(R.string.tmdb_rating, Formats.rating(it)!!) } ?: Formats.rating(providerRating)
 
 /**
- * TMDB's terms require its logo and notice wherever its data is shown; shown only when it is. The
- * logo stays small: the terms also require it to be less prominent than the app's own branding.
+ * TMDB's terms require its logo and notice wherever its data is shown; shown only when it is
+ * (its rating, summary, or [hasPeople]: a People row from TMDB). The logo stays small: the terms
+ * also require it to be less prominent than the app's own branding.
  */
 @Composable
-fun TmdbCredit(tmdb: TmdbMeta?) {
-    if (tmdb == null || (tmdb.reliableRating == null && tmdb.overview == null)) return
+fun TmdbCredit(tmdb: TmdbMeta?, hasPeople: Boolean = false) {
+    if (!hasPeople && (tmdb == null || (tmdb.reliableRating == null && tmdb.overview == null))) return
     Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Image(
             painterResource(R.drawable.tmdb_logo),

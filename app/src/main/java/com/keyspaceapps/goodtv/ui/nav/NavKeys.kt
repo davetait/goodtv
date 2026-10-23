@@ -56,6 +56,10 @@ data class MovieDetailKey(val sourceId: Long, val movieId: String) : GoodTvKey
 @Serializable
 data class SeriesDetailKey(val sourceId: Long, val seriesId: String) : GoodTvKey
 
+/** The library titles one TMDB person is in; [name] titles the page before anything loads. */
+@Serializable
+data class PersonSearchKey(val personId: Long, val name: String) : GoodTvKey
+
 @Serializable
 data class CategoryGridKey(val sourceId: Long, val kind: ContentKind, val categoryId: String, val title: String) : GoodTvKey
 

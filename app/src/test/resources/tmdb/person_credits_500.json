@@ -1,0 +1,19 @@
+{
+  "id": 500,
+  "cast": [
+    {"id": 361743, "media_type": "movie", "character": "Maverick", "release_date": "2022-05-24", "genre_ids": [28]},
+    {"id": 2001, "media_type": "tv", "character": "Himself", "first_air_date": "2000-01-01", "episode_count": 40, "genre_ids": [10767]},
+    {"id": 2002, "media_type": "movie", "character": "Self - Guest", "release_date": "2010-01-01", "genre_ids": [99]},
+    {"id": 2003, "media_type": "tv", "character": "Guest Cop", "first_air_date": "2005-03-03", "episode_count": 1, "genre_ids": [18]},
+    {"id": 2004, "media_type": "tv", "character": "Recurring Cop", "first_air_date": "2006-04-04", "episode_count": 5, "genre_ids": [18]},
+    {"id": 2005, "media_type": "person", "character": "Ignored", "genre_ids": []}
+  ],
+  "crew": [
+    {"id": 2006, "media_type": "movie", "job": "Producer", "department": "Production", "release_date": "2015-07-31"},
+    {"id": 2007, "media_type": "tv", "job": "Executive Producer", "department": "Production", "first_air_date": "2019-01-01", "episode_count": 30},
+    {"id": 2008, "media_type": "movie", "job": "Thanks", "department": "Crew", "release_date": "2012-01-01"},
+    {"id": 2009, "media_type": "movie", "job": "Screenplay", "department": "Writing", "release_date": "2008-08-08"},
+    {"id": 2010, "media_type": "tv", "job": "Director", "department": "Directing", "first_air_date": "2011-01-01", "episode_count": 1},
+    {"id": 361743, "media_type": "movie", "job": "Producer", "department": "Production", "release_date": "2022-05-24"}
+  ]
+}

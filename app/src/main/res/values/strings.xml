@@ -14,9 +14,16 @@
     <string name="search_kind_movie">Movie</string>
     <string name="search_kind_series">Series</string>
     <string name="search_no_results">Nothing matches “%1$s”</string>
+    <plurals name="person_titles">
+        <item quantity="one">With %1$s · %2$d title</item>
+        <item quantity="other">With %1$s · %2$d titles</item>
+    </plurals>
+    <string name="person_no_titles">No titles with %1$s</string>
+    <string name="person_loading">Finding titles with %1$s…</string>
+    <string name="person_offline">Searching by person needs the internet</string>
     <string name="tmdb_rating">%1$s TMDB</string>
     <string name="tmdb_logo_description">TMDB</string>
-    <string name="tmdb_credit">Rating and summary from TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.</string>
+    <string name="tmdb_credit">Details from TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.</string>
     <string name="genre_action">Action</string>
     <string name="genre_adventure">Adventure</string>
     <string name="genre_animation">Animation</string>
@@ -66,6 +73,9 @@
     <string name="tab_sources">Sources</string>
     <string name="see_all">See all</string>
     <string name="play">Play</string>
+    <string name="detail_people">People</string>
+    <string name="role_director">Director</string>
+    <string name="role_creator">Creator</string>
     <string name="resume_from">Resume from %1$s</string>
     <string name="start_over">Start over</string>
     <string name="watched">Watched</string>
