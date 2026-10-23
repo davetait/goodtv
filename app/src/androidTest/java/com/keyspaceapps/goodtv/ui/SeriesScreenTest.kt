@@ -31,6 +31,7 @@ import com.keyspaceapps.goodtv.ui.nav.SeriesDetailKey
 import com.keyspaceapps.goodtv.ui.series.SeriesDetailScreen
 import com.keyspaceapps.goodtv.ui.series.SeriesScreen
 import com.keyspaceapps.goodtv.ui.theme.GoodTvTheme
+import com.keyspaceapps.goodtv.testing.clearDatabaseForTest
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Before
@@ -47,7 +48,7 @@ class SeriesScreenTest {
     @Before
     fun seed() = runBlocking {
         val graph = ApplicationProvider.getApplicationContext<android.content.Context>().appGraph()
-        graph.db.clearAllTables()
+        graph.clearDatabaseForTest()
         sourceA = graph.store.insertSource(SourceRecord(0, SourceType.XTREAM, "A", SourceConfig.Xtream("http://s", "u", "p"), true, 1L, null))
         val s1 = Series(sourceA, "s1", "dra", "Series 1", null, "plot", 8.0)
         val s2 = Series(sourceA, "s2", "dra", "Series 2", null, null, null)

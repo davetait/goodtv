@@ -37,6 +37,7 @@ import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.domain.Movie
 import com.keyspaceapps.goodtv.domain.MovieDetail
 import com.keyspaceapps.goodtv.domain.SourceRecord
+import com.keyspaceapps.goodtv.testing.clearDatabaseForTest
 import kotlinx.coroutines.runBlocking
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
@@ -93,7 +94,7 @@ class PersonSearchTest {
         startServer()
         runBlocking {
             graph = ApplicationProvider.getApplicationContext<android.content.Context>().appGraph()
-            graph.db.clearAllTables()
+            graph.clearDatabaseForTest()
             graph.settings.setLastTab(lastTab)
             val api = TmdbApi(OkHttpClient(), TmdbCredential.ApiKey("test"), baseUrl = server.url("/3/"))
             graph.tmdbOverride = TmdbRepository(api, RoomTmdbCache(graph.db.tmdb()), language = { "en-US" })

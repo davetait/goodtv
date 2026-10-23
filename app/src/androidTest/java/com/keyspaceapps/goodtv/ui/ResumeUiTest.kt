@@ -31,6 +31,7 @@ import com.keyspaceapps.goodtv.ui.nav.PlayerKey
 import com.keyspaceapps.goodtv.ui.nav.SeriesDetailKey
 import com.keyspaceapps.goodtv.ui.series.SeriesDetailScreen
 import com.keyspaceapps.goodtv.ui.theme.GoodTvTheme
+import com.keyspaceapps.goodtv.testing.clearDatabaseForTest
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Before
@@ -47,7 +48,7 @@ class ResumeUiTest {
     @Before
     fun seed() = runBlocking {
         val graph = ApplicationProvider.getApplicationContext<android.content.Context>().appGraph()
-        graph.db.clearAllTables()
+        graph.clearDatabaseForTest()
         sid = graph.store.insertSource(SourceRecord(0, SourceType.XTREAM, "A", SourceConfig.Xtream("http://s", "u", "p"), true, 1L, null))
         val movie = Movie(sid, "m1", null, "EN - Heat (1995)", null, "mkv", null, null)
         val fresh = Movie(sid, "m2", null, "Fresh", null, "mkv", null, null)

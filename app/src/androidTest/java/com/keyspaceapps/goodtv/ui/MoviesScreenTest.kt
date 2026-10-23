@@ -32,6 +32,7 @@ import com.keyspaceapps.goodtv.ui.nav.CategoryGridKey
 import com.keyspaceapps.goodtv.ui.nav.MovieDetailKey
 import com.keyspaceapps.goodtv.ui.nav.PlayerKey
 import com.keyspaceapps.goodtv.ui.theme.GoodTvTheme
+import com.keyspaceapps.goodtv.testing.clearDatabaseForTest
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Before
@@ -48,7 +49,7 @@ class MoviesScreenTest {
     @Before
     fun seed() = runBlocking {
         val graph = ApplicationProvider.getApplicationContext<android.content.Context>().appGraph()
-        graph.db.clearAllTables()
+        graph.clearDatabaseForTest()
         sourceA = graph.store.insertSource(SourceRecord(0, SourceType.XTREAM, "A", SourceConfig.Xtream("http://s", "u", "p"), true, 1L, null))
         val action = (1..31).map { Movie(sourceA, "act-%02d".format(it), "act", "Act %02d".format(it), null, "mkv", null, null) }
         val drama = (1..3).map { Movie(sourceA, "dra-$it", "dra", "Dra $it", null, "mp4", null, null) }

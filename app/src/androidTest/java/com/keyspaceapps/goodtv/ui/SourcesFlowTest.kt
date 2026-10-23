@@ -20,6 +20,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.test.core.app.ApplicationProvider
 import com.keyspaceapps.goodtv.MainActivity
 import com.keyspaceapps.goodtv.appGraph
+import com.keyspaceapps.goodtv.testing.clearDatabaseForTest
 import kotlinx.coroutines.runBlocking
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
@@ -47,7 +48,7 @@ class SourcesFlowTest {
     fun setUp() {
         runBlocking {
             val graph = ApplicationProvider.getApplicationContext<android.content.Context>().appGraph()
-            graph.db.clearAllTables()
+            graph.clearDatabaseForTest()
             graph.settings.setLastTab("LIVE")
         }
         server.dispatcher = object : Dispatcher() {

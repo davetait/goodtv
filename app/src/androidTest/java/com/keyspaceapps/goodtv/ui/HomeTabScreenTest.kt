@@ -37,6 +37,7 @@ import com.keyspaceapps.goodtv.domain.Movie
 import com.keyspaceapps.goodtv.domain.Series
 import com.keyspaceapps.goodtv.data.tmdb.PopularMoviesQuery
 import com.keyspaceapps.goodtv.data.tmdb.PopularShowsQuery
+import com.keyspaceapps.goodtv.testing.clearDatabaseForTest
 import org.junit.After
 import org.junit.Rule
 import org.junit.Test
@@ -55,7 +56,7 @@ class HomeTabScreenTest {
     private fun seedAndLaunch(lastTab: String, ranked: Boolean = true) {
         runBlocking {
             val graph = ApplicationProvider.getApplicationContext<android.content.Context>().appGraph()
-            graph.db.clearAllTables()
+            graph.clearDatabaseForTest()
             graph.settings.setLastTab(lastTab)
             val id = graph.store.insertSource(SourceRecord(0, SourceType.XTREAM, "A", SourceConfig.Xtream("http://s", "u", "p"), true, System.currentTimeMillis(), null))
             graph.store.replaceCatalog(

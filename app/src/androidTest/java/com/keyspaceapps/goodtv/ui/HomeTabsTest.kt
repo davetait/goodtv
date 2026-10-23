@@ -30,6 +30,7 @@ import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.domain.LiveChannel
 import com.keyspaceapps.goodtv.domain.Movie
 import com.keyspaceapps.goodtv.domain.SourceRecord
+import com.keyspaceapps.goodtv.testing.clearDatabaseForTest
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Rule
@@ -53,7 +54,7 @@ class HomeTabsTest {
 
     private fun seed() = runBlocking {
         val graph = ApplicationProvider.getApplicationContext<android.content.Context>().appGraph()
-        graph.db.clearAllTables()
+        graph.clearDatabaseForTest()
         graph.settings.setLastTab("LIVE")
         val id = graph.store.insertSource(SourceRecord(0, SourceType.XTREAM, "A", SourceConfig.Xtream("http://s", "u", "p"), true, System.currentTimeMillis(), null))
         graph.store.replaceCatalog(

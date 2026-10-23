@@ -53,6 +53,7 @@ import com.keyspaceapps.goodtv.ui.live.GuideScreen
 import com.keyspaceapps.goodtv.ui.nav.PlayerKey
 import com.keyspaceapps.goodtv.ui.sports.SportsFormats
 import com.keyspaceapps.goodtv.ui.theme.GoodTvTheme
+import com.keyspaceapps.goodtv.testing.clearDatabaseForTest
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -198,7 +199,7 @@ class GuideScreenTest {
      */
     private fun realGuide(programmeMs: Long): GuideSource {
         val graph = ApplicationProvider.getApplicationContext<android.content.Context>().appGraph()
-        runBlocking { graph.db.clearAllTables() }
+        graph.clearDatabaseForTest()
         val rows = news.rows
         val programmes = rows.flatMap { it.programmes }
         val links = listOf(ChannelGuideLink(7, "fx", "fn"), ChannelGuideLink(7, "cn1", "cn"), ChannelGuideLink(7, "ms", "ms"))

@@ -33,6 +33,7 @@ import com.keyspaceapps.goodtv.domain.SourceRecord
 import com.keyspaceapps.goodtv.ui.movies.MoviesScreen
 import com.keyspaceapps.goodtv.ui.series.SeriesScreen
 import com.keyspaceapps.goodtv.ui.theme.GoodTvTheme
+import com.keyspaceapps.goodtv.testing.clearDatabaseForTest
 import kotlinx.coroutines.runBlocking
 import org.junit.Before
 import org.junit.Rule
@@ -47,7 +48,7 @@ class GenreFilterUiTest {
     @Before
     fun seed() = runBlocking {
         val graph = ApplicationProvider.getApplicationContext<android.content.Context>().appGraph()
-        graph.db.clearAllTables()
+        graph.clearDatabaseForTest()
         val sid = graph.store.insertSource(SourceRecord(0, SourceType.XTREAM, "A", SourceConfig.Xtream("http://s", "u", "p"), true, 1L, null))
         graph.store.replaceCatalog(
             sid,
