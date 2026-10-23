@@ -1,16 +1,20 @@
 package com.keyspaceapps.goodtv.data.settings
 
+import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.keyspaceapps.goodtv.data.subtitles.OpenSubtitlesLogin
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.io.IOException
 import java.security.MessageDigest
 
 enum class KeyStatus { NOT_SET, UNCHECKED, CONNECTED, REJECTED_KEY, REJECTED_LOGIN }
@@ -43,6 +47,7 @@ class Integrations(
     private val dataStore: DataStore<Preferences>,
     private val defaults: BuildDefaults,
     scope: CoroutineScope,
+    private val warn: (String) -> Unit = { Log.w("GoodTV", it) },
 ) {
     private val tmdbKey = stringPreferencesKey("tmdb_key")
     private val tmdbStatus = stringPreferencesKey("tmdb_status")
@@ -85,7 +90,7 @@ class Integrations(
         return OpenSubtitlesState(v.access, v.fromBuild, storedStatus(p, osStatus, osFingerprint, fingerprint(v.access)))
     }
 
-    private val empty = androidx.datastore.preferences.core.emptyPreferences()
+    private val empty = emptyPreferences()
     private val tmdbState = MutableStateFlow(tmdbState(empty))
     private val openSubtitlesState = MutableStateFlow(osState(empty))
     private val loadedState = MutableStateFlow(false)
@@ -102,7 +107,12 @@ class Integrations(
 
     init {
         scope.launch {
-            dataStore.data.collect {
+            // An unreadable store counts as empty (the build defaults apply), so nothing waits forever on [loaded].
+            dataStore.data.catch { e ->
+                if (e !is IOException) throw e
+                warn("Integrations could not be read: ${e.javaClass.simpleName}")
+                emit(emptyPreferences())
+            }.collect {
                 tmdbState.value = tmdbState(it)
                 openSubtitlesState.value = osState(it)
                 loadedState.value = true

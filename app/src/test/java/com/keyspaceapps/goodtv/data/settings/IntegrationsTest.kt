@@ -162,6 +162,21 @@ class IntegrationsTest {
         waiter.cancel()
     }
 
+    /** Review R4: a store that can't be read counts as empty, so whoever waits on [Integrations.loaded] isn't stuck. */
+    @Test fun unreadableStoreStillLoadsWithTheBuildValues() = runTest {
+        val warnings = mutableListOf<String>()
+        val broken = object : DataStore<Preferences> by InMemoryDataStore() {
+            override val data = kotlinx.coroutines.flow.flow<Preferences> { throw java.io.IOException("disk says no secret-value") }
+        }
+        val i = Integrations(broken, built, CoroutineScope(UnconfinedTestDispatcher(testScheduler)), warn = { warnings += it })
+        assertTrue(i.loaded.value)
+        i.awaitLoaded()
+        assertEquals(TmdbState("build-tmdb", true, KeyStatus.UNCHECKED), i.tmdb.value)
+        assertEquals(1, warnings.size)
+        assertTrue(warnings.single().contains("IOException"))
+        assertFalse(warnings.single().contains("secret"))
+    }
+
     @Test fun toStringsNeverShowValues() {
         val text = listOf(
             built.toString(),
