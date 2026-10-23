@@ -8,7 +8,11 @@ GoodTV's TMDB and OpenSubtitles keys can only come from `local.properties` at bu
 
 ## What Dave decided
 
-1. **Local builds keep their built-in keys.** A build made on Dave's machine includes the TMDB and OpenSubtitles keys from `local.properties`, as today. `local.properties` stays git-ignored, so the keys never reach GitHub. A build without those entries has no built-in keys and relies on Integrations. (Dave first said no keys should ever be built in, then clarified that what he wants is keeping them out of GitHub.)
+1. **Only debug builds carry built-in keys.**
+   - A debug build made on Dave's machine includes the TMDB and OpenSubtitles keys from `local.properties`, as today. `local.properties` stays git-ignored, so the keys never reach GitHub.
+   - **A release build never includes them**, even when `local.properties` has them. Release builds rely on Integrations alone.
+   - Today release builds do include them; only the developer Xtream login is blanked for release (`app/build.gradle.kts`). This change blanks the four TMDB / OpenSubtitles fields for release the same way.
+   - (Dave first said no keys should ever be built in, then clarified that he wants them kept out of GitHub and out of release builds.)
 2. **A Settings tab replaces the Sources tab** at the end of the top row (Home, Live, Sports, Movies, Series, Settings).
 3. **Settings holds two entries:** Sources (the existing screen) and Integrations (new).
 4. **Integrations** lets the user enter:
@@ -80,7 +84,7 @@ Layout reference: `.superpowers/brainstorm/78805-1792719238/content/settings-and
   - **They're kept out of cloud backup and device transfer**, as source credentials already are. GoodTV's app settings live in DataStore files, which today's backup rules don't exclude, so the rules must cover wherever these values live.
   - Nothing is ever logged.
 - **Built-in keys and typed keys**
-  - The `GOODTV_TMDB_API_KEY` and `GOODTV_OPENSUBTITLES_*` entries in `local.properties` keep flowing into the build as BuildConfig defaults, as today.
+  - The `GOODTV_TMDB_API_KEY` and `GOODTV_OPENSUBTITLES_*` entries in `local.properties` keep flowing into **debug** builds as BuildConfig defaults, as today. Release builds get empty values.
   - **Order:** a value typed in Integrations wins. With none typed, the build's value is used. With neither, the service is off.
   - **On the screen:** a card using the build's values shows them masked like any saved value, with the label "From this build", and is checked like a typed key. The check runs once on first use, and its result is stored as for typed keys.
   - **Typing new values** replaces them for this device.
@@ -102,6 +106,7 @@ Layout reference: `.superpowers/brainstorm/78805-1792719238/content/settings-and
 - **Anti-goals:**
   - A key or password appears in full on screen, in logs, or in a cloud backup.
   - Dave's keys reach GitHub (source, docs, tests or CI output).
+  - A release APK contains Dave's keys.
   - A wrong key saves quietly and the app silently stops showing posters or subtitles.
   - Entering a key needs an app restart.
   - Existing Sources behaviour or first-run setup gets harder.
@@ -114,7 +119,11 @@ Layout reference: `.superpowers/brainstorm/78805-1792719238/content/settings-and
   - Back up and restore Dave's emulator data around connected runs.
   - Tests that enter keys use fake TMDB / OpenSubtitles servers; real keys never go into test sources.
 - **Dave's devices:** after this ships, his emulator and Streamer keep their keys from the build; nothing needs entering.
-- **An APK Dave builds and hands to someone else carries his keys**, as today. They aren't readable on screen, but they can be pulled out of the APK. To give someone a build without his keys, build without those `local.properties` entries. (Claude's note, not a decision; how such a build is made is outside this change.)
+- **Release builds are what Dave hands to others.** They carry none of his keys. A debug APK does carry them, so debug builds stay on his own devices.
+- **Proof the release build is clean:**
+  - A release unit test asserts that the four BuildConfig fields are empty.
+  - A build-time check scans the release APK for the configured key values and fails the build if any appears. It must never print a value; it reports only pass/fail, naming the field.
+- **Release builds without TMDB:** the earlier speed measurements used release builds, and those builds will now start with TMDB and subtitles off until keys are entered in Integrations.
 
 ## Left to the builder
 
