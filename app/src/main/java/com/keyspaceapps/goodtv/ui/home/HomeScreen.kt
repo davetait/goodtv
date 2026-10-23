@@ -92,7 +92,7 @@ fun HomeScreen(onNavigate: (GoodTvKey) -> Unit) {
                 HomeTab.SPORTS -> SportsScreen(onPlay = onNavigate)
                 HomeTab.MOVIES -> MoviesScreen(onMovie = onNavigate, onSeeAll = onNavigate)
                 HomeTab.SERIES -> SeriesScreen(onSeries = onNavigate, onSeeAll = onNavigate)
-                HomeTab.SETTINGS -> SettingsScreen(onNavigate = onNavigate, focusSourcesFirst = true)
+                HomeTab.SETTINGS -> SettingsScreen(onNavigate = onNavigate)
             }
         }
     }

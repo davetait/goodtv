@@ -92,7 +92,9 @@ androidComponents {
 }
 
 // Fails assembleRelease if the release APK contains any local.properties key value. Only entry
-// names are ever logged, never values.
+// names are ever logged, never values. It finalizes assembleRelease only: bundleRelease and
+// installRelease skip it. The real guard is the release build type's blanked BuildConfig fields;
+// this scan is a backstop.
 val checkReleaseApkForKeys = tasks.register("checkReleaseApkForKeys") {
     val scanned = listOf(
         "GOODTV_TMDB_API_KEY",

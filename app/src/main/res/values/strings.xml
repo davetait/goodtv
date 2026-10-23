@@ -106,7 +106,7 @@
     <string name="clear_all">Clear all</string>
     <string name="categories_refresh_first">Refresh this source first</string>
     <string name="everything_hidden">Everything is hidden. Sources → Categories to show some.</string>
-    <string name="nothing_yet">Nothing here yet. A source may still be syncing; check the Sources tab.</string>
+    <string name="nothing_yet">Nothing here yet. A source may still be syncing; check Settings → Sources.</string>
     <string name="home_empty">Popular movies and shows appear here once your library has synced. Watch something and it shows up in Continue Watching.</string>
     <string name="player_play">Play</string>
     <string name="player_pause">Pause</string>

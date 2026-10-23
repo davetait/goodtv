@@ -64,17 +64,17 @@ internal fun statusPartRes(status: KeyStatus): Int = when (status) {
 
 /**
  * Two rows, Sources and Integrations, each opening its screen on top. Focus goes back to the row
- * that opened a screen; otherwise to Sources when [focusSourcesFirst].
+ * that opened a screen; otherwise to Sources.
  */
 @Composable
-fun SettingsScreen(onNavigate: (GoodTvKey) -> Unit, focusSourcesFirst: Boolean) {
+fun SettingsScreen(onNavigate: (GoodTvKey) -> Unit) {
     val vm = goodTvViewModel { SettingsViewModel(it.repository, it.integrations) }
     val sources by vm.sources.collectAsState()
     val tmdb by vm.tmdb.collectAsState()
     val os by vm.openSubtitles.collectAsState()
     val loaded by vm.loaded.collectAsState()
     val requested = remember { mutableStateOf(false) }
-    val target = vm.focus.targetIn(listOf(SOURCES_ROW, INTEGRATIONS_ROW), if (focusSourcesFirst) SOURCES_ROW else null)
+    val target = vm.focus.targetIn(listOf(SOURCES_ROW, INTEGRATIONS_ROW), SOURCES_ROW)
 
     val integrationsStatus = if (!loaded) "" else listOf(
         stringResource(statusPartRes(tmdb.status), stringResource(R.string.tmdb_name)),

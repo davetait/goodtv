@@ -11,6 +11,11 @@ local.properties
 *.iml
 .DS_Store
 
+# Editor swap and backup files
+*.swp
+.*.swp
+*~
+
 # Conductor scratch
 .context/
 .superpowers/

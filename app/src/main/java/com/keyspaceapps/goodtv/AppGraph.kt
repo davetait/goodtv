@@ -5,6 +5,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
 import androidx.annotation.VisibleForTesting
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.preferencesDataStore
 import com.keyspaceapps.goodtv.data.settings.AppSettings
 import com.keyspaceapps.goodtv.data.settings.BuildDefaults
@@ -79,7 +81,11 @@ import java.util.concurrent.TimeUnit
 const val USER_AGENT = "GoodTV/0.2"
 
 private val Context.settingsDataStore by preferencesDataStore(name = "settings")
-private val Context.integrationsDataStore by preferencesDataStore(name = "integrations")
+// A corrupt file would otherwise make every Save throw; starting empty falls back to the build defaults.
+private val Context.integrationsDataStore by preferencesDataStore(
+    name = "integrations",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
 /** Manual dependency graph. One instance per process, owned by [GoodTvApp]. */
 class AppGraph(val context: Context) {
