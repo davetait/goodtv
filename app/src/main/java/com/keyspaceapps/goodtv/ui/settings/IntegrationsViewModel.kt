@@ -9,6 +9,7 @@ import com.keyspaceapps.goodtv.data.settings.KeyStatus
 import com.keyspaceapps.goodtv.data.settings.OpenSubtitlesAccess
 import com.keyspaceapps.goodtv.data.subtitles.OpenSubtitlesLogin
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -49,23 +50,33 @@ data class CardUi(
     val removable: Boolean get() = maskedKey != null && !fromBuild
 }
 
+/**
+ * Whether every character is printable ASCII. OkHttp refuses anything else in a header (a pasted
+ * zero-width space or newline), so no service could ever accept such a value.
+ */
+private fun String.sendable(): Boolean = all { it in ' '..'~' }
+
 /** A saved key as "••••" plus its last 4 characters; a key under 8 characters is all dots. */
 fun maskKey(key: String): String = if (key.length < 8) "•".repeat(key.length) else "••••" + key.takeLast(4)
 
 /**
  * The Integrations screen: shows the TMDB and OpenSubtitles values in effect (masked) with their
- * status, and checks typed values with the service before saving them.
+ * status, and checks typed values with the service before saving them. Save runs in [appScope]
+ * (the app's, not the screen's), so leaving the screen mid-check doesn't drop it.
  */
-class IntegrationsViewModel(private val integrations: Integrations, private val checks: IntegrationChecks) : ViewModel() {
+class IntegrationsViewModel(
+    private val integrations: Integrations,
+    private val checks: IntegrationChecks,
+    private val appScope: CoroutineScope,
+) : ViewModel() {
     private companion object {
         /** How long a removal may take to show in [Integrations] before the build value's check is skipped. */
         const val SETTLE_MS = 5_000L
     }
 
-    /** What the card's last action left behind, over the saved status. */
+    /** What the card's last action left behind: the badge always shows the saved value's status. */
     private data class Attempt(
         val busy: Boolean = false,
-        val badge: Badge? = null,
         @param:StringRes val message: Int? = null,
         val saves: Int = 0,
     )
@@ -77,7 +88,7 @@ class IntegrationsViewModel(private val integrations: Integrations, private val 
 
     val tmdb: StateFlow<CardUi> = combine(integrations.loaded, integrations.tmdb, tmdbAttempt) { loaded, state, attempt ->
         if (!loaded) return@combine loading.copy(saves = attempt.saves)
-        card(state.status, attempt, R.string.tmdb_rejected, R.string.tmdb_unreachable).copy(
+        card(state.status, attempt, R.string.tmdb_rejected).copy(
             maskedKey = state.key?.let(::maskKey),
             fromBuild = state.fromBuild,
         )
@@ -86,7 +97,7 @@ class IntegrationsViewModel(private val integrations: Integrations, private val 
     val openSubtitles: StateFlow<CardUi> = combine(integrations.loaded, integrations.openSubtitles, osAttempt) { loaded, state, attempt ->
         if (!loaded) return@combine loading.copy(saves = attempt.saves)
         val rejected = if (state.status == KeyStatus.REJECTED_LOGIN) R.string.os_login_rejected else R.string.os_key_rejected
-        card(state.status, attempt, rejected, R.string.os_unreachable).copy(
+        card(state.status, attempt, rejected).copy(
             maskedKey = state.access?.apiKey?.let(::maskKey),
             maskedPassword = state.access?.login != null,
             username = state.access?.login?.username,
@@ -94,22 +105,19 @@ class IntegrationsViewModel(private val integrations: Integrations, private val 
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, loading)
 
-    private fun card(status: KeyStatus, attempt: Attempt, @StringRes rejected: Int, @StringRes unreachable: Int): CardUi {
+    private fun card(status: KeyStatus, attempt: Attempt, @StringRes rejected: Int): CardUi {
         val saved = when (status) {
             KeyStatus.NOT_SET -> Badge.NOT_SET
             KeyStatus.UNCHECKED -> Badge.UNCHECKED
             KeyStatus.CONNECTED -> Badge.CONNECTED
             KeyStatus.REJECTED_KEY, KeyStatus.REJECTED_LOGIN -> Badge.REJECTED
         }
-        val badge = when {
-            attempt.busy -> Badge.CHECKING
-            else -> attempt.badge ?: saved
-        }
+        val badge = if (attempt.busy) Badge.CHECKING else saved
+        // "Couldn't reach… Saved" comes only from the Save that couldn't check ([Attempt.message]).
         val message = when {
             attempt.busy -> null
             attempt.message != null -> attempt.message
             saved == Badge.REJECTED -> rejected
-            saved == Badge.UNCHECKED -> unreachable
             else -> null
         }
         return CardUi(badge, message, null, maskedPassword = false, username = null, fromBuild = false, busy = attempt.busy, saves = attempt.saves)
@@ -131,7 +139,7 @@ class IntegrationsViewModel(private val integrations: Integrations, private val 
         val state = integrations.tmdb.value
         val key = state.key ?: return
         if (!state.fromBuild || state.status != KeyStatus.UNCHECKED || tmdbAttempt.value.busy) return
-        tmdbAttempt.update { it.copy(busy = true, badge = null, message = null) }
+        tmdbAttempt.update { it.copy(busy = true, message = null) }
         val status = decide { if (checks.tmdb(key)) KeyStatus.CONNECTED else KeyStatus.REJECTED_KEY }
         if (status != null) integrations.recordTmdbStatus(key, status)
         tmdbAttempt.update { it.copy(busy = false) }
@@ -141,7 +149,7 @@ class IntegrationsViewModel(private val integrations: Integrations, private val 
         val state = integrations.openSubtitles.value
         val access = state.access ?: return
         if (!state.fromBuild || state.status != KeyStatus.UNCHECKED || osAttempt.value.busy) return
-        osAttempt.update { it.copy(busy = true, badge = null, message = null) }
+        osAttempt.update { it.copy(busy = true, message = null) }
         val status = decide { checks.openSubtitles(access) }
         if (status != null) integrations.recordOpenSubtitlesStatus(access, status)
         osAttempt.update { it.copy(busy = false) }
@@ -161,8 +169,12 @@ class IntegrationsViewModel(private val integrations: Integrations, private val 
     fun saveTmdb(typed: String) {
         val key = typed.trim()
         if (key.isEmpty() || tmdbAttempt.value.busy) return
-        tmdbAttempt.update { it.copy(busy = true, badge = null, message = null) }
-        viewModelScope.launch {
+        if (!key.sendable()) {
+            tmdbAttempt.update { it.copy(message = R.string.tmdb_rejected) }
+            return
+        }
+        tmdbAttempt.update { it.copy(busy = true, message = null) }
+        appScope.launch {
             when (decide { if (checks.tmdb(key)) KeyStatus.CONNECTED else KeyStatus.REJECTED_KEY }) {
                 KeyStatus.CONNECTED -> {
                     integrations.saveTmdb(key, KeyStatus.CONNECTED)
@@ -172,7 +184,7 @@ class IntegrationsViewModel(private val integrations: Integrations, private val 
                     integrations.saveTmdb(key, KeyStatus.UNCHECKED)
                     tmdbAttempt.update { Attempt(message = R.string.tmdb_unreachable, saves = it.saves + 1) }
                 }
-                else -> tmdbAttempt.update { Attempt(badge = Badge.REJECTED, message = R.string.tmdb_rejected, saves = it.saves) }
+                else -> tmdbAttempt.update { Attempt(message = R.string.tmdb_rejected, saves = it.saves) }
             }
         }
     }
@@ -189,29 +201,42 @@ class IntegrationsViewModel(private val integrations: Integrations, private val 
 
     /**
      * Checks the key, then the login if one is given, and saves them together only if all is
-     * accepted. An empty field keeps its saved value; a username needs a password and the reverse.
+     * accepted. An empty field keeps its saved value (one half of a login is filled from the saved
+     * login); with no saved login, a username needs a password and the reverse.
      */
     fun saveOpenSubtitles(key: String, username: String, password: String) {
         if (osAttempt.value.busy) return
         val typedKey = key.trim()
         val typedUser = username.trim()
         val typedPassword = password.trim()
-        if (typedUser.isEmpty() != typedPassword.isEmpty()) {
-            osAttempt.update { it.copy(badge = null, message = R.string.os_need_both) }
+        if (typedKey.isEmpty() && typedUser.isEmpty() && typedPassword.isEmpty()) return
+        if (!typedKey.sendable()) {
+            osAttempt.update { it.copy(message = R.string.os_key_rejected) }
             return
         }
-        val typedLogin = if (typedUser.isEmpty()) null else OpenSubtitlesLogin(typedUser, typedPassword)
-        if (typedKey.isEmpty() && typedLogin == null) return
-        osAttempt.update { it.copy(busy = true, badge = null, message = null) }
-        viewModelScope.launch {
+        if (!typedUser.sendable() || !typedPassword.sendable()) {
+            osAttempt.update { it.copy(message = R.string.os_login_rejected) }
+            return
+        }
+        osAttempt.update { it.copy(busy = true, message = null) }
+        appScope.launch {
             integrations.awaitLoaded()
             val saved = integrations.openSubtitles.value.access
+            val login = when {
+                typedUser.isEmpty() && typedPassword.isEmpty() -> saved?.login
+                typedUser.isNotEmpty() && typedPassword.isNotEmpty() -> OpenSubtitlesLogin(typedUser, typedPassword)
+                else -> saved?.login?.let { OpenSubtitlesLogin(typedUser.ifEmpty { it.username }, typedPassword.ifEmpty { it.password }) }
+            }
+            if (login == null && (typedUser.isNotEmpty() || typedPassword.isNotEmpty())) {
+                osAttempt.update { it.copy(busy = false, message = R.string.os_need_both) }
+                return@launch
+            }
             val apiKey = typedKey.ifEmpty { saved?.apiKey }
             if (apiKey == null) {
                 osAttempt.update { it.copy(busy = false, message = R.string.os_need_key) }
                 return@launch
             }
-            val access = OpenSubtitlesAccess(apiKey, typedLogin ?: saved?.login)
+            val access = OpenSubtitlesAccess(apiKey, login)
             when (val status = decide { checks.openSubtitles(access) }) {
                 KeyStatus.CONNECTED -> {
                     integrations.saveOpenSubtitles(access, KeyStatus.CONNECTED)
@@ -223,7 +248,7 @@ class IntegrationsViewModel(private val integrations: Integrations, private val 
                 }
                 else -> {
                     val message = if (status == KeyStatus.REJECTED_LOGIN) R.string.os_login_rejected else R.string.os_key_rejected
-                    osAttempt.update { Attempt(badge = Badge.REJECTED, message = message, saves = it.saves) }
+                    osAttempt.update { Attempt(message = message, saves = it.saves) }
                 }
             }
         }

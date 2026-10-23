@@ -13,6 +13,8 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -32,6 +34,8 @@ class IntegrationsViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val none = BuildDefaults("", "", "", "")
     private val checks = FakeChecks()
+    /** Stands in for AppGraph.appScope: outlives the view model. */
+    private val appScope = CoroutineScope(dispatcher)
 
     /** Made-up values only. */
     private class FakeChecks : IntegrationChecks {
@@ -55,7 +59,7 @@ class IntegrationsViewModelTest {
         val i = integrations()
         val gate = CompletableDeferred<Boolean>()
         checks.tmdbResult = { gate.await() }
-        val vm = IntegrationsViewModel(i, checks)
+        val vm = IntegrationsViewModel(i, checks, appScope)
         advanceUntilIdle()
         assertEquals(Badge.NOT_SET, vm.tmdb.value.badge)
 
@@ -94,7 +98,7 @@ class IntegrationsViewModelTest {
         val i = integrations()
         checks.tmdbResult = { false }
         checks.osResult = { KeyStatus.REJECTED_KEY }
-        val vm = IntegrationsViewModel(i, checks)
+        val vm = IntegrationsViewModel(i, checks, appScope)
         advanceUntilIdle()
 
         vm.saveTmdb("bad-key-0000")
@@ -103,11 +107,11 @@ class IntegrationsViewModelTest {
 
         assertNull(i.tmdb.value.key)
         assertNull(i.openSubtitles.value.access)
-        assertEquals(Badge.REJECTED, vm.tmdb.value.badge)
+        assertEquals(Badge.NOT_SET, vm.tmdb.value.badge)
         assertEquals(R.string.tmdb_rejected, vm.tmdb.value.message)
         assertNull(vm.tmdb.value.maskedKey)
         assertEquals(0, vm.tmdb.value.saves)
-        assertEquals(Badge.REJECTED, vm.openSubtitles.value.badge)
+        assertEquals(Badge.NOT_SET, vm.openSubtitles.value.badge)
         assertEquals(R.string.os_key_rejected, vm.openSubtitles.value.message)
         assertEquals(0, vm.openSubtitles.value.saves)
     }
@@ -116,7 +120,7 @@ class IntegrationsViewModelTest {
         val i = integrations()
         checks.tmdbResult = { throw TmdbException("offline", TmdbException.Reason.NETWORK) }
         checks.osResult = { throw OpenSubtitlesException("offline", OpenSubtitlesException.Reason.NETWORK) }
-        val vm = IntegrationsViewModel(i, checks)
+        val vm = IntegrationsViewModel(i, checks, appScope)
         advanceUntilIdle()
 
         vm.saveTmdb("typed-key-1234")
@@ -137,21 +141,21 @@ class IntegrationsViewModelTest {
     @Test fun goodKeyBadLoginSavesNothing() = runTest(dispatcher) {
         val i = integrations()
         checks.osResult = { KeyStatus.REJECTED_LOGIN }
-        val vm = IntegrationsViewModel(i, checks)
+        val vm = IntegrationsViewModel(i, checks, appScope)
         advanceUntilIdle()
 
         vm.saveOpenSubtitles("os-key-5678", "someone", "wrong-pw")
         advanceUntilIdle()
 
         assertNull(i.openSubtitles.value.access)
-        assertEquals(Badge.REJECTED, vm.openSubtitles.value.badge)
+        assertEquals(Badge.NOT_SET, vm.openSubtitles.value.badge)
         assertEquals(R.string.os_login_rejected, vm.openSubtitles.value.message)
         assertEquals(0, vm.openSubtitles.value.saves)
     }
 
     @Test fun loginNeedsBothFields() = runTest(dispatcher) {
         val i = integrations()
-        val vm = IntegrationsViewModel(i, checks)
+        val vm = IntegrationsViewModel(i, checks, appScope)
         advanceUntilIdle()
 
         vm.saveOpenSubtitles("os-key-5678", "someone", "  ")
@@ -169,7 +173,7 @@ class IntegrationsViewModelTest {
 
     @Test fun loginWithoutKeyAsksForKey() = runTest(dispatcher) {
         val i = integrations()
-        val vm = IntegrationsViewModel(i, checks)
+        val vm = IntegrationsViewModel(i, checks, appScope)
         advanceUntilIdle()
 
         vm.saveOpenSubtitles("", "someone", "secret-pw")
@@ -191,7 +195,7 @@ class IntegrationsViewModelTest {
         val i = integrations()
         i.saveTmdb("saved-key-0000", KeyStatus.CONNECTED)
         i.saveOpenSubtitles(access("saved-os-key", "someone", "secret-pw"), KeyStatus.CONNECTED)
-        val vm = IntegrationsViewModel(i, checks)
+        val vm = IntegrationsViewModel(i, checks, appScope)
         advanceUntilIdle()
 
         vm.saveTmdb("   ")
@@ -212,7 +216,7 @@ class IntegrationsViewModelTest {
 
     @Test fun uncheckedBuildValueIsCheckedOnce() = runTest(dispatcher) {
         val i = integrations(BuildDefaults("build-tmdb-key", "build-os-key", "builduser", "buildpass"))
-        IntegrationsViewModel(i, checks)
+        IntegrationsViewModel(i, checks, appScope)
         advanceUntilIdle()
 
         assertEquals(listOf("build-tmdb-key"), checks.tmdbCalls)
@@ -221,7 +225,7 @@ class IntegrationsViewModelTest {
         assertEquals(KeyStatus.CONNECTED, i.openSubtitles.value.status)
 
         // Opening the screen again doesn't check again: the result was recorded.
-        val again = IntegrationsViewModel(i, checks)
+        val again = IntegrationsViewModel(i, checks, appScope)
         advanceUntilIdle()
         assertEquals(1, checks.tmdbCalls.size)
         assertEquals(1, checks.osCalls.size)
@@ -234,16 +238,16 @@ class IntegrationsViewModelTest {
     @Test fun uncheckedTypedValueIsNotCheckedJustForOpening() = runTest(dispatcher) {
         val i = integrations()
         i.saveTmdb("typed-key-1234", KeyStatus.UNCHECKED)
-        val vm = IntegrationsViewModel(i, checks)
+        val vm = IntegrationsViewModel(i, checks, appScope)
         advanceUntilIdle()
         assertTrue(checks.tmdbCalls.isEmpty())
         assertEquals(Badge.UNCHECKED, vm.tmdb.value.badge)
-        assertEquals(R.string.tmdb_unreachable, vm.tmdb.value.message)
+        assertNull("the saved-offline message belongs to the Save that couldn't check", vm.tmdb.value.message)
     }
 
     @Test fun removeFallsBackToBuild() = runTest(dispatcher) {
         val i = integrations(BuildDefaults("build-tmdb-key", "", "", ""))
-        val vm = IntegrationsViewModel(i, checks)
+        val vm = IntegrationsViewModel(i, checks, appScope)
         advanceUntilIdle()
 
         vm.saveTmdb("typed-key-9999")
@@ -269,6 +273,112 @@ class IntegrationsViewModelTest {
         assertNull(i.openSubtitles.value.access)
         assertEquals(Badge.NOT_SET, vm.openSubtitles.value.badge)
         assertFalse(vm.openSubtitles.value.removable)
+    }
+
+    /** Final review: a value OkHttp can't send in a header is refused at Save, before any network call. */
+    @Test fun unsendableCharactersAreRefusedWithoutACheck() = runTest(dispatcher) {
+        val i = integrations()
+        val vm = IntegrationsViewModel(i, checks, appScope)
+        advanceUntilIdle()
+
+        vm.saveTmdb("eyJmade.up\u200b.token")
+        vm.saveOpenSubtitles("made-up\u200bkey", "", "")
+        advanceUntilIdle()
+        assertEquals(R.string.tmdb_rejected, vm.tmdb.value.message)
+        assertEquals(R.string.os_key_rejected, vm.openSubtitles.value.message)
+
+        vm.saveOpenSubtitles("os-key-5678", "some\none", "secret-pw")
+        advanceUntilIdle()
+        assertEquals(R.string.os_login_rejected, vm.openSubtitles.value.message)
+        vm.saveOpenSubtitles("os-key-5678", "someone", "s\u00e9cret")
+        advanceUntilIdle()
+        assertEquals(R.string.os_login_rejected, vm.openSubtitles.value.message)
+
+        assertTrue(checks.tmdbCalls.isEmpty())
+        assertTrue(checks.osCalls.isEmpty())
+        assertNull(i.tmdb.value.key)
+        assertNull(i.openSubtitles.value.access)
+        assertEquals(0, vm.tmdb.value.saves)
+        assertEquals(0, vm.openSubtitles.value.saves)
+    }
+
+    /** Review R7: with a login saved, typing only one half of it fills the other half from the saved login. */
+    @Test fun oneLoginFieldFillsTheOtherFromTheSavedLogin() = runTest(dispatcher) {
+        val i = integrations()
+        i.saveOpenSubtitles(access("saved-os-key", "someone", "old-pw"), KeyStatus.CONNECTED)
+        val vm = IntegrationsViewModel(i, checks, appScope)
+        advanceUntilIdle()
+
+        vm.saveOpenSubtitles("", "", "new-pw")
+        advanceUntilIdle()
+        assertEquals(listOf(access("saved-os-key", "someone", "new-pw")), checks.osCalls)
+        assertEquals(access("saved-os-key", "someone", "new-pw"), i.openSubtitles.value.access)
+        assertNull(vm.openSubtitles.value.message)
+
+        vm.saveOpenSubtitles("", "someone-else", "")
+        advanceUntilIdle()
+        assertEquals(access("saved-os-key", "someone-else", "new-pw"), checks.osCalls.last())
+        assertEquals(access("saved-os-key", "someone-else", "new-pw"), i.openSubtitles.value.access)
+    }
+
+    /** Review R10a: Back during "Checking…" ends the screen, not the Save. */
+    @Test fun saveCompletesAfterTheScreenCloses() = runTest(dispatcher) {
+        val i = integrations()
+        val tmdbGate = CompletableDeferred<Boolean>()
+        val osGate = CompletableDeferred<KeyStatus>()
+        checks.tmdbResult = { tmdbGate.await() }
+        checks.osResult = { osGate.await() }
+        val vm = IntegrationsViewModel(i, checks, appScope)
+        advanceUntilIdle()
+
+        vm.saveTmdb("typed-key-1234")
+        vm.saveOpenSubtitles("os-key-5678", "", "")
+        runCurrent()
+        assertTrue(vm.tmdb.value.busy)
+        vm.viewModelScope.cancel()
+        tmdbGate.complete(true)
+        osGate.complete(KeyStatus.CONNECTED)
+        advanceUntilIdle()
+
+        assertEquals("typed-key-1234", i.tmdb.value.key)
+        assertEquals(KeyStatus.CONNECTED, i.tmdb.value.status)
+        assertEquals(access("os-key-5678"), i.openSubtitles.value.access)
+        assertEquals(KeyStatus.CONNECTED, i.openSubtitles.value.status)
+    }
+
+    /** Review R10b: a rejected Save leaves the badge on the saved value, which still works. */
+    @Test fun rejectedSaveKeepsTheSavedValuesBadge() = runTest(dispatcher) {
+        val i = integrations(BuildDefaults("build-tmdb-key", "build-os-key", "", ""))
+        val vm = IntegrationsViewModel(i, checks, appScope)
+        advanceUntilIdle()
+        assertEquals(Badge.CONNECTED, vm.tmdb.value.badge)
+
+        checks.tmdbResult = { false }
+        checks.osResult = { KeyStatus.REJECTED_KEY }
+        vm.saveTmdb("bad-key-0000")
+        vm.saveOpenSubtitles("bad-os-key-1", "", "")
+        advanceUntilIdle()
+
+        assertEquals(Badge.CONNECTED, vm.tmdb.value.badge)
+        assertTrue(vm.tmdb.value.fromBuild)
+        assertEquals(R.string.tmdb_rejected, vm.tmdb.value.message)
+        assertEquals(Badge.CONNECTED, vm.openSubtitles.value.badge)
+        assertEquals(R.string.os_key_rejected, vm.openSubtitles.value.message)
+    }
+
+    /** Review R10c: "Couldn't reach… Saved" is for a Save; a build value checked in the background says nothing. */
+    @Test fun backgroundCheckThatCantReachSaysNothing() = runTest(dispatcher) {
+        val i = integrations(BuildDefaults("build-tmdb-key", "build-os-key", "", ""))
+        checks.tmdbResult = { throw TmdbException("offline", TmdbException.Reason.NETWORK) }
+        checks.osResult = { throw OpenSubtitlesException("offline", OpenSubtitlesException.Reason.NETWORK) }
+        val vm = IntegrationsViewModel(i, checks, appScope)
+        advanceUntilIdle()
+
+        assertEquals(1, checks.tmdbCalls.size)
+        assertEquals(Badge.UNCHECKED, vm.tmdb.value.badge)
+        assertNull(vm.tmdb.value.message)
+        assertEquals(Badge.UNCHECKED, vm.openSubtitles.value.badge)
+        assertNull(vm.openSubtitles.value.message)
     }
 
     @Test fun masking() {

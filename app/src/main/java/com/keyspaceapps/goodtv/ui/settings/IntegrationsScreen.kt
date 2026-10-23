@@ -54,7 +54,7 @@ private val FieldWidth = 640.dp
  */
 @Composable
 fun IntegrationsScreen() {
-    val vm = goodTvViewModel(key = "integrations") { IntegrationsViewModel(it.integrations, it.integrationChecks) }
+    val vm = goodTvViewModel(key = "integrations") { IntegrationsViewModel(it.integrations, it.integrationChecks, it.appScope) }
     val tmdb by vm.tmdb.collectAsState()
     val os by vm.openSubtitles.collectAsState()
 
@@ -193,7 +193,9 @@ private fun IntegrationCard(
         fields()
         ui.message?.let {
             Spacer(Modifier.height(12.dp))
-            Text(stringResource(it), color = if (ui.badge == Badge.UNCHECKED) colors.onSurfaceVariant else colors.error)
+            // "Saved; couldn't check" is news, not an error; everything else here is a refusal.
+            val saved = it == R.string.tmdb_unreachable || it == R.string.os_unreachable
+            Text(stringResource(it), color = if (saved) colors.onSurfaceVariant else colors.error)
         }
         Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
