@@ -9,6 +9,8 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.keyspaceapps.goodtv.data.settings.AppSettings
 import com.keyspaceapps.goodtv.data.settings.BuildDefaults
 import com.keyspaceapps.goodtv.data.settings.Integrations
+import com.keyspaceapps.goodtv.data.settings.KeyStatus
+import com.keyspaceapps.goodtv.data.settings.OpenSubtitlesAccess
 import com.keyspaceapps.goodtv.data.settings.integratedOpenSubtitlesApi
 import com.keyspaceapps.goodtv.data.settings.integratedTmdbApi
 import com.keyspaceapps.goodtv.data.db.GoodTvDatabase
@@ -38,6 +40,7 @@ import com.keyspaceapps.goodtv.data.watchlist.WatchListKind
 import com.keyspaceapps.goodtv.data.watchlist.WatchListRef
 import com.keyspaceapps.goodtv.data.watchlist.WatchListRepository
 import com.keyspaceapps.goodtv.data.tmdb.TmdbApi
+import com.keyspaceapps.goodtv.data.tmdb.TmdbCredential
 import com.keyspaceapps.goodtv.data.sports.EspnScoreboard
 import com.keyspaceapps.goodtv.data.sports.League
 import com.keyspaceapps.goodtv.data.sports.LiveRefresher
@@ -56,6 +59,7 @@ import com.keyspaceapps.goodtv.data.tmdb.TmdbRepository
 import com.keyspaceapps.goodtv.data.xtream.XtreamApi
 import com.keyspaceapps.goodtv.data.xtream.XtreamChannelSource
 import com.keyspaceapps.goodtv.data.xtream.XtreamJson
+import com.keyspaceapps.goodtv.ui.settings.IntegrationChecks
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -258,6 +262,16 @@ class AppGraph(val context: Context) {
                 .collect { guideRefresher.refreshIfStale() }
         }
     }
+
+    /** Save's checks on the Integrations screen: the candidate value, not the one in effect. */
+    private val defaultIntegrationChecks: IntegrationChecks = object : IntegrationChecks {
+        override suspend fun tmdb(key: String): Boolean = TmdbCredential.from(key)?.let { tmdbApi.check(it) } ?: false
+        override suspend fun openSubtitles(access: OpenSubtitlesAccess): KeyStatus = openSubtitlesApi.check(access)
+    }
+
+    /** Instrumented tests answer the Integrations screen's checks without a network. */
+    @VisibleForTesting var integrationChecksOverride: IntegrationChecks? = null
+    val integrationChecks: IntegrationChecks get() = integrationChecksOverride ?: defaultIntegrationChecks
 
     /** Instrumented tests point this at a mock TMDB server. */
     @VisibleForTesting var tmdbOverride: TmdbRepository? = null

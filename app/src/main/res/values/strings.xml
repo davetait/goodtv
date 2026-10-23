@@ -183,4 +183,35 @@
     <string name="guide_day_at">%1$s %2$s</string>
     <string name="guide_event_starts">Starts %1$s</string>
     <string name="guide_event_started">Started %1$s</string>
+    <!-- Integrations screen -->
+    <string name="integrations_title">Integrations</string>
+    <string name="integrations_intro">Optional services. GoodTV works without them; they add posters, ratings, cast and subtitles.</string>
+    <string name="integrations_phone_hint">Tip: use the Google TV app on your phone to paste keys.</string>
+    <string name="tmdb_name">TMDB</string>
+    <string name="tmdb_what">Posters, ratings, summaries, genres, popular rows and cast.</string>
+    <!-- %1$s is the domain, shown bold -->
+    <string name="tmdb_where">Create a free API key at %1$s</string>
+    <string name="tmdb_field">API key or read access token</string>
+    <string name="os_name">OpenSubtitles</string>
+    <string name="os_what">English subtitles for titles that don\'t have their own.</string>
+    <!-- %1$s is the domain, shown bold -->
+    <string name="os_where">Create an API key at %1$s</string>
+    <string name="os_why">The API key lets GoodTV search for subtitles. Your OpenSubtitles username and password are needed to download them: without signing in, downloads are limited to a small daily allowance.</string>
+    <string name="os_key">API key</string>
+    <string name="os_username">Username</string>
+    <string name="os_password">Password</string>
+    <string name="badge_not_set">Not set up</string>
+    <string name="badge_checking">Checking…</string>
+    <string name="badge_connected">Connected</string>
+    <string name="badge_rejected">Rejected</string>
+    <string name="badge_unchecked">Couldn\'t check</string>
+    <string name="from_build">From this build</string>
+    <string name="tmdb_rejected">TMDB didn\'t accept this key</string>
+    <string name="os_key_rejected">OpenSubtitles didn\'t accept this API key</string>
+    <string name="os_login_rejected">OpenSubtitles didn\'t accept this username or password</string>
+    <string name="tmdb_unreachable">Couldn\'t reach TMDB. Saved; it will be used when the connection is back.</string>
+    <string name="os_unreachable">Couldn\'t reach OpenSubtitles. Saved; it will be used when the connection is back.</string>
+    <string name="os_need_both">Enter both the username and the password</string>
+    <string name="os_need_key">Enter the API key too</string>
+    <string name="save">Save</string>
 </resources>

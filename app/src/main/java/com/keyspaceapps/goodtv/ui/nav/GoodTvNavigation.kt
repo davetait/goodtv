@@ -28,6 +28,7 @@ import com.keyspaceapps.goodtv.ui.home.HomeScreen
 import com.keyspaceapps.goodtv.ui.home.PersonSearchScreen
 import com.keyspaceapps.goodtv.ui.movies.MovieDetailScreen
 import com.keyspaceapps.goodtv.ui.series.NextEpisode
+import com.keyspaceapps.goodtv.ui.settings.IntegrationsScreen
 import com.keyspaceapps.goodtv.ui.series.NextEpisodes
 import com.keyspaceapps.goodtv.ui.series.SeriesDetailScreen
 import com.keyspaceapps.goodtv.ui.player.PlayerScreen
@@ -54,6 +55,7 @@ fun GoodTvNavigation() {
                 entry<HomeKey> { HomeScreen(onNavigate = { backStack.add(it) }) }
                 entry<EditSourceKey>(stackKey) { key -> EditSourceScreen(sourceId = key.sourceId, onDone = pop) }
                 entry<CategoriesKey>(stackKey) { key -> CategoriesScreen(key = key) }
+                entry<IntegrationsKey>(stackKey) { IntegrationsScreen() }
                 entry<PlayerKey>(stackKey) { key ->
                     val graph = LocalContext.current.appGraph()
                     var item by remember(key) { mutableStateOf<PlayableItem?>(null) }
