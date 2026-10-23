@@ -109,13 +109,16 @@ class OpenSubtitlesApi(
     val isConfigured: Boolean get() = configured()
 
     /**
-     * Whether OpenSubtitles accepts [candidate]: its key (a `infos/formats` call), then its login if
+     * Whether OpenSubtitles accepts [candidate]: its key (a subtitle search, which spends no download;
+     * `infos/formats` answers 200 even for a made-up key), then its login if
      * it has one. Throws [OpenSubtitlesException] when it can't tell (network, server, rate limit).
      * Doesn't touch the live session or [onResult].
      */
     suspend fun check(candidate: OpenSubtitlesAccess): KeyStatus {
         try {
-            call(Request.Builder().url(baseUrl.newBuilder().addPathSegments("infos/formats").build()).get(), candidate.apiKey, null, JsonObject.serializer())
+            val url = baseUrl.newBuilder().addPathSegment("subtitles")
+                .addQueryParameter("tmdb_id", CHECK_TMDB_ID.toString()).addQueryParameter("languages", "en").build()
+            call(Request.Builder().url(url).get(), candidate.apiKey, null, JsonObject.serializer())
         } catch (e: OpenSubtitlesException) {
             if (e.reason == OpenSubtitlesException.Reason.AUTH) return KeyStatus.REJECTED_KEY
             throw e
@@ -223,9 +226,9 @@ class OpenSubtitlesApi(
 
     /**
      * What a refused /login means: OpenSubtitles answers a bad Api-Key with 403 and bad credentials
-     * with 401 (observed behaviour, not documented).
+     * with 401 (observed behaviour, not documented). A key refused before sending (no HTTP code) is the key.
      */
-    private fun loginRefusal(e: OpenSubtitlesException) = if (e.httpCode == 403) KeyStatus.REJECTED_KEY else KeyStatus.REJECTED_LOGIN
+    private fun loginRefusal(e: OpenSubtitlesException) = if (e.httpCode == 401) KeyStatus.REJECTED_LOGIN else KeyStatus.REJECTED_KEY
 
     /** Logs in; a refused login is [OpenSubtitlesException.Reason.AUTH]. */
     private suspend fun login(apiKey: String, login: OpenSubtitlesLogin): Pair<String, HttpUrl> {
@@ -237,8 +240,14 @@ class OpenSubtitlesApi(
     }
 
     private suspend fun <T> call(builder: Request.Builder, apiKey: String, token: String?, strategy: DeserializationStrategy<T>): T = withContext(io) {
-        val request = builder.header("Api-Key", apiKey).header("User-Agent", USER_AGENT).header("Accept", "application/json")
-            .apply { token?.let { header("Authorization", "Bearer $it") } }.build()
+        // A pasted key with a character a header can't carry (a zero-width space, a newline) is refused
+        // by OkHttp with the value in its message: drop that and treat it as the key being rejected.
+        val request = try {
+            builder.header("Api-Key", apiKey).header("User-Agent", USER_AGENT).header("Accept", "application/json")
+                .apply { token?.let { header("Authorization", "Bearer $it") } }.build()
+        } catch (_: IllegalArgumentException) {
+            throw OpenSubtitlesException("OpenSubtitles can't use this key: it has a character that can't be sent", OpenSubtitlesException.Reason.AUTH)
+        }
         try {
             client.newCall(request).execute().use { r ->
                 val text = readCapped(r.body)
@@ -278,6 +287,8 @@ class OpenSubtitlesApi(
         const val DEFAULT_BASE_URL = "https://api.opensubtitles.com/api/v1/"
         const val USER_AGENT = "GoodTV v0.1"
         const val MAX_BYTES = 2 * 1024 * 1024
+        /** The title a key check searches for (The Matrix): any well-known id works. */
+        private const val CHECK_TMDB_ID = 603L
         private val JSON = "application/json".toMediaType()
         private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true; explicitNulls = false; encodeDefaults = true }
     }

@@ -250,6 +250,26 @@ class TmdbApiTest {
         assertEquals("checks never report", emptyList<Pair<TmdbCredential, Boolean>>(), reports)
     }
 
+    /** Final review: a pasted token with a character OkHttp can't send in a header fails as AUTH, never a crash or a leak. */
+    @Test fun tokenWithAnUnsendableCharacterIsAuthNotACrash() = runTest {
+        val bad = TmdbCredential.Bearer("eyJmade.up\u200b.token")
+        val reports = mutableListOf<Pair<TmdbCredential, Boolean>>()
+        val api = liveApi({ bad }, reports)
+        try {
+            api.movie(603, "en-US"); fail("expected AUTH")
+        } catch (e: TmdbException) {
+            assertEquals(TmdbException.Reason.AUTH, e.reason)
+            assertFalse("no value in the message", e.message!!.contains("made"))
+            assertNull("no cause carrying the value", e.cause)
+        }
+        assertFalse(api.check(bad))
+        val lookup = TmdbRepository(api, com.keyspaceapps.goodtv.testing.InMemoryTmdbCache(), language = { "en-US" })
+            .lookup(TmdbKind.MOVIE, 603, "The Matrix")
+        assertTrue(lookup.isFailure)
+        assertEquals("nothing was requested", 0, server.requestCount)
+        assertEquals(listOf<Pair<TmdbCredential, Boolean>>(bad to false, bad to false), reports)
+    }
+
     @Test fun checkThatCannotReachTmdbIsANetworkError() = runTest {
         val api = liveApi({ null })
         server.close()

@@ -229,10 +229,17 @@ class TmdbApi(
         nullOn404: Boolean,
         report: (accepted: Boolean) -> Unit,
     ): Outcome<T> = withContext(io) {
-        val authed = (credential as? TmdbCredential.ApiKey)?.let { url.newBuilder().addQueryParameter("api_key", it.key).build() } ?: url
-        val request = Request.Builder().url(authed).header("User-Agent", USER_AGENT).header("Accept", "application/json").apply {
-            (credential as? TmdbCredential.Bearer)?.let { header("Authorization", "Bearer ${it.token}") }
-        }.build()
+        // A pasted token with a character a header can't carry (a zero-width space, a newline) is
+        // refused by OkHttp; that's a key TMDB can never accept. Its message may hold the value: drop it.
+        val request = try {
+            val authed = (credential as? TmdbCredential.ApiKey)?.let { url.newBuilder().addQueryParameter("api_key", it.key).build() } ?: url
+            Request.Builder().url(authed).header("User-Agent", USER_AGENT).header("Accept", "application/json").apply {
+                (credential as? TmdbCredential.Bearer)?.let { header("Authorization", "Bearer ${it.token}") }
+            }.build()
+        } catch (_: IllegalArgumentException) {
+            report(false)
+            throw TmdbException("TMDB can't use this key: it has a character that can't be sent", TmdbException.Reason.AUTH)
+        }
         try {
             client.newCall(request).execute().use { response ->
                 when {

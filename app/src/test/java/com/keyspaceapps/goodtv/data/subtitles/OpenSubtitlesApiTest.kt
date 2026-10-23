@@ -220,8 +220,22 @@ class OpenSubtitlesApiTest {
         assertEquals(listOf(access to KeyStatus.REJECTED_KEY), reports)
     }
 
+    /** Final review: a pasted key with a character OkHttp can't send in a header is the key rejected, and never in a message. */
+    @Test fun keyWithAnUnsendableCharacterIsRejectedAndNeverInAMessage() = runTest {
+        val keyOnly = OpenSubtitlesAccess("made-up\u200bkey", null)
+        val e = expectFailure(OpenSubtitlesException.Reason.AUTH) { liveApi { keyOnly }.search(SubtitleQuery(1)) }
+        assertFalse("no value in the message", e.message!!.contains("made-up"))
+        val withLogin = OpenSubtitlesAccess("made-up\u200bkey", OpenSubtitlesLogin("u", "p"))
+        val e2 = expectFailure(OpenSubtitlesException.Reason.AUTH) { liveApi { withLogin }.search(SubtitleQuery(1)) }
+        assertFalse("no value in the message", e2.message!!.contains("made-up"))
+        assertEquals(listOf(keyOnly to KeyStatus.REJECTED_KEY, withLogin to KeyStatus.REJECTED_KEY), reports)
+        assertEquals(KeyStatus.REJECTED_KEY, liveApi { null }.check(keyOnly))
+        assertEquals(KeyStatus.REJECTED_KEY, liveApi { null }.check(withLogin))
+        assertEquals("nothing was requested", 0, server.requestCount)
+    }
+
     @Test fun checkWithLoginForbiddenIsRejectedKey() = runTest {
-        server.enqueue(ok("""{"data":{"output_formats":["srt"]}}"""))
+        server.enqueue(ok(noResults))
         server.enqueue(MockResponse(code = 403, body = "{}"))
         assertEquals(KeyStatus.REJECTED_KEY, liveApi { null }.check(OpenSubtitlesAccess("cand-key", OpenSubtitlesLogin("u", "p"))))
         assertEquals(2, server.requestCount)
@@ -253,12 +267,15 @@ class OpenSubtitlesApiTest {
         val live = OpenSubtitlesAccess("live-key", OpenSubtitlesLogin("live-user", "live-pass"))
         val api = liveApi { live }
         val candidate = OpenSubtitlesAccess("cand-key", OpenSubtitlesLogin("cand-user", "cand-pass"))
-        val formats = """{"data":{"output_formats":["srt"]}}"""
+        val formats = noResults
 
         server.enqueue(MockResponse(code = 403, body = "{}"))
         assertEquals(KeyStatus.REJECTED_KEY, api.check(candidate))
         server.takeRequest().let {
-            assertEquals("/api/v1/infos/formats", it.url.encodedPath)
+            // A bad key still gets 200 from infos/formats; a subtitle search (no download spent) answers 403.
+            assertEquals("/api/v1/subtitles", it.url.encodedPath)
+            assertEquals("603", it.url.queryParameter("tmdb_id"))
+            assertEquals("en", it.url.queryParameter("languages"))
             assertEquals("GET", it.method)
             assertEquals("cand-key", it.headers["Api-Key"])
         }
@@ -281,7 +298,7 @@ class OpenSubtitlesApiTest {
 
         server.enqueue(ok(formats))
         assertEquals("key only: no login", KeyStatus.CONNECTED, api.check(OpenSubtitlesAccess("cand-key", null)))
-        assertEquals("/api/v1/infos/formats", server.takeRequest().url.encodedPath)
+        assertEquals("/api/v1/subtitles", server.takeRequest().url.encodedPath)
 
         server.enqueue(MockResponse(code = 500, body = "{}"))
         expectFailure(OpenSubtitlesException.Reason.SERVER) { api.check(candidate) }
