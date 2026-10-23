@@ -33,7 +33,8 @@ fun integratedTmdbApi(
             integrations.tmdb.value.key?.let(TmdbCredential::from)
         }
     },
-    configured = { !disabled() && integrations.tmdb.value.key?.let(TmdbCredential::from) != null },
+    // Before the saved values load the answer isn't known: say yes and let the request's wait decide.
+    configured = { !disabled() && (!integrations.loaded.value || integrations.tmdb.value.key?.let(TmdbCredential::from) != null) },
     onCredentialResult = { credential, accepted ->
         val status = if (accepted) KeyStatus.CONNECTED else KeyStatus.REJECTED_KEY
         val state = integrations.tmdb.value
@@ -64,10 +65,12 @@ fun integratedOpenSubtitlesApi(
             integrations.openSubtitles.value.access
         }
     },
-    configured = { !disabled() && integrations.openSubtitles.value.access != null },
+    configured = { !disabled() && (!integrations.loaded.value || integrations.openSubtitles.value.access != null) },
     onResult = { access, status ->
         val state = integrations.openSubtitles.value
-        if (state.access == access && state.status != status) {
+        // A key Save's check found bad stays REJECTED_KEY: a login refused with that key says nothing new.
+        val keepsRejectedKey = state.status == KeyStatus.REJECTED_KEY && status == KeyStatus.REJECTED_LOGIN
+        if (state.access == access && state.status != status && !keepsRejectedKey) {
             scope.launch { integrations.recordOpenSubtitlesStatus(access, status) }
         }
     },

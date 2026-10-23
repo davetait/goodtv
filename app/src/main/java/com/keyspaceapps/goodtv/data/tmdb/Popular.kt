@@ -94,6 +94,9 @@ class PopularRepository(
     private val lock = Mutex()
     @Volatile private var failedAt: Long? = null
 
+    /** Drops the failure back-off (the TMDB key changed, so the next refresh may well work). */
+    fun forgetFailure() { failedAt = null }
+
     /** Fetches a new ranking when the stored one is a day old or missing; success(Unit) when nothing was needed. */
     suspend fun refreshIfStale(): Result<Unit> = lock.withLock {
         val api = api?.takeIf { it.isConfigured } ?: return Result.success(Unit)
@@ -107,6 +110,7 @@ class PopularRepository(
         } catch (e: CancellationException) {
             throw e
         } catch (e: TmdbException) {
+            if (!api.isConfigured) return Result.success(Unit) // no key after all (asked before it loaded)
             failedAt = now
             Result.failure(e)
         }

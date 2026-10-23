@@ -91,7 +91,8 @@ class TmdbRepository(
         } catch (e: CancellationException) {
             throw e
         } catch (e: TmdbException) {
-            Result.failure(e)
+            // Asked before the saved key loaded, and it turned out there is none: TMDB is off, not failing.
+            if (!api.isConfigured) Result.success(null) else Result.failure(e)
         }
     }
 

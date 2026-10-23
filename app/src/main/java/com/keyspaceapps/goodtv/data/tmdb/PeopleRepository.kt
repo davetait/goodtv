@@ -41,6 +41,7 @@ class PeopleRepository(
             cache.putTitlePeople(kind, tmdbId, people, clock())
             people
         }
+        if (fetched.isFailure && !api.isConfigured) return Result.success(cached?.first.orEmpty())
         return if (fetched.isFailure && cached != null) Result.success(cached.first) else fetched
     }
 
@@ -69,6 +70,7 @@ class PeopleRepository(
         synchronized(memo) { memo[key] }?.takeIf { clock() - it.at < MEMO_TTL_MS }?.let { return Result.success(it.matches) }
         return call { PeopleRules.confidentPeople(query, api.searchPerson(query.trim(), lang)) }
             .onSuccess { matches -> synchronized(memo) { memo[key] = Memo(matches, clock()) } }
+            .let { if (it.isFailure && !api.isConfigured) Result.success(emptyList()) else it }
     }
 
     /** Drops the in-memory search answers (the key changed). */

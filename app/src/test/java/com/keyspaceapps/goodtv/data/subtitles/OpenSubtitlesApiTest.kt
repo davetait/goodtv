@@ -212,6 +212,21 @@ class OpenSubtitlesApiTest {
         assertEquals(listOf(access to KeyStatus.REJECTED_LOGIN), reports)
     }
 
+    /** Review R5: OpenSubtitles answers a bad Api-Key with 403, even on /login. */
+    @Test fun loginForbiddenReportsRejectedKey() = runTest {
+        val access = OpenSubtitlesAccess("bad-key", OpenSubtitlesLogin("u", "p"))
+        server.enqueue(MockResponse(code = 403, body = "{}"))
+        expectFailure(OpenSubtitlesException.Reason.AUTH) { liveApi { access }.search(SubtitleQuery(1)) }
+        assertEquals(listOf(access to KeyStatus.REJECTED_KEY), reports)
+    }
+
+    @Test fun checkWithLoginForbiddenIsRejectedKey() = runTest {
+        server.enqueue(ok("""{"data":{"output_formats":["srt"]}}"""))
+        server.enqueue(MockResponse(code = 403, body = "{}"))
+        assertEquals(KeyStatus.REJECTED_KEY, liveApi { null }.check(OpenSubtitlesAccess("cand-key", OpenSubtitlesLogin("u", "p"))))
+        assertEquals(2, server.requestCount)
+    }
+
     @Test fun keyRejectionReportsRejectedKey() = runTest {
         val access = OpenSubtitlesAccess("bad-key", null)
         val api = liveApi { access }

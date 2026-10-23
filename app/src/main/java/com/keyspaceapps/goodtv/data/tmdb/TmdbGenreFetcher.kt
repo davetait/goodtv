@@ -122,7 +122,8 @@ class TmdbGenreFetcher(
                 return details.genres.mapNotNull { Genre.fromTmdbMovieGenre(it.id) }.toSet()
             } catch (e: TmdbException) {
                 when (e.reason) {
-                    TmdbException.Reason.AUTH -> throw Halt(e.message)
+                    // No key after all (started before it loaded) ends quietly; a rejected one stops the run.
+                    TmdbException.Reason.AUTH -> throw Halt(e.message.takeIf { api.isConfigured })
                     TmdbException.Reason.RATE_LIMITED -> if (attempt == 0) sleep(RATE_LIMIT_PAUSE_MS)
                     TmdbException.Reason.BAD_RESPONSE -> return null
                     TmdbException.Reason.NETWORK, TmdbException.Reason.SERVER -> throw Halt(null)

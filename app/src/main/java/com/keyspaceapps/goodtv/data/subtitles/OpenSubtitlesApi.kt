@@ -60,8 +60,8 @@ object HttpsOnly : Interceptor {
     }
 }
 
-/** [resetUtc] is when the daily allowance renews, for [Reason.QUOTA]. */
-class OpenSubtitlesException(message: String, val reason: Reason, val resetUtc: String? = null) : Exception(message) {
+/** [resetUtc] is when the daily allowance renews, for [Reason.QUOTA]; [httpCode] is the refusing response's status, if any. */
+class OpenSubtitlesException(message: String, val reason: Reason, val resetUtc: String? = null, val httpCode: Int? = null) : Exception(message) {
     enum class Reason { AUTH, QUOTA, RATE_LIMITED, NETWORK, SERVER, BAD_RESPONSE }
 }
 
@@ -72,7 +72,7 @@ class OpenSubtitlesException(message: String, val reason: Reason, val resetUtc: 
  * login it logs in once per access and sends the token to the host the login names; without, the
  * key alone (a smaller allowance). [onResult] hears [KeyStatus.CONNECTED] when a call succeeds,
  * [KeyStatus.REJECTED_LOGIN] when the login is refused and [KeyStatus.REJECTED_KEY] when any other
- * call is. [configured] is a non-blocking hint for [isConfigured].
+ * call is (a 403 on the login counts as the key). [configured] is a non-blocking hint for [isConfigured].
  * [loginScheme] is the scheme for that host (https; tests use http). Download links come from the
  * API's response, so only https links are followed (unless [allowInsecureLinks], for tests) and no
  * response is read past [MAX_BYTES].
@@ -124,7 +124,7 @@ class OpenSubtitlesApi(
         try {
             login(candidate.apiKey, login)
         } catch (e: OpenSubtitlesException) {
-            if (e.reason == OpenSubtitlesException.Reason.AUTH) return KeyStatus.REJECTED_LOGIN
+            if (e.reason == OpenSubtitlesException.Reason.AUTH) return loginRefusal(e)
             throw e
         }
         return KeyStatus.CONNECTED
@@ -212,7 +212,7 @@ class OpenSubtitlesApi(
                 val (token, base) = try {
                     login(access.apiKey, login)
                 } catch (e: OpenSubtitlesException) {
-                    if (e.reason == OpenSubtitlesException.Reason.AUTH) onResult(access, KeyStatus.REJECTED_LOGIN)
+                    if (e.reason == OpenSubtitlesException.Reason.AUTH) onResult(access, loginRefusal(e))
                     throw e
                 }
                 Session(access, token, base).also { session = it }
@@ -220,6 +220,12 @@ class OpenSubtitlesApi(
             current.token to current.base
         }
     }
+
+    /**
+     * What a refused /login means: OpenSubtitles answers a bad Api-Key with 403 and bad credentials
+     * with 401 (observed behaviour, not documented).
+     */
+    private fun loginRefusal(e: OpenSubtitlesException) = if (e.httpCode == 403) KeyStatus.REJECTED_KEY else KeyStatus.REJECTED_LOGIN
 
     /** Logs in; a refused login is [OpenSubtitlesException.Reason.AUTH]. */
     private suspend fun login(apiKey: String, login: OpenSubtitlesLogin): Pair<String, HttpUrl> {
@@ -238,7 +244,7 @@ class OpenSubtitlesApi(
                 val text = readCapped(r.body)
                 if (!r.isSuccessful) {
                     val err = runCatching { json.decodeFromString(OsError.serializer(), text) }.getOrNull()
-                    throw OpenSubtitlesException(err?.message ?: "OpenSubtitles returned HTTP ${r.code}", reasonFor(r.code), err?.reset_time_utc)
+                    throw OpenSubtitlesException(err?.message ?: "OpenSubtitles returned HTTP ${r.code}", reasonFor(r.code), err?.reset_time_utc, r.code)
                 }
                 json.decodeFromString(strategy, text)
             }

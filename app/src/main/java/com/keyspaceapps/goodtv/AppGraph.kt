@@ -228,7 +228,8 @@ class AppGraph(val context: Context) {
 
     /**
      * When the TMDB key in effect changes (typed, removed, or the saved one replacing the build
-     * default at launch), drops what was remembered under the old one and restarts the genre fill.
+     * default at launch), drops what was remembered under the old one (memos, the popular rows'
+     * failure back-off) and restarts the genre fill.
      * Call once per process.
      */
     fun startFollowingTmdbKey() {
@@ -240,6 +241,8 @@ class AppGraph(val context: Context) {
                 last = key
                 tmdb.forgetMemo()
                 people.forgetMemo()
+                popularMovies.forgetFailure()
+                popularShows.forgetFailure()
                 genreFetcher.start()
             }
         }

@@ -6,7 +6,13 @@ import com.keyspaceapps.goodtv.data.subtitles.OpenSubtitlesException
 import com.keyspaceapps.goodtv.data.subtitles.OpenSubtitlesLogin
 import com.keyspaceapps.goodtv.data.subtitles.SubtitleQuery
 import com.keyspaceapps.goodtv.data.tmdb.TmdbApi
+import com.keyspaceapps.goodtv.data.tmdb.PopularMoviesQuery
+import com.keyspaceapps.goodtv.data.tmdb.PopularRepository
+import com.keyspaceapps.goodtv.data.tmdb.PopularStore
 import com.keyspaceapps.goodtv.data.tmdb.TmdbException
+import com.keyspaceapps.goodtv.data.tmdb.TmdbKind
+import com.keyspaceapps.goodtv.data.tmdb.TmdbRepository
+import com.keyspaceapps.goodtv.testing.InMemoryTmdbCache
 import com.keyspaceapps.goodtv.testing.InMemoryDataStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -119,6 +125,63 @@ class IntegrationFeedbackTest {
         try { openSubtitles(i).search(SubtitleQuery(603)); fail() } catch (e: OpenSubtitlesException) { assertEquals(OpenSubtitlesException.Reason.AUTH, e.reason) }
         advanceUntilIdle()
         assertEquals(KeyStatus.REJECTED_LOGIN, i.openSubtitles.value.status)
+    }
+
+    /** Review R5: Save's check found the key bad; a later live login refusal mustn't relabel it a login problem. */
+    @Test fun aStoredRejectedKeyIsNotReplacedByALiveLoginRejection() = runTest {
+        val i = integrations()
+        val access = OpenSubtitlesAccess("os-key", OpenSubtitlesLogin("user", "pass"))
+        i.saveOpenSubtitles(access, KeyStatus.REJECTED_KEY)
+        server.enqueue(MockResponse(code = 401, body = """{"message":"Invalid username/password"}"""))
+        try { openSubtitles(i).search(SubtitleQuery(603)); fail() } catch (e: OpenSubtitlesException) { assertEquals(OpenSubtitlesException.Reason.AUTH, e.reason) }
+        advanceUntilIdle()
+        assertEquals(KeyStatus.REJECTED_KEY, i.openSubtitles.value.status)
+    }
+
+    /** Review R6: until the saved values load, "configured" can't be known, so callers go ahead and the request waits. */
+    @Test fun configuredBeforeLoadIsTrueAndAfterLoadFollowsTheValue() = runTest {
+        val inner = InMemoryDataStore()
+        integrations(inner).apply {
+            saveTmdb("typed-key", KeyStatus.CONNECTED)
+            saveOpenSubtitles(OpenSubtitlesAccess("os-key", null), KeyStatus.CONNECTED)
+        }
+        val slow = object : DataStore<Preferences> by inner {
+            override val data = flow { delay(1_000); emitAll(inner.data) }
+        }
+        val typed = integrations(slow)
+        assertFalse(typed.loaded.value)
+        assertTrue(tmdb(typed).isConfigured)
+        assertTrue(openSubtitles(typed).isConfigured)
+        assertFalse("the test switch still wins", tmdb(typed, disabled = true).isConfigured)
+        assertFalse(openSubtitles(typed, disabled = true).isConfigured)
+        advanceUntilIdle()
+        assertTrue(tmdb(typed).isConfigured)
+
+        val nothing = integrations()
+        advanceUntilIdle()
+        assertTrue(nothing.loaded.value)
+        assertFalse(tmdb(nothing).isConfigured)
+        assertFalse(openSubtitles(nothing).isConfigured)
+    }
+
+    /** R6 follow-up: a lookup made before loading, with no key anywhere, is "TMDB off", not a remembered failure. */
+    @Test fun aStartupLookupWithNoKeyAnywhereIsTmdbOff() = runTest {
+        val slow = object : DataStore<Preferences> by InMemoryDataStore() {
+            override val data = flow { delay(1_000); emitAll(InMemoryDataStore().data) }
+        }
+        val i = integrations(slow)
+        val api = tmdb(i)
+        val repo = TmdbRepository(api, InMemoryTmdbCache(), language = { "en-US" })
+        val popular = PopularRepository(api, object : PopularStore {
+            override suspend fun fetchedAt(listKey: String): Long? = null
+            override suspend fun replace(listKey: String, tmdbIds: List<Long>, fetchedAt: Long) = Unit
+            override fun observeMovies(listKey: String, limit: Int) = kotlinx.coroutines.flow.flowOf(emptyList<com.keyspaceapps.goodtv.domain.Movie>())
+            override fun observeSeries(listKey: String, limit: Int) = kotlinx.coroutines.flow.flowOf(emptyList<com.keyspaceapps.goodtv.domain.Series>())
+        }, PopularMoviesQuery, { "en-US" })
+        assertTrue(api.isConfigured)
+        assertEquals(Result.success(null), repo.lookup(TmdbKind.MOVIE, 603, "The Matrix"))
+        assertTrue(popular.refreshIfStale().isSuccess)
+        assertEquals(0, server.requestCount)
     }
 
     @Test fun openSubtitlesSuccessMarksConnectedAndTheSwitchKeepsItOff() = runTest {
