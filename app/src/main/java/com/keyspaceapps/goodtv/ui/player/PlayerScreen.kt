@@ -55,6 +55,7 @@ import androidx.compose.ui.input.key.nativeKeyCode
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.keepScreenOn
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -131,6 +132,8 @@ fun PlayerScreen(
     val context = LocalContext.current
     var isBuffering by remember { mutableStateOf(true) }
     var isPlaying by remember { mutableStateOf(false) }
+    // Not "playWhenReady": inside the player's apply {} below, a local of that name would shadow the player's own.
+    var wantsToPlay by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<PlaybackException?>(null) }
     var positionMs by remember { mutableLongStateOf(0L) }
     var bufferedMs by remember { mutableLongStateOf(0L) }
@@ -192,6 +195,7 @@ fun PlayerScreen(
                     if (latestUpNext != null) { if (upNextDismissed) latestOnBack() else playNextOnce() }
                 }
             }
+            override fun onPlayWhenReadyChanged(ready: Boolean, reason: Int) { wantsToPlay = ready }
             override fun onIsPlayingChanged(playing: Boolean) {
                 isPlaying = playing
                 if (playing) report.markStarted() else report.now()
@@ -377,6 +381,9 @@ fun PlayerScreen(
         subtitleBusy = subtitleBusy,
     )
 
+    // Playing, or buffering on the way to it: the TV's screensaver mustn't start. Paused or stopped, it may.
+    val keepScreenOn = error == null && wantsToPlay && (isPlaying || isBuffering)
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -414,6 +421,8 @@ fun PlayerScreen(
             .onPlaced { if (!focusRequested) { focusRequested = true; rootFocus.requestFocus() } }
             .focusable(),
     ) {
+        // Its own empty child, so switching it on and off leaves the screen's own modifiers alone.
+        if (keepScreenOn) Box(Modifier.keepScreenOn())
         // Full screen, or (Up next) a 16:9 window top-left with the next episode around it.
         val shrink by animateFloatAsState(if (showUpNext) 1f else 0f, tween(450), label = "upNext")
         BoxWithConstraints(Modifier.fillMaxSize()) {
