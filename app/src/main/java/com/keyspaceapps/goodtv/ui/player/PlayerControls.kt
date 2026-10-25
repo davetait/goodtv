@@ -112,6 +112,8 @@ fun PlayerControls(
     onSelectTrack: (PlayerPanel, TrackChoice) -> Unit,
     modifier: Modifier = Modifier,
     onSubtitleTiming: (deltaMs: Long) -> Unit = {},
+    infoOn: Boolean = false,
+    onToggleInfo: () -> Unit = {},
 ) {
     val seekFocus = remember { FocusRequester() }
     val playFocus = remember { FocusRequester() }
@@ -187,6 +189,13 @@ fun PlayerControls(
                         modifier = Modifier.focusRequester(audioFocus).focusProperties { if (!ui.isLive) up = seekFocus },
                     )
                 }
+                ControlButton(
+                    icon = PlayerIcons.Info,
+                    description = stringResource(R.string.player_info),
+                    onClick = onToggleInfo,
+                    active = infoOn,
+                    modifier = Modifier.focusProperties { if (!ui.isLive) up = seekFocus },
+                )
             }
         }
 

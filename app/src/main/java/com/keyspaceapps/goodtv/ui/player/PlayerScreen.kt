@@ -166,8 +166,14 @@ fun PlayerScreen(
         { if (!done) { done = true; latestOnPlayNext() } }
     }
 
+    // Counts downloads for the info box; a few additions per read, so it stays on.
+    val traffic = remember(item.url) { TrafficMeter() }
+    val bitrate = remember(item.url) { BitrateMeter().apply { reset(bytes = 0, fromMs = if (item.isLive) 0 else startPositionMs) } }
+    var showInfo by remember { mutableStateOf(false) }
+    var info by remember { mutableStateOf(InfoUi()) }
+
     val player = remember(item.url) {
-        PlayerFactory.create(context).apply {
+        PlayerFactory.create(context, traffic).apply {
             setMediaItem(MediaItem.fromUri(item.url), if (item.isLive) 0L else startPositionMs)
             playWhenReady = true
             prepare()
@@ -196,6 +202,9 @@ fun PlayerScreen(
                 }
             }
             override fun onPlayWhenReadyChanged(ready: Boolean, reason: Int) { wantsToPlay = ready }
+            override fun onPositionDiscontinuity(old: Player.PositionInfo, new: Player.PositionInfo, reason: Int) {
+                if (reason == Player.DISCONTINUITY_REASON_SEEK) bitrate.reset(traffic.bytes, new.positionMs)
+            }
             override fun onIsPlayingChanged(playing: Boolean) {
                 isPlaying = playing
                 if (playing) report.markStarted() else report.now()
@@ -250,6 +259,27 @@ fun PlayerScreen(
     LaunchedEffect(controlsVisible, showUpNext) {
         if (!controlsVisible) controlsInUse = false
         if (!controlsVisible && !showUpNext && focusRequested) rootFocus.requestFocus()
+    }
+
+    // The info box reads what the player already keeps (its buffer, decoder counters, the bytes counted
+    // above) once a second, and only while it shows; it never asks the network or the player for more.
+    LaunchedEffect(showInfo, player) {
+        if (!showInfo) return@LaunchedEffect
+        while (true) {
+            val format = player.videoFormat
+            val counters = player.videoDecoderCounters?.also { it.ensureUpdated() }
+            val dropped = counters?.droppedBufferCount?.toLong() ?: 0L
+            info = InfoUi(
+                video = format?.let { InfoText.video(it.width, it.height, it.frameRate, it.sampleMimeType) },
+                bitrateBps = bitrate.bitrateBps(traffic.bytes, player.bufferedPosition),
+                declaredBps = format?.bitrate?.takeIf { it > 0 }?.toLong(),
+                networkBps = traffic.networkBps(),
+                bufferAheadMs = player.totalBufferedDuration,
+                droppedFrames = dropped,
+                totalFrames = dropped + (counters?.renderedOutputBufferCount?.toLong() ?: 0L),
+            )
+            delay(1_000)
+        }
     }
 
     // Up next replaces the controls and counts down while the credits play.
@@ -453,6 +483,9 @@ fun PlayerScreen(
 
         if (isBuffering && error == null) Spinner(Modifier.align(Alignment.Center))
 
+        // Below the top bar's title and clock; it stays when the controls fade, until Info is pressed again.
+        if (showInfo && !showUpNext) PlaybackInfoBox(info, Modifier.align(Alignment.TopEnd).padding(top = 96.dp, end = 56.dp))
+
         AnimatedVisibility(visible = showControls, enter = fadeIn(tween(180)), exit = fadeOut(tween(320))) {
             PlayerControls(
                 modifier = Modifier.onFocusChanged { controlsFocused = it.hasFocus },
@@ -466,6 +499,8 @@ fun PlayerScreen(
                     if (target != null) { player.seekTo(target); positionMs = target; scrubMs = null } else togglePlay()
                 },
                 onOpenPanel = { panel = it; subtitleNotice = null },
+                infoOn = showInfo,
+                onToggleInfo = { showInfo = !showInfo },
                 onSubtitleTiming = { delta ->
                     onlineOffsetMs = (onlineOffsetMs + delta).coerceIn(-SubtitleTiming.LIMIT_MS, SubtitleTiming.LIMIT_MS)
                     val saved = onlineOffsetMs

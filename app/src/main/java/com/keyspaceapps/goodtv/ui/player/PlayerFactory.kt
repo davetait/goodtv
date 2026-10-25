@@ -5,6 +5,7 @@ import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.TransferListener
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.keyspaceapps.goodtv.USER_AGENT
@@ -17,14 +18,15 @@ object PlayerFactory {
     /**
      * ExoPlayer whose HTTP source follows http→https redirects (IPTV panels and the fake server
      * both do that) and identifies as GoodTV, since some panels reject the default ExoPlayer agent.
+     * [traffic] hears every byte downloaded (for the info box).
      */
-    fun create(context: Context): ExoPlayer {
+    fun create(context: Context, traffic: TransferListener? = null): ExoPlayer {
         val http = DefaultHttpDataSource.Factory()
             .setUserAgent(USER_AGENT)
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(15_000)
             .setReadTimeoutMs(30_000)
-        val dataSource = DefaultDataSource.Factory(context, http)
+        val dataSource = DefaultDataSource.Factory(context, http).setTransferListener(traffic)
         return ExoPlayer.Builder(context)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource))
             .setSeekBackIncrementMs(SEEK_BACK_MS)
