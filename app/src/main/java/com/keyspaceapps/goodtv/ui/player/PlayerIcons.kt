@@ -53,6 +53,18 @@ object PlayerIcons {
         line { moveTo(18f, 6.5f); arcTo(7.5f, 7.5f, 0f, false, true, 18f, 17.5f) }
     }
 
+    /** An "i" in a circle. */
+    val Info: ImageVector = icon("Info") {
+        line {
+            moveTo(12f, 3f)
+            arcTo(9f, 9f, 0f, true, true, 11.99f, 3f); close()
+        }
+        line { moveTo(12f, 11f); lineTo(12f, 16.5f) }
+        path(fill = fill) {
+            moveTo(12f, 6.6f); arcTo(1.2f, 1.2f, 0f, true, true, 11.99f, 6.6f); close()
+        }
+    }
+
     val Check: ImageVector = icon("Check") {
         line { moveTo(5f, 12.5f); lineTo(9.5f, 17f); lineTo(19f, 7.5f) }
     }

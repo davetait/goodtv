@@ -30,6 +30,8 @@ import org.junit.Rule
 import org.junit.Test
 import android.view.View
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.performSemanticsAction
 
 /**
  * The player's controls against a real file (assets/player_tracks.mkv: 20 s, English stereo and
@@ -114,6 +116,19 @@ class PlayerScreenTest {
 
     private fun captionsShown(text: String) =
         composeRule.onAllNodes(hasText(text, substring = true)).fetchSemanticsNodes().isNotEmpty()
+
+    /** Info opens a small box saying what's playing and how it's arriving; pressed again, it goes. */
+    @Test
+    fun infoButtonTogglesThePlaybackInfoBox() {
+        launchPaused()
+        composeRule.onNodeWithContentDescription("Info").performSemanticsAction(SemanticsActions.OnClick)
+        waitFor(5_000) { composeRule.onNodeWithText("Playback info") }
+        waitFor(5_000) { composeRule.onNode(hasText("×", substring = true)) }
+        composeRule.onNodeWithText("Buffer").assertExists()
+        composeRule.onNodeWithText("Dropped frames").assertExists()
+        composeRule.onNodeWithContentDescription("Info").performSemanticsAction(SemanticsActions.OnClick)
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasText("Playback info")).fetchSemanticsNodes().isEmpty() }
+    }
 
     /** Google TV's screensaver must not start mid-video: the screen stays on while playing, and may sleep once paused. */
     @Test
