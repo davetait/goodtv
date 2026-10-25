@@ -32,6 +32,7 @@ import android.view.View
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.onNodeWithTag
 
 /**
  * The player's controls against a real file (assets/player_tracks.mkv: 20 s, English stereo and
@@ -116,6 +117,28 @@ class PlayerScreenTest {
 
     private fun captionsShown(text: String) =
         composeRule.onAllNodes(hasText(text, substring = true)).fetchSemanticsNodes().isNotEmpty()
+
+    /** The picture's on-screen width over height, once the video's size is known. */
+    private fun pictureRatio(): Float? = runCatching {
+        val size = composeRule.onNodeWithTag("video_surface", useUnmergedTree = true).fetchSemanticsNode().size
+        if (size.height == 0) null else size.width.toFloat() / size.height
+    }.getOrNull()
+
+    /** A 4:3 picture keeps its shape, with black bars at the sides, instead of being stretched to fill 16:9. */
+    @Test
+    fun fourByThreeVideoKeepsItsShape() {
+        url = asset("player_4x3.mp4")
+        launch()
+        composeRule.waitUntil(15_000) { pictureRatio()?.let { kotlin.math.abs(it - 4f / 3f) < 0.02f } == true }
+    }
+
+    /** SD video with non-square pixels (720×576 stored, shown 16:9) appears at its real shape, not its stored one. */
+    @Test
+    fun nonSquarePixelsAreShownAtTheirRealShape() {
+        url = asset("player_anamorphic.mp4")
+        launch()
+        composeRule.waitUntil(15_000) { pictureRatio()?.let { kotlin.math.abs(it - 16f / 9f) < 0.02f } == true }
+    }
 
     /** Info opens a small box saying what's playing and how it's arriving; pressed again, it goes. */
     @Test
