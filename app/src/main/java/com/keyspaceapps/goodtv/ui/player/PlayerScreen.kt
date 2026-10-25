@@ -56,12 +56,14 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.keepScreenOn
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
+import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.C
@@ -74,6 +76,8 @@ import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.compose.PlayerSurface
 import androidx.media3.ui.compose.SURFACE_TYPE_SURFACE_VIEW
+import androidx.media3.ui.compose.modifiers.resizeWithContentScale
+import androidx.media3.ui.compose.state.rememberPresentationState
 import androidx.tv.material3.Button
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.OutlinedButton
@@ -179,6 +183,8 @@ fun PlayerScreen(
             prepare()
         }
     }
+    // The video's size and shape as the player reports them, for fitting the picture to the screen.
+    val presentation = rememberPresentationState(player)
 
     val report = remember(player) {
         var started = false
@@ -458,11 +464,18 @@ fun PlayerScreen(
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val small = maxWidth * UpNextLayout.VIDEO_WIDTH_FRACTION
             val margin = lerp(0.dp, UpNextLayout.Margin, shrink)
-            PlayerSurface(
-                player = player,
-                surfaceType = SURFACE_TYPE_SURFACE_VIEW,
-                modifier = Modifier.offset(margin, margin).size(lerp(maxWidth, small, shrink), lerp(maxHeight, small * 9f / 16f, shrink)),
-            )
+            // The picture keeps its real shape (pixel aspect ratio included) inside the frame, with black bars
+            // where it doesn't fill it, instead of being stretched to the screen's 16:9.
+            Box(
+                Modifier.offset(margin, margin).size(lerp(maxWidth, small, shrink), lerp(maxHeight, small * 9f / 16f, shrink)),
+                contentAlignment = Alignment.Center,
+            ) {
+                PlayerSurface(
+                    player = player,
+                    surfaceType = SURFACE_TYPE_SURFACE_VIEW,
+                    modifier = Modifier.resizeWithContentScale(ContentScale.Fit, presentation.videoSizeDp).testTag("video_surface"),
+                )
+            }
             val prompt = upNext
             if (prompt != null) {
                 AnimatedVisibility(visible = showUpNext, enter = fadeIn(tween(300, delayMillis = 150)), exit = fadeOut(tween(200))) {
