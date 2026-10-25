@@ -28,6 +28,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import android.view.View
+import androidx.compose.ui.platform.LocalView
 
 /**
  * The player's controls against a real file (assets/player_tracks.mkv: 20 s, English stereo and
@@ -112,6 +114,19 @@ class PlayerScreenTest {
 
     private fun captionsShown(text: String) =
         composeRule.onAllNodes(hasText(text, substring = true)).fetchSemanticsNodes().isNotEmpty()
+
+    /** Google TV's screensaver must not start mid-video: the screen stays on while playing, and may sleep once paused. */
+    @Test
+    fun screenStaysOnWhilePlayingButNotWhilePaused() {
+        var view: View? = null
+        composeRule.setContent {
+            view = LocalView.current
+            GoodTvTheme { PlayerScreen(PlayableItem("Test pattern", url, isLive = false), onBack = {}) }
+        }
+        composeRule.waitUntil(15_000) { view?.keepScreenOn == true }
+        keys(Key.MediaPause)
+        composeRule.waitUntil(5_000) { view?.keepScreenOn == false }
+    }
 
     /** The file marks English as its default subtitle track, so it starts on; switch to French, then off. */
     @Test
