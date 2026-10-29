@@ -62,6 +62,9 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.Timeout
+import androidx.compose.ui.test.assertIsNotDisplayed
+import org.junit.Assert.assertTrue
+import androidx.compose.ui.unit.dp
 
 /** The People row on detail pages, against a mock TMDB server (the runner keeps the real API off). */
 @OptIn(ExperimentalTestApi::class)
@@ -184,6 +187,28 @@ class PeopleRowTest {
         waitForText("Other Show")
         waitForTag("person-1223786")
         composeRule.onNodeWithText("E1 · Winter", substring = true).assertIsFocused()
+    }
+
+    /** In the seasons and episodes, the list takes the space of the people and buttons; UP from the seasons brings them back. */
+    @Test
+    fun episodeListExpandsOverThePeopleRow() {
+        composeRule.setContent { GoodTvTheme { SeriesDetailScreen(SeriesDetailKey(sid, "s1"), onPlay = {}, onPerson = {}) } }
+        waitForTag("person-9813")
+        waitForText("Resume S1 E1")
+        composeRule.onNodeWithText("People").assertIsDisplayed()
+        fun firstEpisodeTop() = composeRule.onNodeWithText("E1 · Winter", substring = true).fetchSemanticsNode().positionInRoot.y
+        val before = firstEpisodeTop()
+
+        pressKey(Key.DirectionDown)
+        composeRule.onNodeWithText("Season 1").assertIsFocused()
+        composeRule.onNodeWithText("People").assertIsNotDisplayed()
+        // The list moved up into the space the people and buttons left (well over 100 dp of it).
+        val moved = with(composeRule.density) { (before - firstEpisodeTop()).toDp() }
+        assertTrue("the list moved up only $moved", moved > 100.dp)
+
+        pressKey(Key.DirectionUp)
+        composeRule.onNodeWithText("Resume S1 E1", substring = true).assertIsFocused()
+        composeRule.onNodeWithText("People").assertIsDisplayed()
     }
 
     @Test
