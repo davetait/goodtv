@@ -25,6 +25,8 @@ import androidx.tv.material3.Text
 import com.keyspaceapps.goodtv.R
 import com.keyspaceapps.goodtv.data.tmdb.PersonJob
 import com.keyspaceapps.goodtv.data.tmdb.TmdbPerson
+import com.keyspaceapps.goodtv.ui.browse.bleed
+import com.keyspaceapps.goodtv.ui.browse.rowBleedPadding
 
 /**
  * "People": TMDB's directors or creators and cast for a title, one button each; draws nothing when [people] is empty.
@@ -38,7 +40,13 @@ fun PeopleRow(people: List<TmdbPerson>, onPerson: (TmdbPerson) -> Unit, modifier
     Column(modifier) {
         Text(stringResource(R.string.detail_people), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(8.dp))
-        LazyRow(state = listState, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        // Reaches past its slot so a focused button at either end has room to grow.
+        LazyRow(
+            state = listState,
+            contentPadding = rowBleedPadding,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.bleed().testTag("people_row"),
+        ) {
             items(people, key = { it.id }) { p ->
                 val requester = remember { FocusRequester() }
                 val refocus = Modifier.focusRequester(requester).onPlaced {

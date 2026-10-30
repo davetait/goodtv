@@ -65,6 +65,7 @@ import org.junit.rules.Timeout
 import androidx.compose.ui.test.assertIsNotDisplayed
 import org.junit.Assert.assertTrue
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.test.SemanticsNodeInteraction
 
 /** The People row on detail pages, against a mock TMDB server (the runner keeps the real API off). */
 @OptIn(ExperimentalTestApi::class)
@@ -187,6 +188,26 @@ class PeopleRowTest {
         waitForText("Other Show")
         waitForTag("person-1223786")
         composeRule.onNodeWithText("E1 · Winter", substring = true).assertIsFocused()
+    }
+
+    /**
+     * A focused button grows by about 10%, and a scrolling row clips at its edges: the People and season rows leave
+     * room around their buttons so the first one isn't cut off, while still lining up with the text above them.
+     */
+    @Test
+    fun rowsLeaveRoomForAFocusedButtonToGrow() {
+        composeRule.setContent { GoodTvTheme { SeriesDetailScreen(SeriesDetailKey(sid, "s1"), onPlay = {}, onPerson = {}) } }
+        waitForTag("person-9813")
+        fun left(matcher: SemanticsNodeInteraction) = matcher.fetchSemanticsNode().positionInRoot.x
+        fun rowLeft(tag: String) = composeRule.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.left
+        val room = with(composeRule.density) { 12.dp.toPx() }
+        val people = composeRule.onNodeWithTag("person-9813", useUnmergedTree = true)
+        val season = composeRule.onNodeWithText("Season 1")
+        assertTrue("people row clips its first button", left(people) - rowLeft("people_row") >= room)
+        assertTrue("season row clips its first button", left(season) - rowLeft("season_row") >= room)
+        // Still lined up with the "People" label above.
+        assertEquals(left(composeRule.onNodeWithText("People")), left(people), 1f)
+        assertEquals(left(composeRule.onNodeWithText("People")), left(season), 1f)
     }
 
     /** In the seasons and episodes, the list takes the space of the people and buttons; UP from the seasons brings them back. */

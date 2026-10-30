@@ -34,6 +34,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -61,6 +62,8 @@ import com.keyspaceapps.goodtv.ui.nav.SeriesDetailKey
 import com.keyspaceapps.goodtv.domain.DisplayTitle
 import com.keyspaceapps.goodtv.ui.player.PlayerFormats
 import com.keyspaceapps.goodtv.data.progress.WatchProgress
+import com.keyspaceapps.goodtv.ui.browse.bleed
+import com.keyspaceapps.goodtv.ui.browse.rowBleedPadding
 import com.keyspaceapps.goodtv.ui.watchlist.WatchListButton
 import kotlin.math.roundToInt
 
@@ -196,7 +199,7 @@ private fun SeriesDetailContent(
                 }
                 Spacer(Modifier.height(20.dp))
                 Column(Modifier.fillMaxSize().onFocusChanged { listFocused = it.hasFocus }) {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    LazyRow(contentPadding = rowBleedPadding, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.bleed().testTag("season_row")) {
                         items(state.seasonNumbers(), key = { it }) { n ->
                             val name = detail.seasons.firstOrNull { it.number == n }?.name ?: "Season $n"
                             // Click, not focus, switches season so the D-pad can pass over chips without changing the list.
