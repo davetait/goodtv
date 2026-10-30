@@ -61,6 +61,7 @@ import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.platform.testTag
@@ -544,11 +545,11 @@ fun PlayerScreen(
 
 /** A thin rotating arc; quieter than a full progress wheel. */
 @Composable
-private fun Spinner(modifier: Modifier = Modifier) {
+internal fun Spinner(modifier: Modifier = Modifier, size: Dp = 56.dp) {
     val turn by rememberInfiniteTransition(label = "spinner").animateFloat(
         0f, 360f, infiniteRepeatable(tween(1_000, easing = LinearEasing), RepeatMode.Restart), label = "turn",
     )
-    Canvas(modifier.size(56.dp)) {
+    Canvas(modifier.size(size)) {
         drawArc(Color.White.copy(alpha = 0.9f), turn, 100f, useCenter = false, style = Stroke(4.dp.toPx(), cap = StrokeCap.Round))
     }
 }
