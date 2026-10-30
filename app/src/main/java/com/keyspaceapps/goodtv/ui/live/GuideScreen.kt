@@ -15,7 +15,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -39,16 +42,21 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.FilterChip
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.keyspaceapps.goodtv.R
+import com.keyspaceapps.goodtv.appGraph
 import com.keyspaceapps.goodtv.data.guide.GuideFilter
 import com.keyspaceapps.goodtv.data.guide.GuideProgramme
 import com.keyspaceapps.goodtv.data.guide.GuideRow
 import com.keyspaceapps.goodtv.data.guide.GuideSource
 import com.keyspaceapps.goodtv.data.sports.ChannelCandidate
+import com.keyspaceapps.goodtv.data.sports.ChannelOrder
 import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.domain.label
 import com.keyspaceapps.goodtv.ui.browse.EmptyStates
@@ -71,6 +79,11 @@ import kotlinx.coroutines.launch
  * same there); clearing it brings the grid back, and Down from the field returns to the cell left. Back
  * from the player returns to the cell (or result) that was played. [source] and [clock] replace the real
  * guide and time in tests.
+ *
+ * With Live previews on, the details panel doubles and plays the row focus rests on ([LivePreviews]); the
+ * guide tells the session where focus is only while it's on screen, and leaves it when it goes or stops.
+ * Selecting the copy that's previewing hands its player to full screen ([LivePreviews.park]) instead of
+ * opening a second stream; any other copy stops the preview first.
  */
 @Composable
 fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock: () -> Long = System::currentTimeMillis) {
@@ -101,6 +114,36 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
     var picking by remember { mutableStateOf<Pair<String, GuideRow>?>(null) }
     var menuFor by remember { mutableStateOf<GuideRow?>(null) }
     val latestOnPlay by rememberUpdatedState(onPlay)
+    val previews = remember(context) { context.appGraph().livePreviews }
+    // Read since app start, so the panel has its height from the first frame and never jumps. null only in
+    // the moments after launch before the first read: the panel is today's until then, and previews are left as they are.
+    val previewsSetting by remember(context) { context.appGraph().livePreviewsSetting }.collectAsState()
+    val previewsOn = previewsSetting == true
+    LaunchedEffect(previewsSetting) { previewsSetting?.let(previews::setEnabled) }
+    // The row focus was last reported on, to report again when the guide comes back from the background.
+    val previewFocus = remember { mutableStateOf<PreviewTarget?>(null) }
+    // Where the panel's picture is in the window, for the grow to full screen. Only a select reads it.
+    val pictureBounds = remember { mutableStateOf<Rect?>(null) }
+    fun reportPreview(target: PreviewTarget?) {
+        previewFocus.value = target
+        previews.focus(target)
+    }
+    // Never report focus while the guide isn't seen, or the session would open a stream nobody watches.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle, previews) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> previews.leave()
+                Lifecycle.Event.ON_START -> previewFocus.value?.let(previews::focus)
+                else -> Unit
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            previews.leave()
+        }
+    }
 
     val current = view
     val board = current?.board
@@ -150,7 +193,15 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
         }
     }
 
-    fun play(c: ChannelCandidate) = latestOnPlay(PlayerKey(c.channel.sourceId, PlayerKey.KIND_LIVE, c.channel.id, null, c.channel.label))
+    // Called only on an actual select (after the picker's choice): taking stops a preview of any other copy.
+    fun play(c: ChannelCandidate, row: GuideRow) {
+        val target = PreviewTarget(row.key, c.channel.sourceId, c.channel.id, c.channel.label)
+        // The previewing copy: its player goes full screen as it is, growing out of the panel. Any other copy:
+        // the preview stops (one stream at a time) and the player opens its own.
+        val handle = previews.takeFor(target)
+        if (handle?.player != null) previews.park(target, handle, pictureBounds.value) else handle?.release()
+        latestOnPlay(PlayerKey(c.channel.sourceId, PlayerKey.KIND_LIVE, c.channel.id, null, c.channel.label))
+    }
 
     // Focus goes back to the cell before the picker leaves; removing the focused row first would let
     // Compose move focus elsewhere (and remember that instead).
@@ -161,7 +212,7 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
 
     fun playRow(fromId: String, row: GuideRow) = when (row.feeds.size) {
         0 -> Unit
-        1 -> play(row.feeds.single())
+        1 -> play(row.feeds.single(), row)
         else -> picking = fromId to row
     }
 
@@ -180,6 +231,7 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
                 if (cell?.kind != CellKind.LOADING) vm.focusTimeMs = cell?.fromMs
                 focus.outside = false
                 if (row != null) focused.value = GuideFocused(row, cell)
+                reportPreview(row?.let { previewTarget(it, cell, vm.now.value) })
             },
             onChannel = { line -> playRow(line.channelId, line.row) },
             onMenu = { row -> menuFor = row },
@@ -214,7 +266,14 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
             Row(
                 Modifier.fillMaxWidth().padding(bottom = 10.dp)
                     // Up from the grid, not Compose rehoming focus after the focused cell left the board.
-                    .onFocusChanged { if (it.hasFocus) focus.outside = vm.focus.key?.let { k -> isOnGrid(focus.lines, focus.windowStart, k) } ?: true },
+                    .onFocusChanged {
+                        if (it.hasFocus) {
+                            focus.outside = vm.focus.key?.let { k -> isOnGrid(focus.lines, focus.windowStart, k) } ?: true
+                            // Up to the chips or the search field: the preview stops at once. A rehome (the focused
+                            // programme ended, a page, a favourite) leaves it be: focus goes back to the row next.
+                            if (focus.outside) reportPreview(null)
+                        }
+                    },
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -253,7 +312,10 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
                     hits.isEmpty() -> Message(stringResource(R.string.search_no_results, query.trim()), Modifier.weight(1f))
                     else -> GuideSearchResults(
                         hits, now, timeLabel, focus, vm.searchFocus, resultRequested,
-                        onFocused = { focused.value = focusedOf(it) },
+                        onFocused = {
+                            focused.value = focusedOf(it)
+                            reportPreview(null)
+                        },
                         onSelect = { playIfOnNow(searchId(it), it.row, it.programme) },
                         onUpFromFirst = { searchField.requestFocus(); true },
                         modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -272,10 +334,14 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
                 )
                 else -> GuideGrid(lines, windowStart, now, listState, focus, actions, timeLabel, status, Modifier.weight(1f).fillMaxWidth())
             }
-            GuideDetails(focused, now, timeLabel, Modifier.padding(top = 8.dp, bottom = 24.dp).height(114.dp))
+            PreviewedDetails(
+                focused, now, timeLabel, previewsOn, previews,
+                Modifier.padding(top = 8.dp, bottom = 24.dp).height(if (previewsOn) 228.dp else 114.dp).testTag("guide_details"),
+                onPictureBounds = { pictureBounds.value = it },
+            )
         }
         picking?.let { (fromId, row) ->
-            FeedPicker(row.name, row.feeds, onPick = { closePicker(fromId); play(it) }, onClose = { closePicker(fromId) }, modifier = Modifier.align(Alignment.CenterEnd))
+            FeedPicker(row.name, row.feeds, onPick = { closePicker(fromId); play(it, row) }, onClose = { closePicker(fromId) }, modifier = Modifier.align(Alignment.CenterEnd))
         }
     }
 
@@ -293,6 +359,31 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
 }
 
 private const val FOCUS_FRAMES = 30
+
+/** The details panel with the session's preview, read here so a preview starting or stopping redraws only the panel. */
+@Composable
+private fun PreviewedDetails(
+    focused: State<GuideFocused?>,
+    now: Long,
+    timeLabel: (Long) -> String,
+    previewsOn: Boolean,
+    previews: LivePreviews,
+    modifier: Modifier,
+    onPictureBounds: (Rect) -> Unit,
+) {
+    val preview by previews.current.collectAsState()
+    GuideDetails(focused, now, timeLabel, previewsOn, preview, modifier, onPictureBounds)
+}
+
+/**
+ * What a preview of [row] plays with [cell] focused (null: the channel cell): the first copy in the feed
+ * picker's order. None for a row without feeds, or an event slot that isn't on (or about to be).
+ */
+internal fun previewTarget(row: GuideRow, cell: GuideCell?, now: Long): PreviewTarget? {
+    if (cell?.startsMs != null && !GuideTime.eventPlayable(cell.startsMs, now)) return null
+    val first = ChannelOrder.sort(row.feeds).firstOrNull()?.channel ?: return null
+    return PreviewTarget(row.key, first.sourceId, first.id, first.label)
+}
 
 private val Chips = listOf(
     GuideFilter.ALL to R.string.guide_chip_all,

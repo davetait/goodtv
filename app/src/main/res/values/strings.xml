@@ -228,6 +228,13 @@
     <string name="save">Save</string>
     <string name="settings_sources">Sources</string>
     <string name="settings_integrations">Integrations</string>
+    <string name="settings_live_tv">Live TV</string>
+    <string name="settings_live_previews_on">Live previews on</string>
+    <string name="settings_live_previews_off">Live previews off</string>
+    <string name="live_tv_title">Live TV</string>
+    <string name="live_previews">Live previews</string>
+    <string name="live_previews_summary">Play the highlighted channel in the guide, with sound, after a moment\'s pause on it.</string>
+    <string name="preview_unavailable">Preview unavailable</string>
     <string name="settings_sources_none">No sources yet</string>
     <plurals name="settings_sources_count">
         <item quantity="one">%d source</item>

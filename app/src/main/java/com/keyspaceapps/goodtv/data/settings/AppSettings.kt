@@ -23,6 +23,12 @@ class AppSettings(private val dataStore: DataStore<Preferences>) : EarlyRefreshL
     val lastTab: Flow<String?> = dataStore.data.map { it[lastTabKey] }
     suspend fun setLastTab(name: String) { dataStore.edit { it[lastTabKey] = name } }
 
+    private val livePreviewsKey = booleanPreferencesKey("live_previews")
+
+    /** Whether the guide plays the highlighted channel; off until turned on. */
+    val livePreviews: Flow<Boolean> = dataStore.data.map { it[livePreviewsKey] ?: false }
+    suspend fun setLivePreviews(on: Boolean) { dataStore.edit { it[livePreviewsKey] = on } }
+
     private fun earlyRefreshKey(sourceId: Long) = longPreferencesKey("guide_early_refresh_$sourceId")
     override suspend fun lastEarlyRefresh(sourceId: Long): Long? = dataStore.data.first()[earlyRefreshKey(sourceId)]
     override suspend fun recordEarlyRefresh(sourceId: Long, atMs: Long) { dataStore.edit { it[earlyRefreshKey(sourceId)] = atMs } }

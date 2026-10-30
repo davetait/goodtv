@@ -71,6 +71,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.Timeout
@@ -85,6 +86,10 @@ class GuideScreenTest {
     val timeout: Timeout = Timeout.seconds(90)
 
     private var played: PlayerKey? = null
+
+    /** These run with Live previews off (the emulator's settings are real; the setting is off by default). */
+    @Before
+    fun previewsOff() = runBlocking { ApplicationProvider.getApplicationContext<android.content.Context>().appGraph().settings.setLivePreviews(false) }
 
     private val day = ZonedDateTime.now().withHour(0).withMinute(0).withSecond(0).withNano(0)
     private fun at(h: Int, m: Int = 0) = day.withHour(h).withMinute(m).toInstant().toEpochMilli()

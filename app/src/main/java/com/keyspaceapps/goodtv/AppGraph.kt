@@ -61,15 +61,24 @@ import com.keyspaceapps.goodtv.data.tmdb.TmdbRepository
 import com.keyspaceapps.goodtv.data.xtream.XtreamApi
 import com.keyspaceapps.goodtv.data.xtream.XtreamChannelSource
 import com.keyspaceapps.goodtv.data.xtream.XtreamJson
+import com.keyspaceapps.goodtv.domain.PlayableRef
+import com.keyspaceapps.goodtv.ui.live.ExoPreviewEngine
+import com.keyspaceapps.goodtv.ui.live.LivePreviews
+import com.keyspaceapps.goodtv.ui.live.PreviewEngine
+import com.keyspaceapps.goodtv.ui.live.PreviewHandle
+import com.keyspaceapps.goodtv.ui.live.PreviewTarget
 import com.keyspaceapps.goodtv.ui.settings.IntegrationChecks
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -131,6 +140,13 @@ class AppGraph(val context: Context) {
     val appScope: CoroutineScope = CoroutineScope(
         SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, e -> Log.e("GoodTV", "Background task failed", e) },
     )
+
+    /**
+     * The Live previews setting, read from app start so the guide knows it on its first frame (its panel's
+     * height depends on it). null only until the first read, moments after launch.
+     */
+    val livePreviewsSetting: StateFlow<Boolean?> = settings.livePreviews.stateIn<Boolean?>(appScope, SharingStarted.Eagerly, null)
+
     val syncManager: SyncManager by lazy { SyncManager(store, sourceRegistry, appScope) }
     val repository: LibraryRepository by lazy { LibraryRepository(store, sourceRegistry, syncManager, settings) }
 
@@ -178,6 +194,32 @@ class AppGraph(val context: Context) {
 
     /** True while the player is on screen; the guide's provider download waits for it to end. */
     val playback = PlaybackState()
+
+    /** Instrumented tests resolve previews to local test media, never a provider. Read at each start. */
+    @VisibleForTesting var previewResolverOverride: (suspend (PreviewTarget) -> String)? = null
+
+    /** Instrumented tests count the preview players opened. Read at each start. */
+    @VisibleForTesting var previewEngineOverride: PreviewEngine? = null
+
+    private val exoPreviewEngine: PreviewEngine by lazy { ExoPreviewEngine(context) }
+
+    /**
+     * The guide's live preview session, on the main thread (ExoPlayer is main-thread only). Plays the
+     * first copy of the resting row, resolved exactly as the full-screen player resolves it.
+     */
+    val livePreviews: LivePreviews by lazy {
+        LivePreviews(
+            scope = CoroutineScope(appScope.coroutineContext + Dispatchers.Main.immediate),
+            playback = playback,
+            resolveUrl = { target ->
+                previewResolverOverride?.invoke(target)
+                    ?: repository.playable(target.sourceId, PlayableRef.Live(target.channelId), target.label).url
+            },
+            engine = object : PreviewEngine {
+                override fun open(url: String): PreviewHandle = (previewEngineOverride ?: exoPreviewEngine).open(url)
+            },
+        )
+    }
 
     /**
      * Downloads the guide once a day: epgshare01 first, the provider's own for what it lacks. Under
