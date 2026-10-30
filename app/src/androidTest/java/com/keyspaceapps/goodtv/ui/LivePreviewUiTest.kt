@@ -54,6 +54,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -101,11 +102,13 @@ class LivePreviewUiTest {
         listOf(p("cn", at(18), at(19), "The Situation Room")),
         loopShow = null, favourite = false,
     )
+    /** The rows on the board; a test can change them under the guide, as a programme ending does. */
+    private val rows = MutableStateFlow(listOf(fox, cnn))
     private val guide = object : GuideSource {
         override fun board(filter: GuideFilter, windowStartMs: Long): Flow<GuideBoard> {
             val end = windowStartMs + 3 * 3_600_000L
             fun clip(r: GuideRow) = r.copy(programmes = r.programmes.filter { it.endMs > windowStartMs && it.startMs < end })
-            return flowOf(GuideBoard(listOf(GuideSection("News", null, listOf(fox, cnn).map(::clip), emptyList())), windowStartMs))
+            return rows.map { all -> GuideBoard(listOf(GuideSection("News", null, all.map(::clip), emptyList())), windowStartMs) }
         }
         override fun search(query: String): Flow<List<GuideSearchHit>> = flowOf(emptyList())
         override suspend fun setFavourite(rowKey: String, favourite: Boolean) = Unit
@@ -242,9 +245,32 @@ class LivePreviewUiTest {
                 override val state: StateFlow<PreviewStatus> = MutableStateFlow(PreviewStatus.PLAYING)
                 override val player: ExoPlayer? = null
                 override fun resume() = Unit
+                override fun pause() = Unit
                 override fun release() = Unit
             }
         }
+    }
+
+    /**
+     * The focused programme leaves the board (it ended at :00 or :30): Compose rehomes focus on the chips for a
+     * moment, then the guide puts it back on the row. The row's preview plays on through it, never reconnecting.
+     */
+    @Test fun theFocusedProgrammeEndingKeepsThePreview() {
+        val engine = CountingEngine().also { graph.previewEngineOverride = it }
+        show(previews = true)
+        waitFocused("Special Report")
+        waitPlaying("fox-news")
+        val handle = current()!!.second
+        assertEquals(1, engine.opens)
+        rows.value = listOf(fox.copy(programmes = listOf(p("fn", at(18), at(19), "Fox News Live"))), cnn)
+        waitFocused("Fox News Live")
+        val deadline = System.currentTimeMillis() + 2_500
+        while (System.currentTimeMillis() < deadline) {
+            composeRule.waitForIdle()
+            assertSame(handle, current()?.second)
+            Thread.sleep(50)
+        }
+        assertEquals(1, engine.opens)
     }
 
     /** The guide gone (a pushed screen) with a rest pending: nothing opens later, and the playing preview stops. */

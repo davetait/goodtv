@@ -33,6 +33,8 @@ interface PreviewHandle {
     val player: ExoPlayer?
     /** Plays again if full screen left it paused: a preview always plays. */
     fun resume()
+    /** Holds it, silent, while a hand-back waits for the guide to show it. */
+    fun pause()
     fun release()
 }
 
@@ -188,7 +190,8 @@ class LivePreviews(
     /**
      * Full screen closed: keep [handle] for [target] if the guide already has that row focused, or
      * focuses it within the grace period; release it at once if the guide is on another row (which then
-     * rests) or previews are off. The session owns it again either way.
+     * rests) or previews are off. The session owns it again either way. It plays only once the guide
+     * shows it: waiting, it's paused, so no sound comes over the logo or from a guide that isn't there.
      */
     fun giveBack(target: PreviewTarget, handle: PreviewHandle) {
         handingOff = false
@@ -201,13 +204,14 @@ class LivePreviews(
             if (enabled && now != null) rest(now)
             return
         }
-        // Full screen may have left it paused; kept, it plays (a still frame would hold the gate for nothing).
-        handle.resume()
         playback.enter()
         val back = Held(target, handle, gate = true)
         if (now != null) {
+            // Full screen may have left it paused; kept, it plays (a still frame would hold the gate for nothing).
+            handle.resume()
             hold(back)
         } else {
+            handle.pause()
             handBack = back
             handBackTimer = scope.launch {
                 delay(handBackGraceMs)
@@ -264,6 +268,7 @@ class LivePreviews(
     private fun claimHandBack(back: Held) {
         handBackTimer?.cancel()
         handBack = null
+        back.handle.resume()
         hold(back)
     }
 
@@ -309,6 +314,7 @@ class LivePreviews(
         override val state: StateFlow<PreviewStatus> = MutableStateFlow(PreviewStatus.FAILED)
         override val player: ExoPlayer? = null
         override fun resume() = Unit
+        override fun pause() = Unit
         override fun release() = Unit
     }
 }
@@ -336,6 +342,10 @@ private class ExoPreviewHandle(override val player: ExoPlayer, url: String) : Pr
 
     override fun resume() {
         if (!released) player.playWhenReady = true
+    }
+
+    override fun pause() {
+        if (!released) player.playWhenReady = false
     }
 
     override fun release() {

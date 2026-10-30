@@ -25,9 +25,11 @@ class LivePreviewsTest {
         val status = MutableStateFlow(PreviewStatus.LOADING)
         var releases = 0
         var resumes = 0
+        var pauses = 0
         override val state: StateFlow<PreviewStatus> = status
         override val player: ExoPlayer? = null
         override fun resume() { resumes++ }
+        override fun pause() { pauses++ }
         override fun release() { releases++ }
     }
 
@@ -577,9 +579,41 @@ class LivePreviewsTest {
         val before = second.resumes
         previews.leave()
         previews.giveBack(row(1), second)
+        // Not until the guide shows it again: no sound over the logo, or with nothing on screen.
+        assertEquals(before, second.resumes)
         previews.focus(row(1))
         assertSame(second, previews.current.value?.second)
         assertEquals(before + 1, second.resumes)
+    }
+
+    /** Back with the guide not on the row yet (or not there at all, after the activity went): it waits, silent. */
+    @Test fun anUnclaimedHandBackIsNotResumedUntilClaimed() = runTest {
+        val previews = session()
+        rest(previews, row(1))
+        val taken = previews.takeFor(row(1))!! as FakeHandle
+        previews.leave()
+        previews.giveBack(row(1), taken)
+        assertEquals(0, taken.resumes)
+        assertEquals(1, taken.pauses)
+        advanceTimeBy(2_000)
+        runCurrent()
+        assertEquals(0, taken.resumes)
+        previews.focus(row(1))
+        assertEquals(1, taken.resumes)
+        assertSame(taken, previews.current.value?.second)
+    }
+
+    /** Never claimed: released when the grace period is up, never having played. */
+    @Test fun aHandBackNeverClaimedIsReleasedWithoutResuming() = runTest {
+        val previews = session()
+        rest(previews, row(1))
+        val taken = previews.takeFor(row(1))!! as FakeHandle
+        previews.leave()
+        previews.giveBack(row(1), taken)
+        advanceTimeBy(3_000)
+        runCurrent()
+        assertEquals(1, taken.releases)
+        assertEquals(0, taken.resumes)
     }
 
     @Test fun aHandBackThatIsReleasedIsNotResumed() = runTest {

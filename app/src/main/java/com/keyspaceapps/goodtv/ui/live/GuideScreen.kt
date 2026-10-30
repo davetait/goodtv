@@ -269,8 +269,9 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
                     .onFocusChanged {
                         if (it.hasFocus) {
                             focus.outside = vm.focus.key?.let { k -> isOnGrid(focus.lines, focus.windowStart, k) } ?: true
-                            // The chips or the search field: the preview stops at once.
-                            reportPreview(null)
+                            // Up to the chips or the search field: the preview stops at once. A rehome (the focused
+                            // programme ended, a page, a favourite) leaves it be: focus goes back to the row next.
+                            if (focus.outside) reportPreview(null)
                         }
                     },
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
