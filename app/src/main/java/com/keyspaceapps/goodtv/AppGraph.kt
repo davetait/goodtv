@@ -61,6 +61,12 @@ import com.keyspaceapps.goodtv.data.tmdb.TmdbRepository
 import com.keyspaceapps.goodtv.data.xtream.XtreamApi
 import com.keyspaceapps.goodtv.data.xtream.XtreamChannelSource
 import com.keyspaceapps.goodtv.data.xtream.XtreamJson
+import com.keyspaceapps.goodtv.domain.PlayableRef
+import com.keyspaceapps.goodtv.ui.live.ExoPreviewEngine
+import com.keyspaceapps.goodtv.ui.live.LivePreviews
+import com.keyspaceapps.goodtv.ui.live.PreviewEngine
+import com.keyspaceapps.goodtv.ui.live.PreviewHandle
+import com.keyspaceapps.goodtv.ui.live.PreviewTarget
 import com.keyspaceapps.goodtv.ui.settings.IntegrationChecks
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -178,6 +184,32 @@ class AppGraph(val context: Context) {
 
     /** True while the player is on screen; the guide's provider download waits for it to end. */
     val playback = PlaybackState()
+
+    /** Instrumented tests resolve previews to local test media, never a provider. Read at each start. */
+    @VisibleForTesting var previewResolverOverride: (suspend (PreviewTarget) -> String)? = null
+
+    /** Instrumented tests count the preview players opened. Read at each start. */
+    @VisibleForTesting var previewEngineOverride: PreviewEngine? = null
+
+    private val exoPreviewEngine: PreviewEngine by lazy { ExoPreviewEngine(context) }
+
+    /**
+     * The guide's live preview session, on the main thread (ExoPlayer is main-thread only). Plays the
+     * first copy of the resting row, resolved exactly as the full-screen player resolves it.
+     */
+    val livePreviews: LivePreviews by lazy {
+        LivePreviews(
+            scope = CoroutineScope(appScope.coroutineContext + Dispatchers.Main.immediate),
+            playback = playback,
+            resolveUrl = { target ->
+                previewResolverOverride?.invoke(target)
+                    ?: repository.playable(target.sourceId, PlayableRef.Live(target.channelId), target.label).url
+            },
+            engine = object : PreviewEngine {
+                override fun open(url: String): PreviewHandle = (previewEngineOverride ?: exoPreviewEngine).open(url)
+            },
+        )
+    }
 
     /**
      * Downloads the guide once a day: epgshare01 first, the provider's own for what it lacks. Under
