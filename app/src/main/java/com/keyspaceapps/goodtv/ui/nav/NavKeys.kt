@@ -77,4 +77,8 @@ data object SourcesKey : GoodTvKey
 @Serializable
 data object IntegrationsKey : GoodTvKey
 
+/** The Live TV settings: the Live previews switch, opened from Settings. */
+@Serializable
+data object LiveTvSettingsKey : GoodTvKey
+
 enum class HomeTab { HOME, LIVE, SPORTS, MOVIES, SERIES, SETTINGS }

@@ -23,6 +23,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.keyspaceapps.goodtv.R
 import com.keyspaceapps.goodtv.data.repo.LibraryRepository
+import com.keyspaceapps.goodtv.data.settings.AppSettings
 import com.keyspaceapps.goodtv.data.settings.Integrations
 import com.keyspaceapps.goodtv.data.settings.KeyStatus
 import com.keyspaceapps.goodtv.domain.SourceSummary
@@ -32,6 +33,7 @@ import com.keyspaceapps.goodtv.ui.browse.targetIn
 import com.keyspaceapps.goodtv.ui.goodTvViewModel
 import com.keyspaceapps.goodtv.ui.nav.GoodTvKey
 import com.keyspaceapps.goodtv.ui.nav.IntegrationsKey
+import com.keyspaceapps.goodtv.ui.nav.LiveTvSettingsKey
 import com.keyspaceapps.goodtv.ui.nav.SourcesKey
 import com.keyspaceapps.goodtv.ui.sources.syncedAgo
 import kotlinx.coroutines.flow.SharingStarted
@@ -40,13 +42,15 @@ import kotlinx.coroutines.flow.stateIn
 
 private const val SOURCES_ROW = "sources"
 private const val INTEGRATIONS_ROW = "integrations"
+private const val LIVE_TV_ROW = "live_tv"
 
 /** The Settings tab's rows: sources (null until first read), the integrations in effect, and the row focused last. */
-class SettingsViewModel(repo: LibraryRepository, integrations: Integrations) : ViewModel() {
+class SettingsViewModel(repo: LibraryRepository, integrations: Integrations, settings: AppSettings) : ViewModel() {
     val sources: StateFlow<List<SourceSummary>?> = repo.sources.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val tmdb = integrations.tmdb
     val openSubtitles = integrations.openSubtitles
     val loaded = integrations.loaded
+    val livePreviews: StateFlow<Boolean?> = settings.livePreviews.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val focus = FocusMemory()
 }
 
@@ -63,18 +67,19 @@ internal fun statusPartRes(status: KeyStatus): Int = when (status) {
 }
 
 /**
- * Two rows, Sources and Integrations, each opening its screen on top. Focus goes back to the row
+ * Three rows, Sources, Integrations and Live TV, each opening its screen on top. Focus goes back to the row
  * that opened a screen; otherwise to Sources.
  */
 @Composable
 fun SettingsScreen(onNavigate: (GoodTvKey) -> Unit) {
-    val vm = goodTvViewModel { SettingsViewModel(it.repository, it.integrations) }
+    val vm = goodTvViewModel { SettingsViewModel(it.repository, it.integrations, it.settings) }
     val sources by vm.sources.collectAsState()
     val tmdb by vm.tmdb.collectAsState()
     val os by vm.openSubtitles.collectAsState()
     val loaded by vm.loaded.collectAsState()
+    val livePreviews by vm.livePreviews.collectAsState()
     val requested = remember { mutableStateOf(false) }
-    val target = vm.focus.targetIn(listOf(SOURCES_ROW, INTEGRATIONS_ROW), SOURCES_ROW)
+    val target = vm.focus.targetIn(listOf(SOURCES_ROW, INTEGRATIONS_ROW, LIVE_TV_ROW), SOURCES_ROW)
 
     val integrationsStatus = if (!loaded) "" else listOf(
         stringResource(statusPartRes(tmdb.status), stringResource(R.string.tmdb_name)),
@@ -96,6 +101,12 @@ fun SettingsScreen(onNavigate: (GoodTvKey) -> Unit) {
             status = integrationsStatus,
             onClick = { onNavigate(IntegrationsKey) },
             modifier = Modifier.rememberedFocus(vm.focus, INTEGRATIONS_ROW, isTarget = target == INTEGRATIONS_ROW, requested = requested),
+        )
+        SettingsRow(
+            title = stringResource(R.string.settings_live_tv),
+            status = livePreviews?.let { stringResource(if (it) R.string.settings_live_previews_on else R.string.settings_live_previews_off) }.orEmpty(),
+            onClick = { onNavigate(LiveTvSettingsKey) },
+            modifier = Modifier.rememberedFocus(vm.focus, LIVE_TV_ROW, isTarget = target == LIVE_TV_ROW, requested = requested),
         )
     }
 }

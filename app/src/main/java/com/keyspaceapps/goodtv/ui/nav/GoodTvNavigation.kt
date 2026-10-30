@@ -31,6 +31,7 @@ import com.keyspaceapps.goodtv.ui.home.PersonSearchScreen
 import com.keyspaceapps.goodtv.ui.movies.MovieDetailScreen
 import com.keyspaceapps.goodtv.ui.series.NextEpisode
 import com.keyspaceapps.goodtv.ui.settings.IntegrationsScreen
+import com.keyspaceapps.goodtv.ui.settings.LiveTvSettingsScreen
 import com.keyspaceapps.goodtv.ui.series.NextEpisodes
 import com.keyspaceapps.goodtv.ui.series.SeriesDetailScreen
 import com.keyspaceapps.goodtv.ui.player.PlayerScreen
@@ -61,6 +62,7 @@ fun GoodTvNavigation() {
                 // A full screen now, not a tab: its own top padding replaces the tab row's.
                 entry<SourcesKey>(stackKey) { Box(Modifier.padding(top = 24.dp)) { SourcesScreen(onNavigate = { backStack.add(it) }) } }
                 entry<IntegrationsKey>(stackKey) { IntegrationsScreen() }
+                entry<LiveTvSettingsKey>(stackKey) { LiveTvSettingsScreen() }
                 entry<PlayerKey>(stackKey) { key ->
                     val graph = LocalContext.current.appGraph()
                     var item by remember(key) { mutableStateOf<PlayableItem?>(null) }
