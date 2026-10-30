@@ -161,6 +161,20 @@ class LivePreviewUiTest {
         composeRule.waitUntil(5_000) { abs(panelHeightDp() - 114f) < 1f }
     }
 
+    /** Back on Live TV (from another tab or the player), the panel is already 228 dp on the first frame: the rows never jump. */
+    @Test fun panelIsFullHeightOnTheFirstFrameBack() {
+        show(previews = true)
+        waitFocused("Special Report")
+        composeRule.waitUntil(5_000) { abs(panelHeightDp() - 228f) < 1f }
+        shown = false
+        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = false
+        shown = true
+        composeRule.mainClock.advanceTimeByFrame()
+        assertEquals(228f, panelHeightDp(), 1f)
+        composeRule.mainClock.autoAdvance = true
+    }
+
     @Test fun restingOnARowPlaysItsPreview() {
         show(previews = true)
         waitFocused("Special Report")

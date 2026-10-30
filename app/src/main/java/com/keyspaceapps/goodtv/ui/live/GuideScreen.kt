@@ -112,8 +112,9 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
     var menuFor by remember { mutableStateOf<GuideRow?>(null) }
     val latestOnPlay by rememberUpdatedState(onPlay)
     val previews = remember(context) { context.appGraph().livePreviews }
-    // null until the setting is read, so a first frame never turns previews off (or on) by mistake.
-    val previewsSetting by remember(context) { context.appGraph().settings.livePreviews }.collectAsState(initial = null)
+    // Read since app start, so the panel has its height from the first frame and never jumps. null only in
+    // the moments after launch before the first read: the panel is today's until then, and previews are left as they are.
+    val previewsSetting by remember(context) { context.appGraph().livePreviewsSetting }.collectAsState()
     val previewsOn = previewsSetting == true
     LaunchedEffect(previewsSetting) { previewsSetting?.let(previews::setEnabled) }
     // The row focus was last reported on, to report again when the guide comes back from the background.
