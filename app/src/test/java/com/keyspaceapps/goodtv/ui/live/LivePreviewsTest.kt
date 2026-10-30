@@ -357,4 +357,42 @@ class LivePreviewsTest {
         assertEquals(1, taken.releases)
         assertFalse(playback.playing.value)
     }
+
+    @Test fun focusingTheSameRowAfterASelectWithoutAPreviewRestartsIt() = runTest {
+        val previews = session()
+        rest(previews, row(1))
+        assertNull(previews.takeFor(row(1, channel = "other copy")))
+        // The full-screen player closes; the guide reports the same row again.
+        previews.focus(row(1))
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(2, engine.opened.size)
+        assertSame(engine.opened[1], previews.current.value?.second)
+    }
+
+    @Test fun focusingTheSameRowAfterATakeThatNeverCameBackRestartsIt() = runTest {
+        val previews = session()
+        rest(previews, row(1))
+        assertSame(engine.opened[0], previews.takeFor(row(1)))
+        // The full-screen player failed and closed without giving the player back.
+        previews.focus(row(1))
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(2, engine.opened.size)
+        assertTrue(playback.playing.value)
+    }
+
+    @Test fun handBackThatRecoveredInFullScreenIsKept() = runTest {
+        val previews = session()
+        rest(previews, row(1))
+        val taken = previews.takeFor(row(1))!! as FakeHandle
+        // Full screen: an error, then a successful retry on the same player.
+        taken.status.value = PreviewStatus.FAILED
+        taken.status.value = PreviewStatus.PLAYING
+        previews.giveBack(row(1), taken)
+        runCurrent()
+        assertEquals(0, taken.releases)
+        assertSame(taken, previews.current.value?.second)
+        assertTrue(playback.playing.value)
+    }
 }

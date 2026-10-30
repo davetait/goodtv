@@ -83,7 +83,8 @@ class LivePreviews(
     fun focus(target: PreviewTarget?) {
         val sameRow = target != null && target.rowKey == focused?.rowKey
         focused = target
-        if (sameRow) return
+        // Same row keeps its preview (or its failure) or its pending start; with neither (after a select), it rests again.
+        if (sameRow && (held != null || starting?.isActive == true)) return
         stop()
         val back = handBack
         if (back != null && target != null && back.target.rowKey == target.rowKey) {
@@ -245,8 +246,8 @@ class ExoPreviewEngine(private val context: Context) : PreviewEngine {
 }
 
 private class ExoPreviewHandle(override val player: ExoPlayer, url: String) : PreviewHandle, Player.Listener {
-    private val status = MutableStateFlow(PreviewStatus.LOADING)
-    override val state: StateFlow<PreviewStatus> = status.asStateFlow()
+    private val mapper = PreviewStatusMapper()
+    override val state: StateFlow<PreviewStatus> = mapper.status
     private var released = false
 
     init {
@@ -256,23 +257,38 @@ private class ExoPreviewHandle(override val player: ExoPlayer, url: String) : Pr
         player.prepare()
     }
 
-    override fun onIsPlayingChanged(isPlaying: Boolean) {
-        if (isPlaying && status.value == PreviewStatus.LOADING) status.value = PreviewStatus.PLAYING
-    }
-
-    override fun onPlaybackStateChanged(playbackState: Int) {
-        // A live stream that ends has nothing left to show.
-        if (playbackState == Player.STATE_ENDED) status.value = PreviewStatus.FAILED
-    }
-
-    override fun onPlayerError(error: PlaybackException) {
-        status.value = PreviewStatus.FAILED
-    }
+    override fun onIsPlayingChanged(isPlaying: Boolean) = mapper.onIsPlaying(isPlaying)
+    override fun onPlaybackStateChanged(playbackState: Int) = mapper.onPlaybackState(playbackState)
+    override fun onPlayerError(error: PlaybackException) = mapper.onError()
 
     override fun release() {
         if (released) return
         released = true
         player.removeListener(this)
         player.release()
+    }
+}
+
+/** Turns a preview player's events into a [PreviewStatus]. */
+internal class PreviewStatusMapper {
+    private val current = MutableStateFlow(PreviewStatus.LOADING)
+    val status: StateFlow<PreviewStatus> = current.asStateFlow()
+
+    /** Playing from any state: full screen's retry can bring a failed player back. */
+    fun onIsPlaying(isPlaying: Boolean) {
+        if (isPlaying) current.value = PreviewStatus.PLAYING
+    }
+
+    fun onPlaybackState(playbackState: Int) {
+        when (playbackState) {
+            // A live stream that ends has nothing left to show.
+            Player.STATE_ENDED -> current.value = PreviewStatus.FAILED
+            // A retry after a failure is loading again; rebuffering while playing keeps the picture.
+            Player.STATE_BUFFERING -> if (current.value == PreviewStatus.FAILED) current.value = PreviewStatus.LOADING
+        }
+    }
+
+    fun onError() {
+        current.value = PreviewStatus.FAILED
     }
 }
