@@ -241,6 +241,7 @@ class LivePreviewUiTest {
             return object : PreviewHandle {
                 override val state: StateFlow<PreviewStatus> = MutableStateFlow(PreviewStatus.PLAYING)
                 override val player: ExoPlayer? = null
+                override fun resume() = Unit
                 override fun release() = Unit
             }
         }
@@ -477,5 +478,29 @@ class LivePreviewUiTest {
             composeRule.mainClock.autoAdvance = true
         }
         composeRule.waitUntil(5_000) { current()?.first?.rowKey == "fox-news" }
+    }
+
+    /** Paused in full screen, then Back: the panel's preview plays again (a still frame would hold the gate for nothing). */
+    @Test fun pausingInFullScreenThenBackPlaysInThePanel() {
+        val engine = countingEngine()
+        showWithPlayer()
+        waitFocused("Special Report")
+        waitPlaying("fox-news")
+        val handle = current()!!.second
+        press(Key.DirectionCenter)
+        waitFullScreen()
+        idleFor(1_000)
+        press(Key.MediaPause)
+        composeRule.waitUntil(5_000) { !composeRule.runOnUiThread { handle.player!!.playWhenReady } }
+        // The pause brought up the controls in use: the first Back hides them, the second leaves.
+        press(Key.Back)
+        composeRule.waitForIdle()
+        assertEquals(2, backStack.size)
+        press(Key.Back)
+        composeRule.waitUntil(5_000) { backStack.size == 1 }
+        composeRule.waitUntil(5_000) { current()?.second === handle }
+        composeRule.waitUntil(5_000) { composeRule.runOnUiThread { handle.player!!.isPlaying } }
+        assertEquals(PreviewStatus.PLAYING, handle.state.value)
+        assertEquals(1, engine.handles.size)
     }
 }

@@ -31,6 +31,8 @@ interface PreviewHandle {
     val state: StateFlow<PreviewStatus>
     /** For the panel's surface and the hand-off to the full-screen player; null in fakes. */
     val player: ExoPlayer?
+    /** Plays again if full screen left it paused: a preview always plays. */
+    fun resume()
     fun release()
 }
 
@@ -199,6 +201,8 @@ class LivePreviews(
             if (enabled && now != null) rest(now)
             return
         }
+        // Full screen may have left it paused; kept, it plays (a still frame would hold the gate for nothing).
+        handle.resume()
         playback.enter()
         val back = Held(target, handle, gate = true)
         if (now != null) {
@@ -304,6 +308,7 @@ class LivePreviews(
     private class Unavailable : PreviewHandle {
         override val state: StateFlow<PreviewStatus> = MutableStateFlow(PreviewStatus.FAILED)
         override val player: ExoPlayer? = null
+        override fun resume() = Unit
         override fun release() = Unit
     }
 }
@@ -328,6 +333,10 @@ private class ExoPreviewHandle(override val player: ExoPlayer, url: String) : Pr
     override fun onIsPlayingChanged(isPlaying: Boolean) = mapper.onIsPlaying(isPlaying)
     override fun onPlaybackStateChanged(playbackState: Int) = mapper.onPlaybackState(playbackState)
     override fun onPlayerError(error: PlaybackException) = mapper.onError()
+
+    override fun resume() {
+        if (!released) player.playWhenReady = true
+    }
 
     override fun release() {
         if (released) return

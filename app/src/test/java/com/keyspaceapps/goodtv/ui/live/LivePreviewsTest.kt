@@ -24,8 +24,10 @@ class LivePreviewsTest {
     private class FakeHandle(val url: String) : PreviewHandle {
         val status = MutableStateFlow(PreviewStatus.LOADING)
         var releases = 0
+        var resumes = 0
         override val state: StateFlow<PreviewStatus> = status
         override val player: ExoPlayer? = null
+        override fun resume() { resumes++ }
         override fun release() { releases++ }
     }
 
@@ -560,5 +562,33 @@ class LivePreviewsTest {
         assertEquals(1, engine.opened.size)
         assertSame(handle, previews.current.value?.second)
         assertEquals(0, handle.releases)
+    }
+
+    /** Paused in full screen, then Back: the preview it goes back to plays again, whether claimed at once or later. */
+    @Test fun aHandBackThatIsKeptResumesPlaying() = runTest {
+        val previews = session()
+        rest(previews, row(1))
+        val taken = previews.takeFor(row(1))!! as FakeHandle
+        previews.giveBack(row(1), taken)
+        assertEquals(1, taken.resumes)
+
+        // Again, with the guide not yet back on the row: kept for the grace period, playing.
+        val second = previews.takeFor(row(1))!! as FakeHandle
+        val before = second.resumes
+        previews.leave()
+        previews.giveBack(row(1), second)
+        previews.focus(row(1))
+        assertSame(second, previews.current.value?.second)
+        assertEquals(before + 1, second.resumes)
+    }
+
+    @Test fun aHandBackThatIsReleasedIsNotResumed() = runTest {
+        val previews = session()
+        rest(previews, row(1))
+        val taken = previews.takeFor(row(1))!! as FakeHandle
+        previews.focus(row(2))
+        previews.giveBack(row(1), taken)
+        assertEquals(1, taken.releases)
+        assertEquals(0, taken.resumes)
     }
 }
