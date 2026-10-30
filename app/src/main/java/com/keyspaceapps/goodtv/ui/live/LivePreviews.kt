@@ -180,6 +180,8 @@ class LivePreviews(
         } else {
             handBackTimer?.cancel()
             handBack = null
+            // A waiting hand-back is paused; full screen plays it.
+            candidate.handle.resume()
         }
         candidate.done = true
         candidate.watcher?.cancel()

@@ -603,6 +603,18 @@ class LivePreviewsTest {
         assertSame(taken, previews.current.value?.second)
     }
 
+    /** A waiting hand-back selected again goes back to full screen playing, not paused. */
+    @Test fun aWaitingHandBackTakenAgainPlays() = runTest {
+        val previews = session()
+        rest(previews, row(1))
+        val taken = previews.takeFor(row(1))!! as FakeHandle
+        previews.leave()
+        previews.giveBack(row(1), taken)
+        assertSame(taken, previews.takeFor(row(1)))
+        assertEquals(1, taken.resumes)
+        assertEquals(0, taken.releases)
+    }
+
     /** Never claimed: released when the grace period is up, never having played. */
     @Test fun aHandBackNeverClaimedIsReleasedWithoutResuming() = runTest {
         val previews = session()
