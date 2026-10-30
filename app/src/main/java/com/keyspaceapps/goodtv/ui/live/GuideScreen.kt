@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -81,6 +82,8 @@ import kotlinx.coroutines.launch
  *
  * With Live previews on, the details panel doubles and plays the row focus rests on ([LivePreviews]); the
  * guide tells the session where focus is only while it's on screen, and leaves it when it goes or stops.
+ * Selecting the copy that's previewing hands its player to full screen ([LivePreviews.park]) instead of
+ * opening a second stream; any other copy stops the preview first.
  */
 @Composable
 fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock: () -> Long = System::currentTimeMillis) {
@@ -119,6 +122,8 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
     LaunchedEffect(previewsSetting) { previewsSetting?.let(previews::setEnabled) }
     // The row focus was last reported on, to report again when the guide comes back from the background.
     val previewFocus = remember { mutableStateOf<PreviewTarget?>(null) }
+    // Where the panel's picture is in the window, for the grow to full screen. Only a select reads it.
+    val pictureBounds = remember { mutableStateOf<Rect?>(null) }
     fun reportPreview(target: PreviewTarget?) {
         previewFocus.value = target
         previews.focus(target)
@@ -188,9 +193,13 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
         }
     }
 
-    fun play(c: ChannelCandidate) {
-        // One stream at a time: the preview stops before the full-screen player opens its own.
-        previews.leave()
+    // Called only on an actual select (after the picker's choice): taking stops a preview of any other copy.
+    fun play(c: ChannelCandidate, row: GuideRow) {
+        val target = PreviewTarget(row.key, c.channel.sourceId, c.channel.id, c.channel.label)
+        // The previewing copy: its player goes full screen as it is, growing out of the panel. Any other copy:
+        // the preview stops (one stream at a time) and the player opens its own.
+        val handle = previews.takeFor(target)
+        if (handle?.player != null) previews.park(target, handle, pictureBounds.value) else handle?.release()
         latestOnPlay(PlayerKey(c.channel.sourceId, PlayerKey.KIND_LIVE, c.channel.id, null, c.channel.label))
     }
 
@@ -203,7 +212,7 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
 
     fun playRow(fromId: String, row: GuideRow) = when (row.feeds.size) {
         0 -> Unit
-        1 -> play(row.feeds.single())
+        1 -> play(row.feeds.single(), row)
         else -> picking = fromId to row
     }
 
@@ -327,10 +336,11 @@ fun GuideScreen(onPlay: (PlayerKey) -> Unit, source: GuideSource? = null, clock:
             PreviewedDetails(
                 focused, now, timeLabel, previewsOn, previews,
                 Modifier.padding(top = 8.dp, bottom = 24.dp).height(if (previewsOn) 228.dp else 114.dp).testTag("guide_details"),
+                onPictureBounds = { pictureBounds.value = it },
             )
         }
         picking?.let { (fromId, row) ->
-            FeedPicker(row.name, row.feeds, onPick = { closePicker(fromId); play(it) }, onClose = { closePicker(fromId) }, modifier = Modifier.align(Alignment.CenterEnd))
+            FeedPicker(row.name, row.feeds, onPick = { closePicker(fromId); play(it, row) }, onClose = { closePicker(fromId) }, modifier = Modifier.align(Alignment.CenterEnd))
         }
     }
 
@@ -358,9 +368,10 @@ private fun PreviewedDetails(
     previewsOn: Boolean,
     previews: LivePreviews,
     modifier: Modifier,
+    onPictureBounds: (Rect) -> Unit,
 ) {
     val preview by previews.current.collectAsState()
-    GuideDetails(focused, now, timeLabel, previewsOn, preview, modifier)
+    GuideDetails(focused, now, timeLabel, previewsOn, preview, modifier, onPictureBounds)
 }
 
 /**

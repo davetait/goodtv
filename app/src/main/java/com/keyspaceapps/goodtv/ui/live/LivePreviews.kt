@@ -1,6 +1,7 @@
 package com.keyspaceapps.goodtv.ui.live
 
 import android.content.Context
+import androidx.compose.ui.geometry.Rect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -50,6 +51,9 @@ class LivePreviews(
     private val restMs: Long = 1_000,
     private val handBackGraceMs: Long = 3_000,
 ) {
+    /** A preview handed to full screen; [from] is where the guide drew it, in window pixels (null: unknown). */
+    class HandOff(val target: PreviewTarget, val handle: PreviewHandle, val from: Rect?)
+
     /** A handle the session answers for; [done] once released, failed or taken, after which the session never touches it again. */
     private class Held(val target: PreviewTarget, val handle: PreviewHandle, var gate: Boolean) {
         var done = false
@@ -67,6 +71,15 @@ class LivePreviews(
     private var held: Held? = null
     private var handBack: Held? = null
     private var handBackTimer: Job? = null
+    private var parked: HandOff? = null
+    private var covered = 0
+
+    /**
+     * From [park] until the hand-off comes back ([giveBack]) or is let go: a push or pop of the player now
+     * is the picture growing out of the panel or shrinking back into it.
+     */
+    var handingOff: Boolean = false
+        private set
 
     fun setEnabled(on: Boolean) {
         if (on == enabled) return
@@ -76,6 +89,7 @@ class LivePreviews(
         } else {
             stop()
             dropHandBack()
+            dropParked()
         }
     }
 
@@ -100,6 +114,47 @@ class LivePreviews(
         focused = null
         stop()
         dropHandBack()
+        dropParked()
+    }
+
+    /** Keeps what [takeFor] gave the guide, and where the panel drew it, for the full-screen player about to open. */
+    fun park(target: PreviewTarget, handle: PreviewHandle, from: Rect?) {
+        dropParked()
+        starting?.cancel()
+        parked = HandOff(target, handle, from)
+        handingOff = true
+    }
+
+    /**
+     * The full-screen player for [sourceId]/[channelId] takes the parked hand-off, once; it then owns the
+     * handle until [giveBack]. A hand-off parked for another channel is released.
+     */
+    fun takeParked(sourceId: Long, channelId: String): HandOff? {
+        val p = parked ?: return null
+        parked = null
+        if (p.target.sourceId != sourceId || p.target.channelId != channelId) {
+            p.handle.release()
+            handingOff = false
+            return null
+        }
+        return p
+    }
+
+    /**
+     * A full-screen player is up (calls nest): the session stops what it holds and starts nothing, whatever
+     * the guide reports underneath it, since the player holds the one stream. [uncover] rests on the row
+     * the guide last reported.
+     */
+    fun cover() {
+        covered++
+        stop()
+        dropHandBack()
+    }
+
+    fun uncover() {
+        if (covered == 0) return
+        covered--
+        if (covered == 0) focused?.let(::focus)
     }
 
     /**
@@ -129,19 +184,24 @@ class LivePreviews(
     }
 
     /**
-     * Full screen closed: keep [handle] for [target] if the guide focuses that row within the grace
-     * period (or already has it focused), else release it. The session owns it again either way.
+     * Full screen closed: keep [handle] for [target] if the guide already has that row focused, or
+     * focuses it within the grace period; release it at once if the guide is on another row (which then
+     * rests) or previews are off. The session owns it again either way.
      */
     fun giveBack(target: PreviewTarget, handle: PreviewHandle) {
+        handingOff = false
         stop()
         dropHandBack()
-        if (!enabled) {
+        val now = focused
+        if (!enabled || (now != null && now.rowKey != target.rowKey)) {
+            // Off, or the guide is already on another row (its window or chip changed): that row rests instead.
             handle.release()
+            if (enabled && now != null) rest(now)
             return
         }
         playback.enter()
         val back = Held(target, handle, gate = true)
-        if (focused?.rowKey == target.rowKey) {
+        if (now != null) {
             hold(back)
         } else {
             handBack = back
@@ -157,6 +217,7 @@ class LivePreviews(
             handle.state.value != PreviewStatus.FAILED
 
     private fun rest(target: PreviewTarget) {
+        if (covered > 0) return
         starting = scope.launch {
             delay(restMs)
             val url = try {
@@ -211,6 +272,13 @@ class LivePreviews(
         shown.value = null
     }
 
+    private fun dropParked() {
+        val p = parked ?: return
+        parked = null
+        p.handle.release()
+        handingOff = false
+    }
+
     private fun dropHandBack() {
         handBackTimer?.cancel()
         handBackTimer = null
@@ -242,7 +310,7 @@ class LivePreviews(
 
 /** The app's previews: an ExoPlayer per preview, playing at once, with sound. Main thread only. */
 class ExoPreviewEngine(private val context: Context) : PreviewEngine {
-    override fun open(url: String): PreviewHandle = ExoPreviewHandle(PlayerFactory.create(context), url)
+    override fun open(url: String): PreviewHandle = ExoPreviewHandle(PlayerFactory.createHandable(context), url)
 }
 
 private class ExoPreviewHandle(override val player: ExoPlayer, url: String) : PreviewHandle, Player.Listener {

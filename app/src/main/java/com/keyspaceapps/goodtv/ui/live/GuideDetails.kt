@@ -24,8 +24,11 @@ import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -56,7 +59,8 @@ internal data class GuideFocused(val row: GuideRow, val cell: GuideCell?)
  *
  * With [previewsOn] the picture is a 16:9 area at the panel's full inner height (the guide makes the panel
  * twice as tall), and it shows [preview] while that's the focused row's: the picture playing with a LIVE
- * badge, the logo with a spinner while it loads, or the logo with "Preview unavailable".
+ * badge, the logo with a spinner while it loads, or the logo with "Preview unavailable". [onPictureBounds] hears
+ * where that picture is in the window, for the hand-off to full screen.
  */
 @Composable
 internal fun GuideDetails(
@@ -66,6 +70,7 @@ internal fun GuideDetails(
     previewsOn: Boolean,
     preview: Pair<PreviewTarget, PreviewHandle>?,
     modifier: Modifier = Modifier,
+    onPictureBounds: (Rect) -> Unit = {},
 ) {
     Row(modifier.fillMaxWidth().background(Color(0xFF0D111B), RoundedCornerShape(8.dp)).padding(12.dp)) {
         val focused = focusedState.value ?: return@Row
@@ -87,7 +92,8 @@ internal fun GuideDetails(
             Box(Modifier.size(width = 160.dp, height = 90.dp).clip(RoundedCornerShape(5.dp)).background(Color(0xFF2A3045))) { still() }
         } else {
             Box(
-                Modifier.fillMaxHeight().aspectRatio(16f / 9f).clip(RoundedCornerShape(5.dp)).background(Color(0xFF2A3045)).testTag("guide_preview"),
+                Modifier.fillMaxHeight().aspectRatio(16f / 9f).onGloballyPositioned { onPictureBounds(it.boundsInWindow()) }
+                    .clip(RoundedCornerShape(5.dp)).background(Color(0xFF2A3045)).testTag("guide_preview"),
                 contentAlignment = Alignment.Center,
             ) {
                 // A preview belongs to its row: moving along the row keeps it, while the text follows focus.

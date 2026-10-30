@@ -37,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -44,7 +45,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -57,11 +61,16 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.keepScreenOn
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.platform.testTag
@@ -75,6 +84,7 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.text.Cue
 import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.compose.PlayerSurface
 import androidx.media3.ui.compose.SURFACE_TYPE_SURFACE_VIEW
 import androidx.media3.ui.compose.modifiers.resizeWithContentScale
@@ -121,6 +131,11 @@ const val PROGRESS_REPORT_MS = 10_000L
  * every [PROGRESS_REPORT_MS] while playing, on pause, when the app goes to the background and when
  * the screen closes; never before playback has actually started, so a resume can't be wiped by
  * the 0 the player reports before its first seek.
+ *
+ * [adopted] is a player already playing [item] (the guide's live preview): the screen uses it as it is, without
+ * preparing it again, listens and meters it from now on, and on closing passes it to [onAdoptedClosed] instead of
+ * releasing it. With [growFrom] (its picture's bounds in the window), the picture sits there at [growth] 0, with the
+ * screen's black clear so what's beneath shows, and fills the screen at 1; the controls wait for 1.
  */
 @OptIn(UnstableApi::class)
 @Composable
@@ -133,6 +148,10 @@ fun PlayerScreen(
     upNext: UpNext? = null,
     onPlayNext: () -> Unit = {},
     onlineSubtitles: OnlineSubtitleSource? = null,
+    adopted: ExoPlayer? = null,
+    onAdoptedClosed: ((ExoPlayer) -> Unit)? = null,
+    growFrom: Rect? = null,
+    growth: () -> Float = { 1f },
 ) {
     val context = LocalContext.current
     var isBuffering by remember { mutableStateOf(true) }
@@ -173,17 +192,19 @@ fun PlayerScreen(
 
     // Counts downloads for the info box; a few additions per read, so it stays on.
     val traffic = remember(item.url) { TrafficMeter() }
-    val bitrate = remember(item.url) { BitrateMeter().apply { reset(bytes = 0, fromMs = if (item.isLive) 0 else startPositionMs) } }
+    // An adopted player has already buffered some way: the bitrate counts from what arrives from now on.
+    val bitrate = remember(item.url) { BitrateMeter().apply { reset(bytes = 0, fromMs = adopted?.bufferedPosition ?: if (item.isLive) 0 else startPositionMs) } }
     var showInfo by remember { mutableStateOf(false) }
     var info by remember { mutableStateOf(InfoUi()) }
 
-    val player = remember(item.url) {
-        PlayerFactory.create(context, traffic).apply {
+    val player = remember(item.url, adopted) {
+        adopted ?: PlayerFactory.create(context, traffic).apply {
             setMediaItem(MediaItem.fromUri(item.url), if (item.isLive) 0L else startPositionMs)
             playWhenReady = true
             prepare()
         }
     }
+    val latestOnAdoptedClosed by rememberUpdatedState(onAdoptedClosed)
     // The video's size and shape as the player reports them, for fitting the picture to the screen.
     val presentation = rememberPresentationState(player)
 
@@ -220,11 +241,23 @@ fun PlayerScreen(
             override fun onTracksChanged(t: Tracks) { tracks = t }
             override fun onCues(cueGroup: CueGroup) { cues = cueGroup.cues }
         }
+        val switch = if (player === adopted) PlayerFactory.trafficOf(player) else null
+        if (player === adopted) {
+            // Already under way: start from where it is.
+            error = player.playerError
+            isPlaying = player.isPlaying
+            wantsToPlay = player.playWhenReady
+            isBuffering = player.playbackState == Player.STATE_BUFFERING || player.playbackState == Player.STATE_IDLE && error == null
+            tracks = player.currentTracks
+            switch?.target = traffic
+        }
         player.addListener(listener)
         onDispose {
             report.now() // leaving the player: save where we got to before releasing it
             player.removeListener(listener)
-            player.release()
+            if (switch?.target === traffic) switch.target = null
+            val giveBack = latestOnAdoptedClosed
+            if (player === adopted && giveBack != null) giveBack(player) else player.release()
         }
     }
 
@@ -418,13 +451,21 @@ fun PlayerScreen(
         subtitleBusy = subtitleBusy,
     )
 
+    // Growing from (or shrinking back to) the guide's panel: only the picture shows until it fills the screen.
+    val latestGrowth by rememberUpdatedState(growth)
+    val grown by remember(growFrom) { derivedStateOf { growFrom == null || latestGrowth() >= 1f } }
+    var origin by remember { mutableStateOf(Offset.Zero) }
+
     // Playing, or buffering on the way to it: the TV's screensaver mustn't start. Paused or stopped, it may.
     val keepScreenOn = error == null && wantsToPlay && (isPlaying || isBuffering)
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .then(
+                if (growFrom == null) Modifier.background(Color.Black)
+                else Modifier.onPlaced { origin = it.positionInWindow() }.drawBehind { drawRect(Color.Black, alpha = latestGrowth().coerceIn(0f, 1f)) },
+            )
             .onPreviewKeyEvent { e ->
                 if (e.type == KeyEventType.KeyDown && e.key != Key.Back) { lastInteraction = System.currentTimeMillis(); controlsInUse = true }
                 // Taken here, before Compose's own Back handling moves focus out of the panel or
@@ -467,8 +508,11 @@ fun PlayerScreen(
             val margin = lerp(0.dp, UpNextLayout.Margin, shrink)
             // The picture keeps its real shape (pixel aspect ratio included) inside the frame, with black bars
             // where it doesn't fill it, instead of being stretched to the screen's 16:9.
+            val width = lerp(maxWidth, small, shrink)
+            val height = lerp(maxHeight, small * 9f / 16f, shrink)
             Box(
-                Modifier.offset(margin, margin).size(lerp(maxWidth, small, shrink), lerp(maxHeight, small * 9f / 16f, shrink)),
+                if (growFrom == null) Modifier.offset(margin, margin).size(width, height)
+                else with(LocalDensity.current) { Modifier.growing(growFrom, { origin }, latestGrowth, margin.roundToPx(), width.roundToPx(), height.roundToPx()) },
                 contentAlignment = Alignment.Center,
             ) {
                 PlayerSurface(
@@ -491,14 +535,14 @@ fun PlayerScreen(
             }
         }
 
-        val showControls = controlsVisible && error == null && !showUpNext
+        val showControls = controlsVisible && error == null && !showUpNext && grown
         val captionInset by animateDpAsState(if (showControls) (if (item.isLive) 150.dp else 210.dp) else 64.dp, label = "captions")
-        if (!showUpNext) SubtitleLayer(if (onlineAll != null) onlineCues else cues, bottomInset = captionInset)
+        if (!showUpNext && grown) SubtitleLayer(if (onlineAll != null) onlineCues else cues, bottomInset = captionInset)
 
-        if (isBuffering && error == null) Spinner(Modifier.align(Alignment.Center))
+        if (isBuffering && error == null && grown) Spinner(Modifier.align(Alignment.Center))
 
         // Below the top bar's title and clock; it stays when the controls fade, until Info is pressed again.
-        if (showInfo && !showUpNext) PlaybackInfoBox(info, Modifier.align(Alignment.TopEnd).padding(top = 96.dp, end = 56.dp))
+        if (showInfo && !showUpNext && grown) PlaybackInfoBox(info, Modifier.align(Alignment.TopEnd).padding(top = 96.dp, end = 56.dp))
 
         AnimatedVisibility(visible = showControls, enter = fadeIn(tween(180)), exit = fadeOut(tween(320))) {
             PlayerControls(
@@ -532,7 +576,7 @@ fun PlayerScreen(
             )
         }
 
-        error?.let { e ->
+        error?.takeIf { grown }?.let { e ->
             PlaybackErrorCard(
                 error = e,
                 onRetry = { error = null; isBuffering = true; player.prepare(); player.play() },
@@ -540,6 +584,21 @@ fun PlayerScreen(
                 modifier = Modifier.align(Alignment.Center),
             )
         }
+    }
+}
+
+/**
+ * Lays the picture out between [from] (window bounds, made local with [origin]) at [growth] 0 and its full-screen
+ * place ([offset], [width] × [height] px) at 1. Read while laying out, so the animation never recomposes the screen.
+ */
+private fun Modifier.growing(from: Rect, origin: () -> Offset, growth: () -> Float, offset: Int, width: Int, height: Int) = layout { measurable, _ ->
+    val t = growth().coerceIn(0f, 1f)
+    val start = from.topLeft - origin()
+    val w = (from.width + (width - from.width) * t).toInt().coerceAtLeast(0)
+    val h = (from.height + (height - from.height) * t).toInt().coerceAtLeast(0)
+    val placeable = measurable.measure(Constraints.fixed(w, h))
+    layout(width, height) {
+        placeable.place(IntOffset((start.x + (offset - start.x) * t).toInt(), (start.y + (offset - start.y) * t).toInt()))
     }
 }
 

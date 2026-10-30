@@ -1,5 +1,6 @@
 package com.keyspaceapps.goodtv.ui.live
 
+import androidx.compose.ui.geometry.Rect
 import androidx.media3.exoplayer.ExoPlayer
 import com.keyspaceapps.goodtv.data.guide.PlaybackState
 import kotlinx.coroutines.CoroutineScope
@@ -394,5 +395,170 @@ class LivePreviewsTest {
         assertEquals(0, taken.releases)
         assertSame(taken, previews.current.value?.second)
         assertTrue(playback.playing.value)
+    }
+
+    // Going full screen: the guide parks the taken handle (with the panel's bounds) for the player screen.
+
+    @Test fun parkedHandOffIsTakenOnceByItsChannel() = runTest {
+        val previews = session()
+        rest(previews, row(1))
+        val handle = previews.takeFor(row(1))!!
+        val bounds = Rect(10f, 20f, 370f, 222.5f)
+        assertFalse(previews.handingOff)
+        previews.park(row(1), handle, bounds)
+        assertTrue(previews.handingOff)
+        val handOff = previews.takeParked(1, "ch1")!!
+        assertSame(handle, handOff.handle)
+        assertEquals(row(1), handOff.target)
+        assertEquals(bounds, handOff.from)
+        assertNull(previews.takeParked(1, "ch1"))
+        // Still with full screen until it comes back.
+        assertTrue(previews.handingOff)
+        previews.giveBack(row(1), handle)
+        assertFalse(previews.handingOff)
+    }
+
+    @Test fun parkedHandOffForAnotherChannelIsReleased() = runTest {
+        val previews = session()
+        rest(previews, row(1))
+        val handle = previews.takeFor(row(1))!! as FakeHandle
+        previews.park(row(1), handle, null)
+        assertNull(previews.takeParked(1, "other"))
+        assertEquals(1, handle.releases)
+        assertFalse(previews.handingOff)
+        assertFalse(playback.playing.value)
+    }
+
+    @Test fun parkedHandOffNobodyTookIsReleasedWhenTheGuideGoes() = runTest {
+        val previews = session()
+        rest(previews, row(1))
+        val handle = previews.takeFor(row(1))!! as FakeHandle
+        previews.park(row(1), handle, null)
+        previews.leave()
+        assertEquals(1, handle.releases)
+        assertFalse(previews.handingOff)
+        assertNull(previews.takeParked(1, "ch1"))
+    }
+
+    @Test fun aTakenHandOffIsNotReleasedWhenTheGuideGoes() = runTest {
+        val previews = session()
+        rest(previews, row(1))
+        val handle = previews.takeFor(row(1))!! as FakeHandle
+        previews.park(row(1), handle, null)
+        previews.takeParked(1, "ch1")
+        previews.leave()
+        previews.setEnabled(false)
+        assertEquals(0, handle.releases)
+        assertTrue(previews.handingOff)
+    }
+
+    // While a full-screen player is up, nothing starts: one stream at a time, whatever the guide reports.
+
+    @Test fun nothingStartsWhileCovered() = runTest {
+        val previews = session()
+        previews.cover()
+        previews.focus(row(1))
+        advanceTimeBy(5_000)
+        runCurrent()
+        assertEquals(0, engine.opened.size)
+        previews.setEnabled(false)
+        previews.setEnabled(true)
+        advanceTimeBy(5_000)
+        runCurrent()
+        assertEquals(0, engine.opened.size)
+        // Full screen closed: the focused row rests as usual.
+        previews.uncover()
+        advanceTimeBy(999)
+        runCurrent()
+        assertEquals(0, engine.opened.size)
+        advanceTimeBy(1)
+        runCurrent()
+        assertEquals(1, engine.opened.size)
+    }
+
+    @Test fun coveringStopsAPendingStartAndAPlayingPreview() = runTest {
+        val previews = session()
+        rest(previews, row(1))
+        val first = engine.opened.single()
+        previews.focus(row(2))
+        advanceTimeBy(500)
+        previews.cover()
+        assertEquals(1, first.releases)
+        advanceTimeBy(5_000)
+        runCurrent()
+        assertEquals(1, engine.opened.size)
+        assertNull(previews.current.value)
+        assertFalse(playback.playing.value)
+    }
+
+    /** Rest, select, full screen, Back: the guide reports its row while the player still covers it. One open throughout. */
+    @Test fun handOffAndBackOpensOneStream() = runTest {
+        val previews = session()
+        rest(previews, row(1))
+        val handle = previews.takeFor(row(1))!! as FakeHandle
+        previews.park(row(1), handle, null)
+        // A focus report in the frame of the push, before the player screen covers the guide.
+        previews.focus(row(1))
+        val handOff = previews.takeParked(1, "ch1")!!
+        previews.cover()
+        previews.leave() // the guide goes once the grow ends
+        advanceTimeBy(5_000)
+        runCurrent()
+        // Back: the guide is drawn again and reports its row while the player shrinks over it.
+        previews.focus(row(1))
+        advanceTimeBy(5_000)
+        runCurrent()
+        assertEquals(1, engine.opened.size)
+        previews.giveBack(handOff.target, handOff.handle)
+        previews.uncover()
+        assertSame(handle, previews.current.value?.second)
+        advanceTimeBy(10_000)
+        runCurrent()
+        assertEquals(1, engine.opened.size)
+        assertEquals(0, handle.releases)
+        assertTrue(playback.playing.value)
+    }
+
+    @Test fun handBackWithFocusOnAnotherRowIsReleasedAndThatRowRests() = runTest {
+        val previews = session()
+        rest(previews, row(1))
+        val handle = previews.takeFor(row(1))!! as FakeHandle
+        previews.park(row(1), handle, null)
+        previews.takeParked(1, "ch1")
+        previews.cover()
+        previews.leave()
+        // Back to a guide whose window or chip changed: another row has focus.
+        previews.focus(row(2))
+        previews.giveBack(row(1), handle)
+        assertEquals(1, handle.releases)
+        assertFalse(playback.playing.value)
+        assertFalse(previews.handingOff)
+        // Only once the full-screen player has gone does the focused row rest.
+        advanceTimeBy(5_000)
+        runCurrent()
+        assertEquals(1, engine.opened.size)
+        previews.uncover()
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(2, engine.opened.size)
+        assertEquals("row2", previews.current.value?.first?.rowKey)
+    }
+
+    @Test fun uncoveringBeforeTheHandBackStillKeepsIt() = runTest {
+        val previews = session()
+        rest(previews, row(1))
+        val handle = previews.takeFor(row(1))!! as FakeHandle
+        previews.park(row(1), handle, null)
+        previews.takeParked(1, "ch1")
+        previews.cover()
+        previews.leave()
+        previews.focus(row(1))
+        previews.uncover()
+        previews.giveBack(row(1), handle)
+        advanceTimeBy(5_000)
+        runCurrent()
+        assertEquals(1, engine.opened.size)
+        assertSame(handle, previews.current.value?.second)
+        assertEquals(0, handle.releases)
     }
 }

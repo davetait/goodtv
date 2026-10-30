@@ -2,6 +2,7 @@ package com.keyspaceapps.goodtv.ui
 
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.input.key.Key
@@ -16,6 +17,10 @@ import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.printToLog
 import androidx.lifecycle.Lifecycle
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.navigation3.runtime.entryProvider
+import androidx.navigation3.ui.NavDisplay
+import androidx.navigation3.ui.defaultPopTransitionSpec
+import androidx.navigation3.ui.defaultTransitionSpec
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import com.keyspaceapps.goodtv.AppGraph
@@ -30,10 +35,17 @@ import com.keyspaceapps.goodtv.data.guide.GuideSource
 import com.keyspaceapps.goodtv.data.guide.LiveGenre
 import com.keyspaceapps.goodtv.data.sports.ChannelCandidate
 import com.keyspaceapps.goodtv.domain.LiveChannel
+import com.keyspaceapps.goodtv.domain.PlayableItem
+import com.keyspaceapps.goodtv.ui.live.ExoPreviewEngine
 import com.keyspaceapps.goodtv.ui.live.GuideScreen
 import com.keyspaceapps.goodtv.ui.live.PreviewEngine
 import com.keyspaceapps.goodtv.ui.live.PreviewHandle
 import com.keyspaceapps.goodtv.ui.live.PreviewStatus
+import com.keyspaceapps.goodtv.ui.nav.GROW_MS
+import com.keyspaceapps.goodtv.ui.nav.PlayerEntry
+import com.keyspaceapps.goodtv.ui.nav.PlayerKey
+import com.keyspaceapps.goodtv.ui.nav.handOffTransition
+import com.keyspaceapps.goodtv.ui.player.PlayerFactory
 import com.keyspaceapps.goodtv.ui.theme.GoodTvTheme
 import java.io.File
 import java.time.ZonedDateTime
@@ -46,7 +58,9 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -265,5 +279,203 @@ class LivePreviewUiTest {
         InstrumentationRegistry.getInstrumentation().waitForIdleSync()
         assertNull(current())
         assertEquals(1, engine.opens)
+    }
+
+    // Going full screen: the guide on a back stack with the app's player entry and transitions.
+
+    private object GuideHere
+
+    private val backStack = mutableStateListOf<Any>(GuideHere)
+
+    private fun showWithPlayer() {
+        runBlocking { graph.settings.setLivePreviews(true) }
+        val previews = graph.livePreviews
+        composeRule.setContent {
+            GoodTvTheme {
+                NavDisplay(
+                    backStack = backStack,
+                    onBack = { backStack.removeLastOrNull() },
+                    transitionSpec = handOffTransition(previews, defaultTransitionSpec()),
+                    popTransitionSpec = handOffTransition(previews, defaultPopTransitionSpec()),
+                    entryProvider = entryProvider {
+                        entry<GuideHere> { GuideScreen(onPlay = { backStack.add(it) }, source = guide, clock = { now }) }
+                        entry<PlayerKey> { key ->
+                            PlayerEntry(key, onBack = { backStack.removeLastOrNull() }, onPlayNext = {}, resolve = { PlayableItem(it.title, media, isLive = true) })
+                        }
+                    },
+                )
+            }
+        }
+    }
+
+    /** The app's preview players (real ExoPlayers on the local file), counted. */
+    private class CountingExoEngine(context: android.content.Context) : PreviewEngine {
+        private val real = ExoPreviewEngine(context)
+        val handles = mutableListOf<PreviewHandle>()
+        override fun open(url: String): PreviewHandle = real.open(url).also { handles += it }
+    }
+
+    private fun countingEngine() = CountingExoEngine(composeRule.activity).also { graph.previewEngineOverride = it }
+
+    private fun waitFullScreen() = try {
+        composeRule.waitUntil(10_000) { composeRule.onAllNodes(hasTestTag("video_surface"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+    } catch (e: Throwable) {
+        composeRule.onRoot(useUnmergedTree = true).printToLog("GoodTvTree"); throw e
+    }
+
+    private fun released(handle: PreviewHandle) = composeRule.runOnUiThread { handle.player!!.isReleased }
+
+    /** Lets [ms] pass on the real clock with the UI idle in between, for anything that might open late. */
+    private fun idleFor(ms: Long) {
+        val deadline = System.currentTimeMillis() + ms
+        while (System.currentTimeMillis() < deadline) {
+            composeRule.waitForIdle()
+            Thread.sleep(100)
+        }
+    }
+
+    @Test fun selectingAPlayingPreviewDoesNotOpenASecondStream() {
+        val engine = countingEngine()
+        showWithPlayer()
+        waitFocused("Special Report")
+        waitPlaying("fox-news")
+        val handle = current()!!.second
+        val made = PlayerFactory.created.get()
+        press(Key.DirectionCenter)
+        waitFullScreen()
+        assertTrue(backStack.last() is PlayerKey)
+        // The player screen plays the preview's player: nothing new made, nothing new opened.
+        assertEquals(made, PlayerFactory.created.get())
+        assertEquals(1, engine.handles.size)
+        assertSame(handle, engine.handles.single())
+        assertTrue(graph.livePreviews.handingOff)
+        assertNull(current())
+        assertEquals(PreviewStatus.PLAYING, handle.state.value)
+        assertFalse(released(handle))
+        // However long full screen lasts, the guide underneath starts nothing.
+        idleFor(2_500)
+        assertEquals(1, engine.handles.size)
+        assertEquals(made, PlayerFactory.created.get())
+    }
+
+    @Test fun backReturnsTheStreamToThePanel() {
+        val engine = countingEngine()
+        showWithPlayer()
+        waitFocused("Special Report")
+        waitPlaying("fox-news")
+        val handle = current()!!.second
+        val made = PlayerFactory.created.get()
+        press(Key.DirectionCenter)
+        waitFullScreen()
+        idleFor(1_000)
+        press(Key.Back)
+        composeRule.waitUntil(5_000) { backStack.size == 1 }
+        waitFocused("Special Report")
+        composeRule.waitUntil(5_000) { current()?.second === handle }
+        assertEquals("fox-news", current()!!.first.rowKey)
+        assertEquals(PreviewStatus.PLAYING, handle.state.value)
+        assertFalse(released(handle))
+        assertFalse(graph.livePreviews.handingOff)
+        assertEquals(1, engine.handles.size)
+        assertEquals(made, PlayerFactory.created.get())
+        // Kept: no restart a moment later either.
+        idleFor(2_500)
+        assertSame(handle, current()?.second)
+        assertEquals(PreviewStatus.PLAYING, handle.state.value)
+        assertEquals(1, engine.handles.size)
+    }
+
+    @Test fun selectingWithoutAPreviewOpensNormally() {
+        val engine = countingEngine()
+        showWithPlayer()
+        waitFocused("Special Report")
+        val made = PlayerFactory.created.get()
+        // Before the second's rest is up.
+        press(Key.DirectionCenter)
+        waitFullScreen()
+        assertEquals(made + 1, PlayerFactory.created.get())
+        assertFalse(graph.livePreviews.handingOff)
+        idleFor(2_500)
+        assertEquals(0, engine.handles.size)
+        assertNull(current())
+        // Back on the guide, the row rests again once the player has gone.
+        press(Key.Back)
+        composeRule.waitUntil(5_000) { backStack.size == 1 }
+        waitFocused("Special Report")
+        waitPlaying("fox-news")
+        assertEquals(1, engine.handles.size)
+    }
+
+    @Test fun pickingAnotherCopyStopsThePreviewAndOpensItsOwn() {
+        val engine = countingEngine()
+        showWithPlayer()
+        waitFocused("Special Report")
+        press(Key.DirectionDown)
+        waitFocused("The Situation Room")
+        waitPlaying("cnn")
+        val preview = current()!!.second
+        val made = PlayerFactory.created.get()
+        press(Key.DirectionCenter)
+        waitFocused("US: CNN FHD")
+        press(Key.DirectionDown)
+        waitFocused("US: CNN HD")
+        press(Key.DirectionCenter)
+        waitFullScreen()
+        assertEquals("cn1", (backStack.last() as PlayerKey).refId)
+        assertEquals(made + 1, PlayerFactory.created.get())
+        assertNull(current())
+        assertFalse(graph.livePreviews.handingOff)
+        // The preview stopped for it, and nothing opens while full screen is up.
+        assertTrue(released(preview))
+        idleFor(2_500)
+        assertEquals(1, engine.handles.size)
+    }
+
+    private fun boundsOf(tag: String) = composeRule.onNode(hasTestTag(tag), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+    private fun has(tag: String) = composeRule.onAllNodes(hasTestTag(tag), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+
+    /** The picture grows out of the panel with the guide drawn beneath it, and shrinks back into it on Back. */
+    @Test fun thePictureGrowsFromThePanelAndShrinksBack() {
+        countingEngine()
+        showWithPlayer()
+        waitFocused("Special Report")
+        waitPlaying("fox-news")
+        val panel = boundsOf("guide_preview")
+        val screen = composeRule.onRoot().fetchSemanticsNode().boundsInRoot
+        composeRule.mainClock.autoAdvance = false
+        try {
+            press(Key.DirectionCenter)
+            composeRule.mainClock.advanceTimeByFrame()
+            composeRule.mainClock.advanceTimeByFrame()
+            // At the start the picture sits in the panel, and the guide is still there around it.
+            assertTrue(has("video_surface"))
+            assertTrue(has("guide_details"))
+            val start = boundsOf("video_surface")
+            assertTrue("$start in $panel", start.width <= panel.width + 2 && start.left >= panel.left - 2 && start.bottom <= panel.bottom + 2)
+            // Half way: bigger than the panel, smaller than the screen, the guide still beneath.
+            composeRule.mainClock.advanceTimeBy(GROW_MS / 2L)
+            val mid = boundsOf("video_surface")
+            assertTrue("$mid", mid.width > panel.width + 10 && mid.width < screen.width - 10)
+            assertTrue(has("guide_details"))
+            // Done: full screen, and the guide has gone.
+            composeRule.mainClock.advanceTimeBy(GROW_MS + 1_000L)
+            assertTrue(has("video_surface"))
+            assertFalse(has("guide_details"))
+            assertTrue(boundsOf("video_surface").width > screen.width * 0.6f)
+
+            press(Key.Back)
+            composeRule.mainClock.advanceTimeByFrame()
+            composeRule.mainClock.advanceTimeByFrame()
+            composeRule.mainClock.advanceTimeBy(GROW_MS / 2L)
+            // Shrinking: the guide is back beneath, the picture on its way to the panel.
+            assertTrue(has("guide_details"))
+            val back = boundsOf("video_surface")
+            assertTrue("$back", back.width > panel.width + 10 && back.width < screen.width - 10)
+            composeRule.mainClock.advanceTimeBy(GROW_MS + 1_000L)
+            assertFalse(has("video_surface"))
+        } finally {
+            composeRule.mainClock.autoAdvance = true
+        }
+        composeRule.waitUntil(5_000) { current()?.first?.rowKey == "fox-news" }
     }
 }
