@@ -1,8 +1,46 @@
 # GoodTV
 
-Android TV / Google TV IPTV player, built for the Google TV Streamer. Kotlin, Jetpack Compose for TV, Media3 ExoPlayer.
+GoodTV is the IPTV app I want for myself. It's free and supports the features I use. It's not available on the Play store yet, but you can sideload the APK or build it yourself from the source code.
 
-Add one or more **sources** (Xtream Codes today, M3U later) and browse one merged library: Live (category sidebar + channel list), Movies and Series (category rows with "See all" grids and detail pages). Everything is cached in Room, so the app opens from cache and refreshes sources in the background when they are older than 12 hours.
+GoodTV is still in heavy development, and I make changes as I think of new features or find things that annoy me. If you have a feature request or bug report, create an issue in Github. It's only been tested with my IPTV provider, so you will likely see issues with some other providers. These should be quick fixes.
+
+## Features
+
+### Home screen
+- The home screen shows your saved and in-progress content so you can quickly get to what you want.
+- Popular shows and movies also show on your home screen, so you don't have to wade through a hundred movies or shows if you don't want to.
+
+### Live TV 
+- Live TV has a full program guide with EPG support. On-guide live previews are optional (settings screen).
+- Save your favourite TV channels so they show up at the top.
+- Filter Live TV by channel category: network (eg ABC, CBS, etc), news, sports, etc).
+- Search all Live TV channels by show name.
+- Channel grouping. Eg instead of seeing 150 ABC network channels, it'll show you a few major ones from different time zones, then collapse the rest so they stay hidden until you want to see them.
+
+### Sports
+- Dynamically generates a sports screen from your playlist, so if your provider doesn't have its own group for Sports, you still get a dedicated sports feed.
+- Uses ESPN's website to find all of today's games for major US sports, then collects all the channels each one is on.
+- Click the game you want to see, then select from the channels the game is showing on.
+- Supports NHL, NBA, NFL, and MLB. Will support more soon (or now, if I forget to update this readme). The goal is to let users select their preferred leagues in the settings menu, so you don't see leagues you're not interested in.
+
+### Movies and Shows
+- Filter by genre or do a text search across all your categories.
+- Displays ratings, movie summary, actors, director, etc. from TMDB (add your free TMDB API key in the settings)
+- Click on any of the names to see all of their movies and shows. Eg click on "Tom Hanks" from the Castaway summary, and you'll see all of his movies.
+- Uses subtitles from your provider, but also loads them from OpenSubtitles if your provider doesn't have them. Add your free OpenSubtitles API key in settings.
+- Add movies and shows to your watchlist, which displays on the home screen
+
+### Sources
+- If you don't use a third party app to edit your playlist, the app has a quick way to do it. I like to "clear all", then select the few categories I want. You don't need to spend a long time unchecking all the foreign content. I tried to make it quick and easy, but I will probably improve this again next time I switch providers.
+- All your sources appear as a merged library. More options to merge or switch sources will be added later.
+- Sources are refreshed and synced in the background, so it doesn't block you from using the app. You can choose to manually sync if you want.
+- Only supports XStream right now because that's what I use. M3U is planned, but not my top priority unless requested.
+
+
+
+# Information for developers or if you want to build your own apk
+
+Dev platform: Kotlin, Jetpack Compose for TV, Media3 ExoPlayer.
 
 ## Prerequisites
 
@@ -72,8 +110,6 @@ Real providers expose hundreds of categories. On the Sources tab, each source ha
 
 ## Real Google TV Streamer (adb over Wi-Fi)
 
-The Streamer has no USB data port, so debugging is over the network. These steps come from community guides rather than Google's own docs, so menu names may differ slightly by firmware:
-
 1. On the TV: Settings → System → About → highlight **Android TV OS build** and press Select 7 times to unlock Developer options.
 2. Settings → System → Developer options → turn on **Network debugging** (sometimes labelled USB debugging). Note the IP address shown.
 3. On your Mac: `adb connect <tv-ip>:5555`, then accept the authorization prompt on the TV (tick "Always allow").
@@ -99,8 +135,3 @@ docs/superpowers/                 design spec and implementation plan
 ```
 
 Tests: `./gradlew :app:testDebugUnitTest` (JVM: parsing, URLs, sync, view models) and `./gradlew :app:connectedDebugAndroidTest` (emulator: Room, Sources flow against a MockWebServer, Live/Movies/Series screens).
-
-## Next
-
-- M3U playlist sources (implement `ChannelSource` + a form).
-- EPG (now/next), search, resume position, favourites.
