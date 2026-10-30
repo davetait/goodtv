@@ -3,6 +3,7 @@ package com.keyspaceapps.goodtv.ui.watchlist
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -31,10 +32,10 @@ class WatchListToggleViewModel(private val repo: WatchListRepository, private va
 
 /** The detail page's "＋ Watch list" / "✓ On watch list" button for [ref]. It never takes initial focus. */
 @Composable
-fun WatchListButton(ref: WatchListRef) {
+fun WatchListButton(ref: WatchListRef, modifier: Modifier = Modifier) {
     val vm = goodTvViewModel(key = "watchlist-${ref.key}") { WatchListToggleViewModel(it.watchList, ref) }
     val saved by vm.saved.collectAsState()
-    Button(onClick = vm::toggle) {
+    Button(onClick = vm::toggle, modifier = modifier) {
         Text(stringResource(if (saved == true) R.string.watch_list_on else R.string.watch_list_button))
     }
 }
