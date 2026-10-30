@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.RememberObserver
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -126,17 +127,18 @@ internal fun PlayerEntry(
 ) {
     val graph = LocalContext.current.appGraph()
     val previews = graph.livePreviews
-    val handOff = remember(key) { if (key.refKind == PlayerKey.KIND_LIVE) previews.takeParked(key.sourceId, key.refId) else null }
+    // Taken while composing, so the first frame already has the stream; a composition that never commits gives it back.
+    val claim = remember(key) {
+        if (key.refKind == PlayerKey.KIND_LIVE) HandOffClaim.take(previews, key.sourceId, key.refId) else HandOffClaim(previews, null)
+    }
+    val handOff = claim.handOff
     DisposableEffect(previews) {
         previews.cover()
         onDispose { previews.uncover() }
     }
     // Back to the guide once, whether the player screen closes it or never opened (Back while resolving).
-    val giveBack = remember(handOff) {
-        var given = false
-        { if (!given && handOff != null) { given = true; previews.giveBack(handOff.target, handOff.handle) } }
-    }
-    DisposableEffect(handOff) { onDispose { giveBack() } }
+    val giveBack: () -> Unit = claim::giveBack
+    DisposableEffect(claim) { onDispose { claim.giveBack() } }
     val growth: (() -> Float)? = if (handOff?.from != null) {
         val transition = LocalNavAnimatedContentScope.current.transition
         val grow = transition.animateFloat(transitionSpec = { tween(GROW_MS) }, label = "grow") { if (it == EnterExitState.Visible) 1f else 0f }
@@ -181,6 +183,33 @@ internal fun PlayerEntry(
             growFrom = handOff?.from.takeIf { growth != null },
             growth = growth ?: { 1f },
         )
+    }
+}
+
+/**
+ * A [PlayerEntry]'s hold on the guide's parked preview ([LivePreviews.takeParked]), remembered with it. [giveBack]
+ * returns it to the guide once, however often it's called. Taken during composition, so if that composition is
+ * abandoned (never committed, so no effect ever runs to close it) it goes back then, rather than playing on unowned.
+ */
+internal class HandOffClaim(private val previews: LivePreviews, val handOff: LivePreviews.HandOff?) : RememberObserver {
+    private var given = false
+
+    fun giveBack() {
+        val h = handOff ?: return
+        if (given) return
+        given = true
+        previews.giveBack(h.target, h.handle)
+    }
+
+    override fun onRemembered() = Unit
+
+    // Committed: the player screen closing it, or the entry's dispose, gives it back.
+    override fun onForgotten() = Unit
+
+    override fun onAbandoned() = giveBack()
+
+    companion object {
+        fun take(previews: LivePreviews, sourceId: Long, channelId: String) = HandOffClaim(previews, previews.takeParked(sourceId, channelId))
     }
 }
 
