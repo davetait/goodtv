@@ -33,7 +33,7 @@ Dave flips channels in the Live TV guide. He stops briefly on a channel to see *
   - **Loading:** while a channel loads, the picture area shows the channel logo with a small spinner, as the thumbnail does today. If the stream fails, the logo stays with a short "Preview unavailable" note. The guide itself is unaffected.
   - **Which channels:** previews play only for live channel rows that are playable now. Event slots that aren't on yet, and rows with no feed, show the logo as today.
   - **Several copies:** for a row that merges several copies of a channel, the preview plays the **first copy**. Selecting still opens the copy picker as today (Claude's guess, approved).
-    - "First" means the first feed in the row's saved order (`row.feeds.first()`, which is stable).
+    - "First" means the copy listed first in the copy picker (`ChannelOrder.sort(row.feeds).first()`), so picking the top copy continues the preview.
     - The preview resolves that copy's stream exactly as the full-screen player would, so a hand-off needs no restart (Claude's call).
   - **A preview belongs to the channel, not the focused cell** (Claude's call).
     - It starts when focus rests on any cell of a channel's row.
