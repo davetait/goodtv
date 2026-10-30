@@ -14,8 +14,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.tv.material3.MaterialTheme
-import androidx.tv.material3.Tab
-import androidx.tv.material3.TabRow
 import androidx.tv.material3.Text
 import com.keyspaceapps.goodtv.R
 import com.keyspaceapps.goodtv.data.repo.LibraryRepository
@@ -28,6 +26,7 @@ import com.keyspaceapps.goodtv.ui.sports.SportsScreen
 import com.keyspaceapps.goodtv.ui.nav.GoodTvKey
 import com.keyspaceapps.goodtv.ui.nav.HomeTab
 import com.keyspaceapps.goodtv.ui.settings.SettingsScreen
+import com.keyspaceapps.goodtv.ui.theme.MenuTabRow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -69,22 +68,14 @@ fun HomeScreen(onNavigate: (GoodTvKey) -> Unit) {
             .background(MaterialTheme.colorScheme.background),
     ) {
         val tabs = HomeTab.entries
-        TabRow(
-            selectedTabIndex = tabs.indexOf(current),
+        // Switch on click, not focus: after returning from a pushed screen, initial focus lands on
+        // the first tab, and focus-switching would silently move the user off the tab they were on.
+        MenuTabRow(
+            labels = tabs.map { stringResource(it.labelRes) },
+            selectedIndex = tabs.indexOf(current),
+            onSelect = { vm.selectTab(tabs[it]) },
             modifier = Modifier.padding(start = 48.dp, top = 24.dp, bottom = 16.dp),
-        ) {
-            tabs.forEach { t ->
-                // Switch on click, not focus: after returning from a pushed screen, initial focus lands on
-                // the first tab, and focus-switching would silently move the user off the tab they were on.
-                Tab(
-                    selected = t == current,
-                    onFocus = {},
-                    onClick = { vm.selectTab(t) },
-                ) {
-                    Text(text = stringResource(t.labelRes), modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-                }
-            }
-        }
+        )
         Box(Modifier.fillMaxSize()) {
             when (current) {
                 HomeTab.HOME -> HomeTabScreen(onNavigate = onNavigate)

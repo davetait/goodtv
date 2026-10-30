@@ -32,14 +32,13 @@ import androidx.tv.material3.Checkbox
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.ListItem
 import androidx.tv.material3.MaterialTheme
-import androidx.tv.material3.Tab
-import androidx.tv.material3.TabRow
 import androidx.tv.material3.Text
 import androidx.tv.material3.TriStateCheckbox
 import com.keyspaceapps.goodtv.R
 import com.keyspaceapps.goodtv.domain.ContentKind
 import com.keyspaceapps.goodtv.ui.goodTvViewModel
 import com.keyspaceapps.goodtv.ui.nav.CategoriesKey
+import com.keyspaceapps.goodtv.ui.theme.MenuTabRow
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalTvMaterial3Api::class) // AssistChip
@@ -61,17 +60,15 @@ fun CategoriesScreen(key: CategoriesKey) {
     Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 24.dp)) {
         Text(nickname, style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(12.dp))
-        TabRow(selectedTabIndex = ContentKind.entries.indexOf(kind)) {
-            ContentKind.entries.forEach { k ->
+        val kinds = ContentKind.entries
+        MenuTabRow(
+            labels = kinds.map { k ->
                 val tab = tabs.firstOrNull { it.kind == k }
-                Tab(selected = k == kind, onFocus = {}, onClick = { vm.selectKind(k) }) {
-                    Text(
-                        stringResource(R.string.categories_tab, stringResource(k.labelRes), tab?.shown ?: 0, tab?.total ?: 0),
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                    )
-                }
-            }
-        }
+                stringResource(R.string.categories_tab, stringResource(k.labelRes), tab?.shown ?: 0, tab?.total ?: 0)
+            },
+            selectedIndex = kinds.indexOf(kind),
+            onSelect = { vm.selectKind(kinds[it]) },
+        )
         Spacer(Modifier.height(16.dp))
         if (!synced) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
