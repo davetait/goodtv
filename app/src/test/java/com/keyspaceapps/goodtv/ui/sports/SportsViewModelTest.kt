@@ -55,4 +55,17 @@ class SportsViewModelTest {
         assertNull(vm.filter.value)
         assertEquals(next, vm.shown.value)
     }
+
+    @Test fun filterStaysOnAllWhenItsLeagueComesBack() = runTest {
+        val board = MutableStateFlow(both)
+        val vm = SportsViewModel(board)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.shown.collect {} }
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.filter.collect {} }
+        vm.selectLeague(League.MLS)
+        board.value = SportsBoard(listOf(row(League.NHL)))
+        val back = SportsBoard(listOf(row(League.MLS), row(League.NHL)))
+        board.value = back
+        assertNull(vm.filter.value)
+        assertEquals(back, vm.shown.value)
+    }
 }
