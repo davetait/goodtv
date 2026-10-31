@@ -9,6 +9,8 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -167,5 +169,39 @@ class SportsScreenTest {
         composeRule.waitUntil(5_000) { played != null }
         showing = true
         waitFocused("On 3 channels")
+    }
+
+    private val atlanta = Team("Atlanta United FC", null, "Atlanta", "ATL", null)
+    private val toronto = Team("Toronto FC", null, "Toronto", "TOR", null)
+    private val mlsGame = SportsGame(League.MLS, "m1", start, GameState.LIVE, toronto, atlanta, "0", "2", "54'", emptyList())
+    private val withMls = SportsBoard(listOf(board.leagues[0], LeagueGames(League.MLS, listOf(GameWithChannels(mlsGame, emptyList())), failed = false)))
+
+    @Test fun filterShowsOneLeague() {
+        show(withMls)
+        waitFocused("Sharks")
+        keys("U")
+        waitFocused("All leagues")
+        keys("C")
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(isRoot()).fetchSemanticsNodes().size == 2 }
+        // All leagues, NHL · 1, MLS · 1: the popup is its own window and takes the keys.
+        composeRule.onAllNodes(isRoot())[1].performKeyInput { pressKey(Key.DirectionDown); pressKey(Key.DirectionDown); pressKey(Key.DirectionCenter) }
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(isRoot()).fetchSemanticsNodes().size == 1 }
+        composeRule.waitUntil(5_000) { composeRule.onAllNodes(hasText("Sharks", substring = true)).fetchSemanticsNodes().isEmpty() }
+        composeRule.onNodeWithText("Atlanta United FC", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onAllNodes(hasText("NHL")).assertCountEquals(0)
+        composeRule.onNodeWithTag("sports_league_filter").assertIsDisplayed()
+        composeRule.waitUntil(5_000) { runCatching { composeRule.onNode(hasText("Atlanta United FC", substring = true)).assertIsFocused() }.isSuccess ||
+            runCatching { composeRule.onNode(hasText("MLS · ", substring = true)).assertIsFocused() }.isSuccess }
+    }
+
+    @Test fun soccerCardReadsHomeVAway() {
+        show(withMls)
+        waitFor("Atlanta United FC")
+        val home = composeRule.onNodeWithText("Atlanta United FC", useUnmergedTree = true).fetchSemanticsNode().positionInRoot.x
+        val away = composeRule.onNodeWithText("Toronto FC", useUnmergedTree = true).fetchSemanticsNode().positionInRoot.x
+        val v = composeRule.onNodeWithText("v", useUnmergedTree = true).fetchSemanticsNode().positionInRoot.x
+        assertEquals(true, home < v && v < away)
+        composeRule.onNodeWithText("2 – 0", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("@", useUnmergedTree = true).assertIsDisplayed()
     }
 }
