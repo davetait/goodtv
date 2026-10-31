@@ -6,6 +6,7 @@ import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.ZoneOffset
+import java.util.EnumSet
 import kotlin.math.abs
 
 /** A live channel that might carry a game, with its category's name (league words often live there). */
@@ -14,21 +15,39 @@ data class ChannelCandidate(val channel: LiveChannel, val categoryName: String)
 /**
  * Pairs today's games with the live channels whose names mention both teams.
  *
- * A team is recognised by its display name, location, nickname or abbreviation (2–4 letters, whole
- * word only), never by a league word. The two teams must match different words of the name. A
- * channel that is over ("ENDED", "End", "Final"), an empty slot ("No event streaming"), a replay
- * or another league's ("CFL", "MLS", "AHL", …) never matches. A date in the name must be within [WINDOW_HOURS] of the start. When a name fits
- * several games, a league word in the name or category decides; if it still fits several, it matches
- * none (better "On 2 channels" than starting the wrong game).
+ * A team is recognised by its display name, nickname, abbreviation (2–4 letters, whole word only) or,
+ * when the display name starts with it, its location ("Toronto" for Toronto FC, not "Australia" for
+ * South Australia), never by a league word. The two teams must match different words of the name. A
+ * channel that is over ("ENDED", "End", "Final"), an empty slot ("No event streaming"), a replay or a
+ * league the app doesn't have ("CFL", "OHL", …) never matches. A league word in the name or category
+ * ("NBA", "Premier League") or a sport word ("FC", "cricket") limits the channel to that league's or
+ * sport's games, so Toronto FC stays off the Maple Leafs even when no soccer is on. A date in the name
+ * must be within [WINDOW_HOURS] of the start (or, for a live game, of now). A channel naming women
+ * ("Women's Cricket", "Arsenal Women") only matches women's leagues. If a name still fits several games it matches none
+ * (better "On 2 channels" than starting the wrong game).
  */
 object GameMatcher {
     const val WINDOW_HOURS = 30L
 
-    private val LEAGUE_WORDS = League.entries.map { it.label.lowercase() }.toSet()
     /** Name starts (normalised) of a slot that is over or empty; the guide hides these too. */
     internal val CLOSED = listOf("ended ", "end ", "final ", "no event streaming")
-    /** Leagues outside the six whose teams share cities with them (Toronto, Montreal, …): a channel naming one is theirs. */
-    private val OTHER_LEAGUES = setOf("cfl", "mls", "fc", "cf", "ahl", "echl", "ohl", "whl", "qmjhl", "chl", "ncaa", "ncaaf", "ncaab", "nwsl", "ufl", "xfl", "nll", "khl")
+    /** Leagues the app doesn't have whose teams share cities with its own (Toronto, Montreal, …): a channel naming one is theirs. */
+    private val OUTSIDE_LEAGUES = setOf("cfl", "echl", "ohl", "whl", "qmjhl", "chl", "xfl", "khl")
+    /**
+     * Words that name a sport rather than a league. Not "soccer": providers' slot labels carry it
+     * whatever is on ("76ers vs. Knicks | … | CA: SOCCER PPV 30").
+     */
+    private val SPORT_WORDS = mapOf("fc" to Sport.SOCCER, "cf" to Sport.SOCCER, "sc" to Sport.SOCCER, "cricket" to Sport.CRICKET)
+    /** Words that mark a women's match ("Women`s Cricket" normalises to "women s"); "w" alone is too loose. */
+    private val WOMEN_WORDS = setOf("women", "womens")
+    private val LEAGUE_WORDS = League.entries.flatMap { it.words }.toSet() + OUTSIDE_LEAGUES + SPORT_WORDS.keys
+
+    private class Naming(val words: List<String>, val leagues: Set<League>)
+    /** League and sport phrases by first word, built once: [gameFor] runs for every channel. */
+    private val NAMINGS: Map<String, List<Naming>> = buildMap<List<String>, MutableSet<League>> {
+        for (l in League.entries) for (w in l.words) getOrPut(w.split(' ')) { mutableSetOf() } += l
+        for ((w, sport) in SPORT_WORDS) getOrPut(listOf(w)) { mutableSetOf() } += League.entries.filter { it.sport == sport }
+    }.map { (words, leagues) -> Naming(words, leagues.toSet()) }.groupBy { it.words.first() }
 
     private data class Form(val words: List<String>, val game: SportsGame, val home: Boolean)
     private data class Hit(val game: SportsGame, val home: Boolean, val from: Int, val to: Int)
@@ -51,10 +70,15 @@ object GameMatcher {
         val name = normalize(c.channel.name)
         if (CLOSED.any { name.startsWith(it) } || " replay " in " $name ") return null
         val words = name.split(' ').filter { it.isNotEmpty() }
-        if ((words + normalize(c.categoryName).split(' ')).any { it in OTHER_LEAGUES }) return null
+        val categoryWords = normalize(c.categoryName).split(' ')
+        if (words.any { it in OUTSIDE_LEAGUES } || categoryWords.any { it in OUTSIDE_LEAGUES }) return null
+        val named = EnumSet.noneOf(League::class.java).also { addNamed(words, it); addNamed(categoryWords, it) }
+        val women = words.any { it in WOMEN_WORDS } || categoryWords.any { it in WOMEN_WORDS }
         val hits = mutableListOf<Hit>()
         for (i in words.indices) {
             for (f in index[words[i]].orEmpty()) {
+                if (named.isNotEmpty() && f.game.league !in named) continue
+                if (women && !f.game.league.womens) continue
                 val end = i + f.words.size
                 if (end <= words.size && words.subList(i, end) == f.words) hits += Hit(f.game, f.home, i, end)
             }
@@ -66,11 +90,10 @@ object GameMatcher {
             home.any { a -> away.any { b -> a.to <= b.from || b.to <= a.from } }
         }.keys.toList()
         val time = ChannelTimes.parse(c.channel.name, now)
-        if (time != null) candidates = candidates.filter { abs(it.startsAt.epochSecond - time.epochSecond) <= WINDOW_HOURS * 3600 }
-        if (candidates.size > 1) {
-            val context = " $name ${normalize(c.categoryName)} "
-            val withLeague = candidates.filter { " ${it.league.label.lowercase()} " in context }
-            if (withLeague.isNotEmpty()) candidates = withLeague
+        // A live game can run for days (a Test match): its dated daily slots sit near now, not near its start.
+        if (time != null) candidates = candidates.filter {
+            abs(it.startsAt.epochSecond - time.epochSecond) <= WINDOW_HOURS * 3600 ||
+                (it.state == GameState.LIVE && abs(now.epochSecond - time.epochSecond) <= WINDOW_HOURS * 3600)
         }
         if (candidates.size > 1 && time != null) {
             // The same matchup on two days (a series): the nearer start is this channel's game.
@@ -80,10 +103,31 @@ object GameMatcher {
         return candidates.singleOrNull()
     }
 
+    /** Adds the leagues [words] name, as whole phrases, to [into]. */
+    private fun addNamed(words: List<String>, into: MutableSet<League>) {
+        for (i in words.indices) {
+            for (n in NAMINGS[words[i]].orEmpty()) {
+                val end = i + n.words.size
+                if (end <= words.size && words.subList(i, end) == n.words) into += n.leagues
+            }
+        }
+    }
+
     private fun forms(team: Team): List<List<String>> = buildList {
-        listOfNotNull(team.displayName, team.location, team.nickname).forEach { add(normalize(it)) }
+        val display = normalize(team.displayName)
+        add(display)
+        team.nickname?.let { add(normalize(it)) }
+        team.location?.let { normalize(it) }?.takeIf { startsWithWords(withoutLeagueWord(display), it) }?.let { add(it) }
         team.abbreviation.takeIf { it.length in 2..4 }?.let { add(normalize(it)) }
     }.filter { it.isNotEmpty() && it !in LEAGUE_WORDS }.distinct().map { it.split(' ') }
+
+    /** "pwhl las vegas" → "las vegas", "fc barcelona" → "barcelona": a display name can lead with a league or sport word. */
+    private fun withoutLeagueWord(display: String): String {
+        val first = display.substringBefore(' ')
+        return if (first != display && first in LEAGUE_WORDS) display.substringAfter(' ') else display
+    }
+
+    private fun startsWithWords(s: String, prefix: String) = s == prefix || s.startsWith("$prefix ")
 
     private val MARKS = Regex("""\p{M}+""")
     private val NOT_ALPHANUMERIC = Regex("""[^a-z0-9]+""")

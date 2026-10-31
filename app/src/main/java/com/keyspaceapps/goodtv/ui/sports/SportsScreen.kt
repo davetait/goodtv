@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -49,9 +50,12 @@ import com.keyspaceapps.goodtv.data.sports.ChannelCandidate
 import com.keyspaceapps.goodtv.data.sports.ChannelOrder
 import com.keyspaceapps.goodtv.data.sports.GameState
 import com.keyspaceapps.goodtv.data.sports.GameWithChannels
+import com.keyspaceapps.goodtv.data.sports.League
+import com.keyspaceapps.goodtv.data.sports.homeFirst
 import com.keyspaceapps.goodtv.data.sports.SportsBoard
 import com.keyspaceapps.goodtv.data.sports.Team
 import com.keyspaceapps.goodtv.domain.label
+import com.keyspaceapps.goodtv.ui.browse.TvDropdown
 import com.keyspaceapps.goodtv.ui.goodTvViewModel
 import com.keyspaceapps.goodtv.ui.live.FeedPicker
 import com.keyspaceapps.goodtv.ui.nav.PlayerKey
@@ -68,7 +72,9 @@ private val LiveRed = Color(0xFFE11D48)
 @Composable
 fun SportsScreen(onPlay: (PlayerKey) -> Unit, board: Flow<SportsBoard>? = null) {
     val vm = goodTvViewModel { SportsViewModel(board ?: it.sports.observe()) }
-    val current by vm.board.collectAsState()
+    val current by vm.shown.collectAsState()
+    val whole by vm.board.collectAsState()
+    val filter by vm.filter.collectAsState()
     var picking by remember { mutableStateOf<GameWithChannels?>(null) }
     val requesters = remember { HashMap<String, FocusRequester>() }
     var initialDone by remember { mutableStateOf(false) }
@@ -88,11 +94,31 @@ fun SportsScreen(onPlay: (PlayerKey) -> Unit, board: Flow<SportsBoard>? = null) 
     }
     Box(Modifier.fillMaxSize()) {
         if (loaded.leagues.isEmpty()) {
-            Text(stringResource(R.string.sports_none_today), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 48.dp, top = 24.dp))
+            Text(stringResource(if (loaded.anyEnabled) R.string.sports_none_today else R.string.sports_none_switched_on), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 48.dp, top = 24.dp))
         } else {
             val target = vm.focus.key?.takeIf { k -> loaded.leagues.any { l -> l.games.any { it.game.key == k } } }
                 ?: loaded.leagues.firstOrNull { it.games.isNotEmpty() }?.games?.first()?.game?.key
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 48.dp)) {
+            Column(Modifier.fillMaxSize()) {
+            val rows = whole?.leagues.orEmpty()
+            if (rows.isNotEmpty()) {
+                val all = stringResource(R.string.sports_filter_all)
+                TvDropdown(
+                    options = listOf<League?>(null) + rows.map { it.league },
+                    selected = filter,
+                    label = { l ->
+                        val row = rows.firstOrNull { it.league == l }
+                        when {
+                            l == null || row == null -> all
+                            row.failed -> l.label
+                            else -> stringResource(R.string.sports_filter_with_count, l.label, row.games.size.toString())
+                        }
+                    },
+                    onSelect = vm::selectLeague,
+                    modifier = Modifier.padding(start = 48.dp, top = 8.dp).width(320.dp).testTag("sports_league_filter"),
+                    listWidth = 320.dp,
+                )
+            }
+            LazyColumn(Modifier.fillMaxWidth().weight(1f), contentPadding = PaddingValues(bottom = 48.dp)) {
                 items(loaded.leagues, key = { it.league.name }) { row ->
                     Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
                         Text(row.league.label, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 48.dp, bottom = 8.dp))
@@ -129,10 +155,11 @@ fun SportsScreen(onPlay: (PlayerKey) -> Unit, board: Flow<SportsBoard>? = null) 
                     }
                 }
             }
+            }
         }
         picking?.let { g ->
             FeedPicker(
-                title = "${g.game.away.nickname ?: g.game.away.displayName} @ ${g.game.home.nickname ?: g.game.home.displayName}",
+                title = matchupTitle(g),
                 channels = g.channels,
                 onPick = { closePicker(g); play(it) },
                 onClose = { closePicker(g) },
@@ -142,6 +169,14 @@ fun SportsScreen(onPlay: (PlayerKey) -> Unit, board: Flow<SportsBoard>? = null) 
     }
 }
 
+/** "Home v Away" for soccer and cricket, "Away @ Home" otherwise. */
+@Composable
+private fun matchupTitle(g: GameWithChannels): String {
+    val home = g.game.home.nickname ?: g.game.home.displayName
+    val away = g.game.away.nickname ?: g.game.away.displayName
+    return if (g.game.league.homeFirst) "$home ${stringResource(R.string.sports_versus)} $away" else "$away @ $home"
+}
+
 @Composable
 private fun GameCard(g: GameWithChannels, onClick: () -> Unit, modifier: Modifier) {
     val game = g.game
@@ -149,9 +184,14 @@ private fun GameCard(g: GameWithChannels, onClick: () -> Unit, modifier: Modifie
     Card(onClick = onClick, modifier = modifier.width(300.dp).height(168.dp)) {
         Column(Modifier.fillMaxSize().padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TeamCell(game.away, Modifier.weight(1f))
-                Text("@", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 6.dp))
-                TeamCell(game.home, Modifier.weight(1f))
+                val homeFirst = game.league.homeFirst
+                TeamCell(if (homeFirst) game.home else game.away, Modifier.weight(1f))
+                Text(
+                    if (homeFirst) stringResource(R.string.sports_versus) else "@",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 6.dp),
+                )
+                TeamCell(if (homeFirst) game.away else game.home, Modifier.weight(1f))
             }
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -163,7 +203,7 @@ private fun GameCard(g: GameWithChannels, onClick: () -> Unit, modifier: Modifie
                         modifier = Modifier.background(LiveRed, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 1.dp),
                     )
                     if (game.awayScore != null && game.homeScore != null) {
-                        Text("${game.awayScore} – ${game.homeScore}", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
+                        Text(if (game.league.homeFirst) "${game.homeScore} – ${game.awayScore}" else "${game.awayScore} – ${game.homeScore}", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
                     }
                     game.detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 } else {

@@ -43,10 +43,12 @@ import com.keyspaceapps.goodtv.data.watchlist.WatchListRef
 import com.keyspaceapps.goodtv.data.watchlist.WatchListRepository
 import com.keyspaceapps.goodtv.data.tmdb.TmdbApi
 import com.keyspaceapps.goodtv.data.tmdb.TmdbCredential
+import com.keyspaceapps.goodtv.data.sports.EspnCricketScorepanel
 import com.keyspaceapps.goodtv.data.sports.EspnScoreboard
+import com.keyspaceapps.goodtv.data.sports.HockeyTechScorebar
 import com.keyspaceapps.goodtv.data.sports.League
+import com.keyspaceapps.goodtv.data.sports.LeagueSource
 import com.keyspaceapps.goodtv.data.sports.LiveRefresher
-import com.keyspaceapps.goodtv.data.sports.PwhlScorebar
 import com.keyspaceapps.goodtv.data.sports.ScheduleSource
 import com.keyspaceapps.goodtv.data.sports.SportsRepository
 import com.keyspaceapps.goodtv.data.subtitles.OnlineSubtitles
@@ -89,7 +91,7 @@ import java.util.concurrent.TimeUnit
 
 const val USER_AGENT = "GoodTV/0.2"
 
-private val Context.settingsDataStore by preferencesDataStore(name = "settings")
+internal val Context.settingsDataStore by preferencesDataStore(name = "settings")
 // A corrupt file would otherwise make every Save throw; starting empty falls back to the build defaults.
 private val Context.integrationsDataStore by preferencesDataStore(
     name = "integrations",
@@ -146,6 +148,9 @@ class AppGraph(val context: Context) {
      * height depends on it). null only until the first read, moments after launch.
      */
     val livePreviewsSetting: StateFlow<Boolean?> = settings.livePreviews.stateIn<Boolean?>(appScope, SharingStarted.Eagerly, null)
+
+    /** The switched-on Sports leagues, read from app start; null only until the first read. */
+    val sportsLeaguesSetting: StateFlow<Set<League>?> = settings.sportsLeagues.stateIn<Set<League>?>(appScope, SharingStarted.Eagerly, null)
 
     val syncManager: SyncManager by lazy { SyncManager(store, sourceRegistry, appScope) }
     val repository: LibraryRepository by lazy { LibraryRepository(store, sourceRegistry, syncManager, settings) }
@@ -249,11 +254,19 @@ class AppGraph(val context: Context) {
      */
     val onlineSubtitles: OnlineSubtitles? get() = if (openSubtitlesApi.isConfigured) onlineSubtitlesInstance else null
 
-    /** The Sports tab: today's NHL/NBA/MLB/NFL/WNBA games from ESPN, PWHL from HockeyTech, matched to live channels. */
+    /** The Sports tab: today's games from ESPN, HockeyTech and ESPN's cricket scorepanel, matched to live channels. */
     val sports: SportsRepository by lazy {
         val espn = EspnScoreboard(okHttp)
-        val sources: Map<League, ScheduleSource> = League.entries.associateWith { if (it == League.PWHL) PwhlScorebar(okHttp) else espn }
-        SportsRepository(sources, store, liveRefresher)
+        val hockeyTech = HockeyTechScorebar(okHttp)
+        val cricket = EspnCricketScorepanel(okHttp)
+        val sources: Map<League, ScheduleSource> = League.entries.associateWith {
+            when (it.source) {
+                is LeagueSource.Espn -> espn
+                is LeagueSource.HockeyTech -> hockeyTech
+                LeagueSource.EspnInternationalCricket -> cricket
+            }
+        }
+        SportsRepository(sources, settings.sportsLeagues, store, liveRefresher)
     }
 
     /** Re-downloads the live lists of stale sources; shared by Sports and the guide's event slots. */

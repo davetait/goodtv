@@ -7,6 +7,7 @@ import java.time.ZoneId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -15,6 +16,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
@@ -26,10 +29,11 @@ data class GameWithChannels(val game: SportsGame, val channels: List<ChannelCand
 /** One league's row. [failed]: its schedule couldn't be read and there is no earlier copy to show. */
 data class LeagueGames(val league: League, val games: List<GameWithChannels>, val failed: Boolean)
 
-data class SportsBoard(val leagues: List<LeagueGames>)
+/** [anyEnabled]: false when every league is switched off, so the screen can say so rather than "No games on today". */
+data class SportsBoard(val leagues: List<LeagueGames>, val anyEnabled: Boolean = true)
 
 /**
- * The Sports screen's data: for each league in [League] order, today's games that are live or still
+ * The Sports screen's data: for each switched-on league in alphabetical order of label, today's games that are live or still
  * to come (finished ones dropped; a game from yesterday that is still live counts), live first,
  * then by start, each with the channels [GameMatcher] finds for it.
  *
@@ -39,8 +43,10 @@ data class SportsBoard(val leagues: List<LeagueGames>)
  * [LiveRefresher.refreshIfStale], concurrently: the first board comes from the channels the store
  * already has, and refreshed names arrive through [LibraryStore.observeSportsCandidates].
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class SportsRepository(
     private val sources: Map<League, ScheduleSource>,
+    private val enabled: Flow<Set<League>>,
     private val store: LibraryStore,
     private val refresher: LiveRefresher,
     private val clock: () -> Instant = Instant::now,
@@ -54,22 +60,25 @@ class SportsRepository(
     fun observe(): Flow<SportsBoard> = channelFlow {
         // Mapping ~57,000 channels: off the collector's (main) thread.
         launch(compute) { refresher.refreshIfStale() }
-        val schedules = flow {
-            while (true) {
-                emit(readAll())
-                delay(pollMs)
+        // A change to the switched-on leagues restarts the loop, so a league switched on is read at once.
+        val schedules = enabled.distinctUntilChanged().flatMapLatest { leagues ->
+            flow {
+                while (true) {
+                    emit(leagues.isNotEmpty() to readAll(leagues))
+                    delay(pollMs)
+                }
             }
         }
         combine(schedules, store.observeSportsCandidates().flowOn(compute)) { s, c -> s to c }.collect { (s, c) ->
-            send(withContext(compute) { build(s, c) })
+            send(withContext(compute) { build(s.second, c, anyEnabled = s.first) })
         }
     }
 
     /** Per league, yesterday's and today's games, or null when today's couldn't be read. */
-    private suspend fun readAll(): Map<League, List<SportsGame>?> = coroutineScope {
+    private suspend fun readAll(leagues: Set<League>): Map<League, List<SportsGame>?> = coroutineScope {
         val now = clock()
         val today = now.atZone(zone()).toLocalDate()
-        League.entries.filter { it in sources }.map { league ->
+        League.entries.filter { it in leagues && it in sources }.map { league ->
             async {
                 val (yesterday, current) = listOf(today.minusDays(1), today).map { async { readDay(league, it, now) } }.awaitAll()
                 league to current?.let { (yesterday.orEmpty() + it).distinctBy { g -> g.key } }
@@ -93,7 +102,7 @@ class SportsRepository(
         lastGood[league to day]?.takeIf { now.toEpochMilli() - it.at.toEpochMilli() <= KEEP_LAST_GOOD_MS }?.games
     }
 
-    private fun build(schedules: Map<League, List<SportsGame>?>, channels: List<ChannelCandidate>): SportsBoard {
+    private fun build(schedules: Map<League, List<SportsGame>?>, channels: List<ChannelCandidate>, anyEnabled: Boolean): SportsBoard {
         val now = clock()
         val today = now.atZone(zone()).toLocalDate()
         val shown = schedules.mapValues { (_, games) ->
@@ -104,11 +113,11 @@ class SportsRepository(
         // yesterday's game instead of attaching to today's.
         val matched = GameMatcher.match(schedules.values.filterNotNull().flatten(), channels, now)
         return SportsBoard(
-            League.entries.mapNotNull { league ->
-                if (league !in schedules) return@mapNotNull null
+            schedules.keys.sortedBy { it.label.lowercase() }.mapNotNull { league ->
                 val games = shown[league] ?: return@mapNotNull LeagueGames(league, emptyList(), failed = true)
                 if (games.isEmpty()) null else LeagueGames(league, games.map { GameWithChannels(it, matched[it.key].orEmpty()) }, failed = false)
             },
+            anyEnabled,
         )
     }
 

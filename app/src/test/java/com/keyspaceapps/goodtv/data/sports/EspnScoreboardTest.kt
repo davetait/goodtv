@@ -58,6 +58,29 @@ class EspnScoreboardTest {
         try { source().games(League.NHL, day); fail() } catch (e: SportsException) { }
     }
 
+    @Test fun premierLeagueFixture() = runTest {
+        server.enqueue(MockResponse(code = 200, body = javaClass.getResource("/sports/espn_eng1.json")!!.readText()))
+        val g = source().games(League.PREMIER_LEAGUE, LocalDate.of(2026, 11, 1)).single()
+        assertEquals("/apis/site/v2/sports/soccer/eng.1/scoreboard", server.takeRequest().url.encodedPath)
+        assertEquals("Arsenal", g.away.displayName)
+        assertEquals("Liverpool", g.home.displayName)
+        assertEquals(GameState.SCHEDULED, g.state)
+        assertEquals("PREMIER_LEAGUE:${g.id}", g.key)
+    }
+
+    @Test fun sheffieldShieldFixtureReadsCricketScores() = runTest {
+        server.enqueue(MockResponse(code = 200, body = javaClass.getResource("/sports/espn_cricket_8043.json")!!.readText()))
+        val games = source().games(League.BIG_BASH, LocalDate.of(2026, 10, 31))
+        assertEquals(3, games.size)
+        assertEquals(2, games.count { it.state == GameState.LIVE })
+        val tas = games.single { it.home.displayName == "Tasmania" }
+        assertEquals("Tasmania", tas.home.displayName)
+        assertEquals("New South Wales", tas.away.displayName)
+        assertEquals("174/8 (60 ov)", tas.awayScore)
+        assertEquals("427", tas.homeScore)
+        assertEquals("NSW trail by 253 runs", tas.detail)
+    }
+
     private fun event(id: String, state: String, detail: String) = """{"id":"$id","date":"2026-10-20T23:00Z",
       "status":{"type":{"state":"$state","shortDetail":"$detail"}},
       "competitions":[{"competitors":[
