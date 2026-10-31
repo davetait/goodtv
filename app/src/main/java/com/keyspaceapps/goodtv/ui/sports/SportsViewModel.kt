@@ -30,7 +30,8 @@ class SportsViewModel(board: Flow<SportsBoard>) : ViewModel() {
     private val view: StateFlow<Pair<League?, SportsBoard?>> = combine(this.board, selected) { b, s ->
         val f = s?.takeIf { l -> b?.leagues?.any { it.league == l } == true }
         // A league with no row drops the choice for good: if it returns later, the screen stays on All.
-        if (s != null && f == null && b != null) selected.value = null
+        // Only if the choice is still s: a pick made since this pair was captured must survive.
+        if (s != null && f == null && b != null) selected.compareAndSet(s, null)
         f to (if (b == null || f == null) b else SportsBoard(b.leagues.filter { it.league == f }))
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null to null)
 
