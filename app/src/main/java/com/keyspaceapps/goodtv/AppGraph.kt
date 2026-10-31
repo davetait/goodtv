@@ -91,7 +91,7 @@ import java.util.concurrent.TimeUnit
 
 const val USER_AGENT = "GoodTV/0.2"
 
-private val Context.settingsDataStore by preferencesDataStore(name = "settings")
+internal val Context.settingsDataStore by preferencesDataStore(name = "settings")
 // A corrupt file would otherwise make every Save throw; starting empty falls back to the build defaults.
 private val Context.integrationsDataStore by preferencesDataStore(
     name = "integrations",

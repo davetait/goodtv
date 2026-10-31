@@ -235,6 +235,15 @@
     <string name="settings_live_previews_on">Live previews on</string>
     <string name="settings_live_previews_off">Live previews off</string>
     <string name="live_tv_title">Live TV</string>
+    <string name="settings_sports">Sports</string>
+    <plurals name="settings_sports_leagues_on">
+        <item quantity="one">%d league on</item>
+        <item quantity="other">%d leagues on</item>
+    </plurals>
+    <string name="sports_settings_title">Sports</string>
+    <string name="sports_group_north_america">North America</string>
+    <string name="sports_group_world_soccer">World soccer</string>
+    <string name="sports_group_cricket">Cricket</string>
     <string name="live_previews">Live previews</string>
     <string name="live_previews_summary">Play the highlighted channel in the guide, with sound, after a moment\'s pause on it.</string>
     <string name="preview_unavailable">Preview unavailable</string>

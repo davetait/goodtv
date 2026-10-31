@@ -46,6 +46,7 @@ import com.keyspaceapps.goodtv.ui.movies.MovieDetailScreen
 import com.keyspaceapps.goodtv.ui.series.NextEpisode
 import com.keyspaceapps.goodtv.ui.settings.IntegrationsScreen
 import com.keyspaceapps.goodtv.ui.settings.LiveTvSettingsScreen
+import com.keyspaceapps.goodtv.ui.settings.SportsSettingsScreen
 import com.keyspaceapps.goodtv.ui.series.NextEpisodes
 import com.keyspaceapps.goodtv.ui.series.SeriesDetailScreen
 import com.keyspaceapps.goodtv.ui.player.PlayerScreen
@@ -80,6 +81,7 @@ fun GoodTvNavigation() {
                 entry<SourcesKey>(stackKey) { Box(Modifier.padding(top = 24.dp)) { SourcesScreen(onNavigate = { backStack.add(it) }) } }
                 entry<IntegrationsKey>(stackKey) { IntegrationsScreen() }
                 entry<LiveTvSettingsKey>(stackKey) { LiveTvSettingsScreen() }
+                entry<SportsSettingsKey>(stackKey) { SportsSettingsScreen() }
                 entry<PlayerKey>(stackKey) { key ->
                     // The next episode replaces this one, so Back still goes where this one came from.
                     PlayerEntry(key, onBack = pop, onPlayNext = { k -> backStack.removeLastOrNull(); backStack.add(k) })

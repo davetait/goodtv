@@ -81,4 +81,8 @@ data object IntegrationsKey : GoodTvKey
 @Serializable
 data object LiveTvSettingsKey : GoodTvKey
 
+/** The Sports settings: one switch per league, opened from Settings. */
+@Serializable
+data object SportsSettingsKey : GoodTvKey
+
 enum class HomeTab { HOME, LIVE, SPORTS, MOVIES, SERIES, SETTINGS }
