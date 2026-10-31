@@ -114,6 +114,58 @@ class GameMatcherTest {
         assertEquals("the NHL game itself still matches", listOf(g.key), matchOf("NHL: Toronto vs Montreal", listOf(g)))
     }
 
+    private val leafs = team("Toronto Maple Leafs", "Maple Leafs", "Toronto", "TOR")
+    private val leafsHabs = game(League.NHL, "13", habs, leafs)
+    // As ESPN's MLS scoreboard has them: location and nickname repeat the display name.
+    private val torontoFc = team("Toronto FC", "Toronto FC", "Toronto FC", "TOR")
+    private val cfMontreal = team("CF Montréal", "CF Montréal", "CF Montréal", "MTL")
+
+    @Test fun soccerWordKeepsAChannelOffHockeyWhenNoSoccerIsOn() {
+        val m = GameMatcher.match(listOf(leafsHabs), listOf(ch("Toronto FC vs CF Montreal 7:30 PM")), now)
+        assertEquals(emptyList<ChannelCandidate>(), m.getValue(leafsHabs.key))
+    }
+
+    @Test fun fcChannelReachesMlsWhenMlsIsOn() {
+        val mls = game(League.MLS, "m1", cfMontreal, torontoFc)
+        val c = ch("Toronto FC vs CF Montreal 7:30 PM")
+        val m = GameMatcher.match(listOf(leafsHabs, mls), listOf(c), now)
+        assertEquals(listOf(c), m.getValue(mls.key))
+        assertEquals(emptyList<ChannelCandidate>(), m.getValue(leafsHabs.key))
+    }
+
+    @Test fun leagueWordLimitsCandidates() {
+        val raptors = team("Toronto Raptors", "Raptors", "Toronto", "TOR")
+        val bruins = team("Boston Bruins", "Bruins", "Boston", "BOS")
+        val nba = game(League.NBA, "14", raptors, celtics)
+        val nhl = game(League.NHL, "15", leafs, bruins)
+        assertEquals(listOf(nba.key), matchOf("NBA: Toronto at Boston", listOf(nba, nhl)))
+        assertEquals("a league word keeps it off another league's game even when that is the only fit",
+            emptyList<String>(), matchOf("NBA: Toronto at Boston", listOf(nhl)))
+    }
+
+    @Test fun outsideLeagueWordStillRejects() {
+        val mls = game(League.MLS, "m2", cfMontreal, torontoFc)
+        val raptors = team("Toronto Raptors", "Raptors", "Toronto", "TOR")
+        val nba = game(League.NBA, "16", raptors, celtics)
+        assertEquals(emptyList<String>(), matchOf("CFL: Toronto at Montreal", listOf(leafsHabs, mls, nba)))
+        assertEquals(emptyList<String>(), matchOf("CFL: Toronto at Montreal", listOf(leafsHabs)))
+        assertEquals(emptyList<String>(), matchOf("Toronto at Montreal", listOf(leafsHabs), category = "CA| CFL"))
+    }
+
+    @Test fun locationIsANameOnlyWhenTheDisplayNameStartsWithIt() {
+        // As ESPN's cricket scoreboards have them: Shield sides carry "Australia" as their location.
+        val tasmania = team("Tasmania", "Tasmania", "Australia", "TAS")
+        val southAustralia = team("South Australia", "South Australia", "Australia", "SOA")
+        val newZealand = team("New Zealand", "New Zealand", "New Zealand", "NZ")
+        val australia = team("Australia", "Australia", "Australia", "AUS")
+        val shield = game(League.BIG_BASH, "s1", southAustralia, tasmania, at = "2026-10-20T23:30:00Z")
+        val t20i = game(League.INTERNATIONAL_CRICKET, "i1", australia, newZealand, at = "2026-10-21T01:00:00Z")
+        val games = listOf(shield, t20i)
+        assertEquals(listOf(t20i.key), matchOf("Australia vs New Zealand T20I", games))
+        assertEquals(listOf(shield.key), matchOf("Tasmania v South Australia", games))
+        assertEquals("\"Australia\" is not South Australia's name", emptyList<String>(), matchOf("Tasmania v Australia", games))
+    }
+
     @Test fun abbreviationsOnlyAsWholeWords() {
         assertEquals(emptyList<String>(), matchOf("SJÖBERG vs MONTREAL"))
         assertEquals(emptyList<String>(), matchOf("SJÄLLAND MTL"))
