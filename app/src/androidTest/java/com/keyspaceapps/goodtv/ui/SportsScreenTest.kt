@@ -158,6 +158,12 @@ class SportsScreenTest {
         composeRule.onAllNodes(hasText("NHL")).assertCountEquals(0)
     }
 
+    @Test fun noLeagueSwitchedOnPointsToSettings() {
+        show(SportsBoard(emptyList(), anyEnabled = false))
+        waitFor("No leagues switched on. Choose some in Settings → Sports.")
+        composeRule.onAllNodes(hasText("No games on today")).assertCountEquals(0)
+    }
+
     /** Leaving for the player and coming back rebuilds the screen; focus returns to the card that was opened. */
     @Test fun backFromThePlayerRefocusesTheCard() {
         var showing by mutableStateOf(true)

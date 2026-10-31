@@ -246,6 +246,23 @@ class SportsRepositoryTest {
         assertEquals(listOf(League.MLS), boards.last().leagues.map { it.league })
     }
 
+    @Test fun everyLeagueSwitchedOffSaysSo() = runTest {
+        init()
+        today(League.NHL)
+        val enabled = MutableStateFlow(setOf(League.NHL))
+        val boards = collect(repo(enabled))
+        assertTrue(boards.last().anyEnabled)
+        enabled.value = emptySet()
+        runCurrent()
+        assertEquals(SportsBoard(emptyList(), anyEnabled = false), boards.last())
+    }
+
+    @Test fun enabledLeaguesWithNoGamesStillCountAsOn() = runTest {
+        init()
+        val board = collect(repo(MutableStateFlow(setOf(League.NHL)))).last()
+        assertEquals(SportsBoard(emptyList(), anyEnabled = true), board)
+    }
+
     /** The live-list refresh maps ~57,000 channels; it must not run on the collector's (main) thread. */
     @Test fun refreshRunsOnTheComputeDispatcher() = runBlocking {
         init()

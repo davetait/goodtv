@@ -29,7 +29,8 @@ data class GameWithChannels(val game: SportsGame, val channels: List<ChannelCand
 /** One league's row. [failed]: its schedule couldn't be read and there is no earlier copy to show. */
 data class LeagueGames(val league: League, val games: List<GameWithChannels>, val failed: Boolean)
 
-data class SportsBoard(val leagues: List<LeagueGames>)
+/** [anyEnabled]: false when every league is switched off, so the screen can say so rather than "No games on today". */
+data class SportsBoard(val leagues: List<LeagueGames>, val anyEnabled: Boolean = true)
 
 /**
  * The Sports screen's data: for each switched-on league in alphabetical order of label, today's games that are live or still
@@ -63,13 +64,13 @@ class SportsRepository(
         val schedules = enabled.distinctUntilChanged().flatMapLatest { leagues ->
             flow {
                 while (true) {
-                    emit(readAll(leagues))
+                    emit(leagues.isNotEmpty() to readAll(leagues))
                     delay(pollMs)
                 }
             }
         }
         combine(schedules, store.observeSportsCandidates().flowOn(compute)) { s, c -> s to c }.collect { (s, c) ->
-            send(withContext(compute) { build(s, c) })
+            send(withContext(compute) { build(s.second, c, anyEnabled = s.first) })
         }
     }
 
@@ -101,7 +102,7 @@ class SportsRepository(
         lastGood[league to day]?.takeIf { now.toEpochMilli() - it.at.toEpochMilli() <= KEEP_LAST_GOOD_MS }?.games
     }
 
-    private fun build(schedules: Map<League, List<SportsGame>?>, channels: List<ChannelCandidate>): SportsBoard {
+    private fun build(schedules: Map<League, List<SportsGame>?>, channels: List<ChannelCandidate>, anyEnabled: Boolean): SportsBoard {
         val now = clock()
         val today = now.atZone(zone()).toLocalDate()
         val shown = schedules.mapValues { (_, games) ->
@@ -116,6 +117,7 @@ class SportsRepository(
                 val games = shown[league] ?: return@mapNotNull LeagueGames(league, emptyList(), failed = true)
                 if (games.isEmpty()) null else LeagueGames(league, games.map { GameWithChannels(it, matched[it.key].orEmpty()) }, failed = false)
             },
+            anyEnabled,
         )
     }
 

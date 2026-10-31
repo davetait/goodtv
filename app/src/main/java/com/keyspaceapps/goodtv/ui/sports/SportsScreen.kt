@@ -94,7 +94,7 @@ fun SportsScreen(onPlay: (PlayerKey) -> Unit, board: Flow<SportsBoard>? = null) 
     }
     Box(Modifier.fillMaxSize()) {
         if (loaded.leagues.isEmpty()) {
-            Text(stringResource(R.string.sports_none_today), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 48.dp, top = 24.dp))
+            Text(stringResource(if (loaded.anyEnabled) R.string.sports_none_today else R.string.sports_none_switched_on), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 48.dp, top = 24.dp))
         } else {
             val target = vm.focus.key?.takeIf { k -> loaded.leagues.any { l -> l.games.any { it.game.key == k } } }
                 ?: loaded.leagues.firstOrNull { it.games.isNotEmpty() }?.games?.first()?.game?.key

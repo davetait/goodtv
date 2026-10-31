@@ -49,4 +49,13 @@ class AppSettingsTest {
         store.edit { it[stringSetPreferencesKey("sports_leagues")] = setOf("NHL", "CFL_LEGACY") }
         assertEquals(setOf(League.NHL), AppSettings(store).sportsLeagues.first())
     }
+
+    @Test
+    fun everyLeagueSwitchedOffStaysEmpty() = runTest {
+        val store = InMemoryDataStore()
+        val settings = AppSettings(store)
+        for (l in defaults) settings.setLeagueOn(l, false)
+        assertEquals(emptySet<League>(), settings.sportsLeagues.first())
+        assertEquals(emptySet<League>(), AppSettings(store).sportsLeagues.first())
+    }
 }
