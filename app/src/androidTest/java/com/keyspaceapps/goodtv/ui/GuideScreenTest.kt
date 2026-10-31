@@ -93,6 +93,8 @@ class GuideScreenTest {
 
     private val day = ZonedDateTime.now().withHour(0).withMinute(0).withSecond(0).withNano(0)
     private fun at(h: Int, m: Int = 0) = day.withHour(h).withMinute(m).toInstant().toEpochMilli()
+    /** [h]:[m] on tomorrow's calendar date: 24 hours on is an hour off on a clock-change day. */
+    private fun tomorrowAt(h: Int, m: Int = 0) = day.plusDays(1).withHour(h).withMinute(m).toInstant().toEpochMilli()
     private val now = at(18, 10)
 
     private fun feed(id: String, name: String, category: String = "US| NEWS") = ChannelCandidate(LiveChannel(7, id, "c", name, null, null), category)
@@ -172,10 +174,9 @@ class GuideScreenTest {
 
     // Search hits carry rows without programmes, as the repository's do.
     private fun hit(row: GuideRow, programme: GuideProgramme?) = GuideSearchHit(row.copy(programmes = emptyList()), programme)
-    private val dayMs = 24 * 3_600_000L
     private val specialReport = fox.programmes[0]
     private val hannityTonight = fox.programmes[3]
-    private val hannityTomorrow = p("fn", at(21) + dayMs, at(22) + dayMs, "Hannity")
+    private val hannityTomorrow = p("fn", tomorrowAt(21), tomorrowAt(22), "Hannity")
     private val searches = mapOf(
         // In the repository's order: on now, then by start, then channels and loops.
         "fox" to listOf(hit(fox, specialReport), hit(fox, hannityTonight), hit(fox, hannityTomorrow), hit(fox, null), hit(rock, null)),
@@ -610,7 +611,7 @@ class GuideScreenTest {
 
     /** Tomorrow (and later today, beyond half an hour away) only says when it starts; Select shows details. */
     @Test fun eventStartingTomorrowSaysTomorrow() {
-        openEvents(slotAt("event d", "Boxing Rematch", at(20) + dayMs), slotAt("event e", "UFC Main Card", at(23)))
+        openEvents(slotAt("event d", "Boxing Rematch", tomorrowAt(20)), slotAt("event e", "UFC Main Card", at(23)))
         val tomorrow = "Starts Tomorrow ${time(20, 0)}"
         waitFor(tomorrow)
         composeRule.onNodeWithText("Starts Today ${time(23, 0)}").assertIsDisplayed()
