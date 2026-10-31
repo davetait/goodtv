@@ -39,7 +39,7 @@ enum class League(
     COLLEGE_BASKETBALL_WOMEN("College Basketball (Women's)", Sport.BASKETBALL, LeagueGroup.NORTH_AMERICA, LeagueSource.Espn("basketball/womens-college-basketball"), false, listOf("ncaa", "ncaab", "ncaaw", "college basketball")),
     COLLEGE_FOOTBALL("College Football", Sport.FOOTBALL, LeagueGroup.NORTH_AMERICA, LeagueSource.Espn("football/college-football"), false, listOf("ncaa", "ncaaf", "cfb", "college football")),
     EUROPA_LEAGUE("Europa League", Sport.SOCCER, LeagueGroup.WORLD_SOCCER, LeagueSource.Espn("soccer/uefa.europa"), false, listOf("europa league", "uel")),
-    INTERNATIONAL_CRICKET("International Cricket", Sport.CRICKET, LeagueGroup.CRICKET, LeagueSource.EspnInternationalCricket, false, listOf("odi", "t20i")),
+    INTERNATIONAL_CRICKET("International Cricket", Sport.CRICKET, LeagueGroup.CRICKET, LeagueSource.EspnInternationalCricket, false, listOf("odi", "t20i", "icc")),
     IPL("IPL", Sport.CRICKET, LeagueGroup.CRICKET, LeagueSource.Espn("cricket/8048"), false, listOf("ipl", "indian premier league")),
     LA_LIGA("La Liga", Sport.SOCCER, LeagueGroup.WORLD_SOCCER, LeagueSource.Espn("soccer/esp.1"), false, listOf("la liga", "laliga")),
     LIGA_MX("Liga MX", Sport.SOCCER, LeagueGroup.NORTH_AMERICA, LeagueSource.Espn("soccer/mex.1"), false, listOf("liga mx", "ligamx")),
@@ -59,6 +59,9 @@ enum class League(
     WNBA("WNBA", Sport.BASKETBALL, LeagueGroup.NORTH_AMERICA, LeagueSource.Espn("basketball/wnba"), true, listOf("wnba")),
     WORLD_CUP("World Cup", Sport.SOCCER, LeagueGroup.WORLD_SOCCER, LeagueSource.Espn("soccer/fifa.world"), false, listOf("world cup")),
 }
+
+/** Leagues whose games are women's; a channel naming women ("Women's Cricket", "Arsenal Women") only matches these. */
+val League.womens: Boolean get() = this == League.WNBA || this == League.NWSL || this == League.PWHL || this == League.COLLEGE_BASKETBALL_WOMEN
 
 /** Soccer and cricket cards read "Home v Away"; every other sport keeps "Away @ Home". */
 val League.homeFirst: Boolean get() = sport == Sport.SOCCER || sport == Sport.CRICKET

@@ -188,6 +188,40 @@ class GameMatcherTest {
         assertEquals(listOf(g.key), matchOf("(Apple) 003 |  Montréal vs. Nashville  (2026-10-20 23:00:00)", listOf(g)))
     }
 
+    private val arsenal = team("Arsenal", "Arsenal", "Arsenal", "ARS")
+    private val chelsea = team("Chelsea", "Chelsea", "Chelsea", "CHE")
+    private val sixersBbl = team("Sydney Sixers", "Sixers", "Sydney", "SYS")
+    private val heat = team("Brisbane Heat", "Heat", "Brisbane", "BRH")
+
+    @Test fun womensMatchNeverAttachesToAMensGame() {
+        val pl = game(League.PREMIER_LEAGUE, "e1", chelsea, arsenal)
+        assertEquals(emptyList<String>(), matchOf("Arsenal Women vs Chelsea Women", listOf(pl)))
+        val bbl = game(League.BIG_BASH, "b1", heat, sixersBbl)
+        assertEquals(emptyList<String>(), matchOf("Sydney Sixers vs Brisbane Heat _ Women`s Cricket", listOf(bbl)))
+        assertEquals("a women's word in the category counts too", emptyList<String>(), matchOf("Arsenal vs Chelsea", listOf(pl), category = "UK| WOMENS FOOTBALL"))
+    }
+
+    @Test fun womensLeagueStillMatchesWithAWomensWord() {
+        val sceptres = team("Toronto Sceptres", "Sceptres", "Toronto", "TOR")
+        val fleet = team("Boston Fleet", "Fleet", "Boston", "BOS")
+        val pwhl = game(League.PWHL, "w1", fleet, sceptres)
+        assertEquals(listOf(pwhl.key), matchOf("PWHL: Toronto Sceptres vs Boston Fleet (Women's Hockey)", listOf(pwhl)))
+    }
+
+    @Test fun liveMultiDayGameMatchesTodaysDatedChannel() {
+        val india = team("India", "India", "India", "IND")
+        val newZealand = team("New Zealand", "New Zealand", "New Zealand", "NZ")
+        val test = game(League.INTERNATIONAL_CRICKET, "t1", india, newZealand, at = "2026-10-17T04:00:00Z", state = GameState.LIVE)
+        assertEquals(listOf(test.key), matchOf("live: India vs New Zealand _ Cricket (2026-10-20 03:00:00)", listOf(test)))
+    }
+
+    @Test fun iccNamesInternationalCricket() {
+        val india = team("India", "India", "India", "IND")
+        val pakistan = team("Pakistan", "Pakistan", "Pakistan", "PAK")
+        val t20 = game(League.INTERNATIONAL_CRICKET, "i2", pakistan, india)
+        assertEquals(listOf(t20.key), matchOf("ICC T20 World Cup: India v Pakistan", listOf(t20)))
+    }
+
     @Test fun channelTimesFormats() {
         fun t(s: String) = ChannelTimes.parse(s, now)
         assertEquals(Instant.parse("2026-10-20T23:05:00Z"), t("LIVE | X | Tue 20 Oct 19:05 EDT (US) |"))

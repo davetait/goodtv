@@ -22,7 +22,8 @@ data class ChannelCandidate(val channel: LiveChannel, val categoryName: String)
  * league the app doesn't have ("CFL", "OHL", …) never matches. A league word in the name or category
  * ("NBA", "Premier League") or a sport word ("FC", "cricket") limits the channel to that league's or
  * sport's games, so Toronto FC stays off the Maple Leafs even when no soccer is on. A date in the name
- * must be within [WINDOW_HOURS] of the start. If a name still fits several games it matches none
+ * must be within [WINDOW_HOURS] of the start (or, for a live game, of now). A channel naming women
+ * ("Women's Cricket", "Arsenal Women") only matches women's leagues. If a name still fits several games it matches none
  * (better "On 2 channels" than starting the wrong game).
  */
 object GameMatcher {
@@ -37,6 +38,8 @@ object GameMatcher {
      * whatever is on ("76ers vs. Knicks | … | CA: SOCCER PPV 30").
      */
     private val SPORT_WORDS = mapOf("fc" to Sport.SOCCER, "cf" to Sport.SOCCER, "sc" to Sport.SOCCER, "cricket" to Sport.CRICKET)
+    /** Words that mark a women's match ("Women`s Cricket" normalises to "women s"); "w" alone is too loose. */
+    private val WOMEN_WORDS = setOf("women", "womens")
     private val LEAGUE_WORDS = League.entries.flatMap { it.words }.toSet() + OUTSIDE_LEAGUES + SPORT_WORDS.keys
 
     private class Naming(val words: List<String>, val leagues: Set<League>)
@@ -70,10 +73,12 @@ object GameMatcher {
         val categoryWords = normalize(c.categoryName).split(' ')
         if (words.any { it in OUTSIDE_LEAGUES } || categoryWords.any { it in OUTSIDE_LEAGUES }) return null
         val named = EnumSet.noneOf(League::class.java).also { addNamed(words, it); addNamed(categoryWords, it) }
+        val women = words.any { it in WOMEN_WORDS } || categoryWords.any { it in WOMEN_WORDS }
         val hits = mutableListOf<Hit>()
         for (i in words.indices) {
             for (f in index[words[i]].orEmpty()) {
                 if (named.isNotEmpty() && f.game.league !in named) continue
+                if (women && !f.game.league.womens) continue
                 val end = i + f.words.size
                 if (end <= words.size && words.subList(i, end) == f.words) hits += Hit(f.game, f.home, i, end)
             }
@@ -85,7 +90,11 @@ object GameMatcher {
             home.any { a -> away.any { b -> a.to <= b.from || b.to <= a.from } }
         }.keys.toList()
         val time = ChannelTimes.parse(c.channel.name, now)
-        if (time != null) candidates = candidates.filter { abs(it.startsAt.epochSecond - time.epochSecond) <= WINDOW_HOURS * 3600 }
+        // A live game can run for days (a Test match): its dated daily slots sit near now, not near its start.
+        if (time != null) candidates = candidates.filter {
+            abs(it.startsAt.epochSecond - time.epochSecond) <= WINDOW_HOURS * 3600 ||
+                (it.state == GameState.LIVE && abs(now.epochSecond - time.epochSecond) <= WINDOW_HOURS * 3600)
+        }
         if (candidates.size > 1 && time != null) {
             // The same matchup on two days (a series): the nearer start is this channel's game.
             val best = candidates.minOf { abs(it.startsAt.epochSecond - time.epochSecond) }
