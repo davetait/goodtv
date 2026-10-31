@@ -13,10 +13,10 @@ import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 
-class PwhlScorebarTest {
+class HockeyTechScorebarTest {
     private val server = MockWebServer()
     private fun fixture() = javaClass.getResource("/sports/pwhl.json")!!.readText()
-    private fun source() = PwhlScorebar(OkHttpClient(), baseUrl = server.url("/feed/"), zone = { ZoneId.of("America/Toronto") })
+    private fun source() = HockeyTechScorebar(OkHttpClient(), baseUrl = server.url("/feed/"), zone = { ZoneId.of("America/Toronto") })
     private val nov22 = LocalDate.of(2026, 11, 22)
 
     @Before fun setUp() = server.start()
@@ -66,5 +66,22 @@ class PwhlScorebarTest {
         assertEquals(listOf("PWHL Las Vegas"), source().games(League.PWHL, nov22).map { it.home.displayName })
         server.enqueue(MockResponse(code = 200, body = fixture()))
         assertEquals(4, source().games(League.PWHL, nov22.plusDays(1)).size)
+    }
+
+    @Test fun ahlFixture() = runTest {
+        server.enqueue(MockResponse(code = 200, body = javaClass.getResource("/sports/ahl.json")!!.readText()))
+        val games = source().games(League.AHL, LocalDate.of(2026, 10, 30))
+        assertEquals(12, games.size)
+        assertEquals(setOf(League.AHL), games.map { it.league }.toSet())
+        assertEquals("AHL:1029216", games.first().key)
+        assertEquals("Belleville Senators", games.first().home.displayName)
+        val url = server.takeRequest().url
+        assertEquals("ahl", url.queryParameter("client_code"))
+        assertEquals("50c2cd9b5e18e390", url.queryParameter("key"))
+    }
+
+    @Test fun aNicknameEqualToTheLeagueIsDropped() = runTest {
+        server.enqueue(MockResponse(code = 200, body = fixture()))
+        assertNull(source().games(League.PWHL, nov22).single().home.nickname)
     }
 }

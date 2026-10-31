@@ -24,7 +24,7 @@ data class ChannelCandidate(val channel: LiveChannel, val categoryName: String)
 object GameMatcher {
     const val WINDOW_HOURS = 30L
 
-    private val LEAGUE_WORDS = League.entries.map { it.label.lowercase() }.toSet()
+    private val LEAGUE_WORDS = League.entries.flatMap { it.words }.toSet()
     /** Name starts (normalised) of a slot that is over or empty; the guide hides these too. */
     internal val CLOSED = listOf("ended ", "end ", "final ", "no event streaming")
     /** Leagues outside the six whose teams share cities with them (Toronto, Montreal, …): a channel naming one is theirs. */

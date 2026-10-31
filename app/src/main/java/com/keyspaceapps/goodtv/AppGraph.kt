@@ -43,10 +43,12 @@ import com.keyspaceapps.goodtv.data.watchlist.WatchListRef
 import com.keyspaceapps.goodtv.data.watchlist.WatchListRepository
 import com.keyspaceapps.goodtv.data.tmdb.TmdbApi
 import com.keyspaceapps.goodtv.data.tmdb.TmdbCredential
+import com.keyspaceapps.goodtv.data.sports.EspnCricketScorepanel
 import com.keyspaceapps.goodtv.data.sports.EspnScoreboard
+import com.keyspaceapps.goodtv.data.sports.HockeyTechScorebar
 import com.keyspaceapps.goodtv.data.sports.League
+import com.keyspaceapps.goodtv.data.sports.LeagueSource
 import com.keyspaceapps.goodtv.data.sports.LiveRefresher
-import com.keyspaceapps.goodtv.data.sports.PwhlScorebar
 import com.keyspaceapps.goodtv.data.sports.ScheduleSource
 import com.keyspaceapps.goodtv.data.sports.SportsRepository
 import com.keyspaceapps.goodtv.data.subtitles.OnlineSubtitles
@@ -249,10 +251,18 @@ class AppGraph(val context: Context) {
      */
     val onlineSubtitles: OnlineSubtitles? get() = if (openSubtitlesApi.isConfigured) onlineSubtitlesInstance else null
 
-    /** The Sports tab: today's NHL/NBA/MLB/NFL/WNBA games from ESPN, PWHL from HockeyTech, matched to live channels. */
+    /** The Sports tab: today's games from ESPN, HockeyTech and ESPN's cricket scorepanel, matched to live channels. */
     val sports: SportsRepository by lazy {
         val espn = EspnScoreboard(okHttp)
-        val sources: Map<League, ScheduleSource> = League.entries.associateWith { if (it == League.PWHL) PwhlScorebar(okHttp) else espn }
+        val hockeyTech = HockeyTechScorebar(okHttp)
+        val cricket = EspnCricketScorepanel(okHttp)
+        val sources: Map<League, ScheduleSource> = League.entries.associateWith {
+            when (it.source) {
+                is LeagueSource.Espn -> espn
+                is LeagueSource.HockeyTech -> hockeyTech
+                LeagueSource.EspnInternationalCricket -> cricket
+            }
+        }
         SportsRepository(sources, store, liveRefresher)
     }
 

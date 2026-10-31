@@ -55,7 +55,7 @@ class SportsRepositoryTest {
     }
 
     private fun TestScope.repo() = SportsRepository(
-        sources = League.entries.associateWith { fake },
+        sources = League.entries.filter { it.onByDefault }.associateWith { fake },
         store = store,
         refresher = LiveRefresher(store, SourceRegistry(listOf(FakeChannelSource())), { false }),
         clock = { now }, zone = { zone }, compute = StandardTestDispatcher(testScheduler),
@@ -83,8 +83,8 @@ class SportsRepositoryTest {
             ) else emptyList()
         }
         val board = collect(repo()).last()
-        assertEquals(listOf(League.NHL, League.NBA), board.leagues.map { it.league })
-        assertEquals(listOf("h2", "h3"), board.leagues[0].games.map { it.game.id })
+        assertEquals(listOf(League.NBA, League.NHL), board.leagues.map { it.league })
+        assertEquals(listOf("h2", "h3"), board.leagues[1].games.map { it.game.id })
     }
 
     @Test fun liveGameFromYesterdayStillShows() = runTest {
@@ -97,7 +97,7 @@ class SportsRepositoryTest {
                 game(League.NHL, "early", "2026-10-20T20:00:00Z", GameState.SCHEDULED),
             ) else emptyList()
         }
-        val repo = SportsRepository(League.entries.associateWith { fake }, store, LiveRefresher(store, SourceRegistry(listOf(FakeChannelSource())), { false }),
+        val repo = SportsRepository(League.entries.filter { it.onByDefault }.associateWith { fake }, store, LiveRefresher(store, SourceRegistry(listOf(FakeChannelSource())), { false }),
             clock = { now }, zone = { la }, compute = StandardTestDispatcher(testScheduler))
         val board = collect(repo).last()
         assertEquals(listOf("late"), board.leagues.single().games.map { it.game.id })
@@ -108,8 +108,8 @@ class SportsRepositoryTest {
         schedule[League.NHL] = { throw SportsException("down") }
         schedule[League.NBA] = { listOf(game(League.NBA, "b1", "2026-10-21T00:30:00Z", GameState.SCHEDULED)) }
         val board = collect(repo()).last()
-        assertEquals(LeagueGames(League.NHL, emptyList(), failed = true), board.leagues[0])
-        assertEquals(League.NBA, board.leagues[1].league)
+        assertEquals(League.NBA, board.leagues[0].league)
+        assertEquals(LeagueGames(League.NHL, emptyList(), failed = true), board.leagues[1])
     }
 
     @Test fun lastGoodScheduleSurvivesAnOutage() = runTest {
@@ -173,8 +173,8 @@ class SportsRepositoryTest {
         val boards = collect(repo())
         advanceTimeBy(SportsRepository.LEAGUE_TIMEOUT_MS + 1); runCurrent()
         val board = boards.first()
-        assertEquals(LeagueGames(League.NHL, emptyList(), failed = true), board.leagues[0])
-        assertEquals(League.NBA, board.leagues[1].league)
+        assertEquals(League.NBA, board.leagues[0].league)
+        assertEquals(LeagueGames(League.NHL, emptyList(), failed = true), board.leagues[1])
     }
 
     @Test fun aLongOutageIsFlaggedNotHidden() = runTest {
@@ -204,7 +204,7 @@ class SportsRepositoryTest {
         val sid = store.insertSource(SourceRecord(0, SourceType.XTREAM, "A", SourceConfig.Xtream("http://s", "u", "p"), true, 0L, null))
         var thread: String? = null
         channels.liveResults[sid] = { thread = Thread.currentThread().name.substringBefore(" @"); Result.success(LiveCatalog(emptyList(), emptyList())) }
-        val repo = SportsRepository(League.entries.associateWith { fake }, store, LiveRefresher(store, SourceRegistry(listOf(channels)), { false }),
+        val repo = SportsRepository(League.entries.filter { it.onByDefault }.associateWith { fake }, store, LiveRefresher(store, SourceRegistry(listOf(channels)), { false }),
             clock = { now }, zone = { zone }, compute = compute)
         val job = launch { repo.observe().collect { } }
         withTimeout(5_000) { while (thread == null) delay(10) }
