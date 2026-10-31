@@ -149,6 +149,9 @@ class AppGraph(val context: Context) {
      */
     val livePreviewsSetting: StateFlow<Boolean?> = settings.livePreviews.stateIn<Boolean?>(appScope, SharingStarted.Eagerly, null)
 
+    /** The switched-on Sports leagues, read from app start; null only until the first read. */
+    val sportsLeaguesSetting: StateFlow<Set<League>?> = settings.sportsLeagues.stateIn<Set<League>?>(appScope, SharingStarted.Eagerly, null)
+
     val syncManager: SyncManager by lazy { SyncManager(store, sourceRegistry, appScope) }
     val repository: LibraryRepository by lazy { LibraryRepository(store, sourceRegistry, syncManager, settings) }
 
@@ -263,7 +266,7 @@ class AppGraph(val context: Context) {
                 LeagueSource.EspnInternationalCricket -> cricket
             }
         }
-        SportsRepository(sources, store, liveRefresher)
+        SportsRepository(sources, settings.sportsLeagues, store, liveRefresher)
     }
 
     /** Re-downloads the live lists of stale sources; shared by Sports and the guide's event slots. */

@@ -18,6 +18,8 @@ import java.util.concurrent.Executors
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -54,8 +56,11 @@ class SportsRepositoryTest {
         }
     }
 
-    private fun TestScope.repo() = SportsRepository(
-        sources = League.entries.filter { it.onByDefault }.associateWith { fake },
+    private val defaults = League.entries.filter { it.onByDefault }.toSet()
+
+    private fun TestScope.repo(enabled: Flow<Set<League>> = MutableStateFlow(defaults)) = SportsRepository(
+        sources = League.entries.associateWith { fake },
+        enabled = enabled,
         store = store,
         refresher = LiveRefresher(store, SourceRegistry(listOf(FakeChannelSource())), { false }),
         clock = { now }, zone = { zone }, compute = StandardTestDispatcher(testScheduler),
@@ -97,7 +102,7 @@ class SportsRepositoryTest {
                 game(League.NHL, "early", "2026-10-20T20:00:00Z", GameState.SCHEDULED),
             ) else emptyList()
         }
-        val repo = SportsRepository(League.entries.filter { it.onByDefault }.associateWith { fake }, store, LiveRefresher(store, SourceRegistry(listOf(FakeChannelSource())), { false }),
+        val repo = SportsRepository(League.entries.associateWith { fake }, MutableStateFlow(defaults), store, LiveRefresher(store, SourceRegistry(listOf(FakeChannelSource())), { false }),
             clock = { now }, zone = { la }, compute = StandardTestDispatcher(testScheduler))
         val board = collect(repo).last()
         assertEquals(listOf("late"), board.leagues.single().games.map { it.game.id })
@@ -196,6 +201,51 @@ class SportsRepositoryTest {
         assertEquals(listOf("h1"), row.games.map { it.game.id })
     }
 
+    private fun today(vararg leagues: League) {
+        val today = LocalDate.of(2026, 10, 20)
+        leagues.forEach { l ->
+            schedule[l] = { d -> if (d == today) listOf(game(l, "${l.name}1", "2026-10-21T00:30:00Z", GameState.SCHEDULED)) else emptyList() }
+        }
+    }
+
+    @Test fun onlyEnabledLeaguesAreRead() = runTest {
+        init()
+        today(League.NHL, League.MLS)
+        collect(repo(MutableStateFlow(setOf(League.NHL, League.MLS))))
+        assertEquals(setOf(League.NHL, League.MLS), reads.toSet())
+    }
+
+    @Test fun rowsAreAlphabetical() = runTest {
+        init()
+        val on = setOf(League.NHL, League.BUNDESLIGA, League.MLS, League.AHL)
+        today(*on.toTypedArray())
+        val board = collect(repo(MutableStateFlow(on))).last()
+        assertEquals(listOf(League.AHL, League.BUNDESLIGA, League.MLS, League.NHL), board.leagues.map { it.league })
+    }
+
+    @Test fun switchingALeagueOnFetchesItAtOnce() = runTest {
+        init()
+        today(League.NHL, League.MLS)
+        val enabled = MutableStateFlow(setOf(League.NHL))
+        val boards = collect(repo(enabled))
+        assertTrue(League.MLS !in reads)
+        enabled.value = setOf(League.NHL, League.MLS)
+        runCurrent()
+        assertTrue(League.MLS in reads)
+        assertEquals(listOf(League.MLS, League.NHL), boards.last().leagues.map { it.league })
+    }
+
+    @Test fun switchingALeagueOffDropsItsRow() = runTest {
+        init()
+        today(League.NHL, League.MLS)
+        val enabled = MutableStateFlow(setOf(League.NHL, League.MLS))
+        val boards = collect(repo(enabled))
+        assertEquals(listOf(League.MLS, League.NHL), boards.last().leagues.map { it.league })
+        enabled.value = setOf(League.MLS)
+        runCurrent()
+        assertEquals(listOf(League.MLS), boards.last().leagues.map { it.league })
+    }
+
     /** The live-list refresh maps ~57,000 channels; it must not run on the collector's (main) thread. */
     @Test fun refreshRunsOnTheComputeDispatcher() = runBlocking {
         init()
@@ -204,7 +254,7 @@ class SportsRepositoryTest {
         val sid = store.insertSource(SourceRecord(0, SourceType.XTREAM, "A", SourceConfig.Xtream("http://s", "u", "p"), true, 0L, null))
         var thread: String? = null
         channels.liveResults[sid] = { thread = Thread.currentThread().name.substringBefore(" @"); Result.success(LiveCatalog(emptyList(), emptyList())) }
-        val repo = SportsRepository(League.entries.filter { it.onByDefault }.associateWith { fake }, store, LiveRefresher(store, SourceRegistry(listOf(channels)), { false }),
+        val repo = SportsRepository(League.entries.associateWith { fake }, MutableStateFlow(defaults), store, LiveRefresher(store, SourceRegistry(listOf(channels)), { false }),
             clock = { now }, zone = { zone }, compute = compute)
         val job = launch { repo.observe().collect { } }
         withTimeout(5_000) { while (thread == null) delay(10) }
