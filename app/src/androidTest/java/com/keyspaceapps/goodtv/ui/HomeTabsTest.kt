@@ -91,12 +91,12 @@ class HomeTabsTest {
 
     /**
      * The Live tab is the guide: focus starts on the first row's cell ("No guide info" here, as wide as the
-     * row). UP goes to the row above it (a genre chip or the search field to their right), UP again to the
-     * tab whose horizontal span overlaps it ("Settings", the last tab), not the selected tab. LEFT then walks along the
+     * row). UP goes to the row above it (a genre chip or the search field to their right), UP again into the
+     * menu, landing on the open tab ("Live"), not on whichever tab sits above. RIGHT then walks along the
      * tabs and Select switches.
      */
     @Test
-    fun upFromTheGuideReachesTheTabsAndLeftWalksTabs() {
+    fun upFromTheGuideLandsOnTheOpenTabAndRightWalksTabs() {
         seedAndLaunch()
         waitFor("Channel One")
         waitFocused(hasText("No guide info"))
@@ -105,14 +105,14 @@ class HomeTabsTest {
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionUp) }
         waitFocused(hasAnyChipLabel() or hasTestTag("guide_search"))
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionUp) }
-        waitFocused(hasText("Settings"))
-        composeRule.onNodeWithText("Live").assertIsSelected()
+        waitFocused(tab("Live"))
+        composeRule.onNode(tab("Live")).assertIsSelected()
 
-        composeRule.onRoot().performKeyInput { pressKey(Key.DirectionLeft) }
-        composeRule.onNodeWithText("Series").assertIsFocused()
+        composeRule.onRoot().performKeyInput { pressKey(Key.DirectionRight) }
+        composeRule.onNode(tab("Sports")).assertIsFocused()
 
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionCenter) }
-        composeRule.onNodeWithText("Series").assertIsSelected()
+        composeRule.onNode(tab("Sports")).assertIsSelected()
     }
 
     @Test
