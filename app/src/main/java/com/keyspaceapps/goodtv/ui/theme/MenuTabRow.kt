@@ -32,9 +32,10 @@ private val OnPill = Color(0xFF0B0F19)
  * (tv-material's own pill sits on the open tab and gives the focused one dark text with nothing behind it.)
  *
  * Moving into the row with the D-pad (UP from the page) lands on the open tab, not on whichever tab sits above.
+ * [openTab], when given, focuses the open tab.
  */
 @Composable
-fun MenuTabRow(labels: List<String>, selectedIndex: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+fun MenuTabRow(labels: List<String>, selectedIndex: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier, openTab: FocusRequester? = null) {
     var focusedIndex by remember { mutableIntStateOf(selectedIndex) }
     val text = MaterialTheme.colorScheme.onBackground
     val green = MaterialTheme.colorScheme.primary
@@ -61,7 +62,7 @@ fun MenuTabRow(labels: List<String>, selectedIndex: Int, onSelect: (Int) -> Unit
                 selected = i == selectedIndex,
                 onFocus = { focusedIndex = i },
                 onClick = { onSelect(i) },
-                modifier = Modifier.focusRequester(requesters[i]),
+                modifier = Modifier.focusRequester(requesters[i]).then(if (i == selectedIndex && openTab != null) Modifier.focusRequester(openTab) else Modifier),
                 colors = TabDefaults.pillIndicatorTabColors(
                     contentColor = text.copy(alpha = 0.6f),
                     inactiveContentColor = text.copy(alpha = 0.7f),

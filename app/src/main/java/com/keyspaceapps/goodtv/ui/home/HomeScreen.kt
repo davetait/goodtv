@@ -8,7 +8,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
@@ -27,8 +30,10 @@ import com.keyspaceapps.goodtv.ui.nav.GoodTvKey
 import com.keyspaceapps.goodtv.ui.nav.HomeTab
 import com.keyspaceapps.goodtv.ui.settings.SettingsScreen
 import com.keyspaceapps.goodtv.ui.theme.MenuTabRow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -56,10 +61,13 @@ class HomeViewModel(private val repo: LibraryRepository, private val settings: A
 internal fun savedTab(name: String): HomeTab? =
     if (name == "SOURCES") HomeTab.SETTINGS else HomeTab.entries.firstOrNull { it.name == name }
 
+/** Each [backToMenu] signal (Back on this screen) focuses the open tab in the menu. */
 @Composable
-fun HomeScreen(onNavigate: (GoodTvKey) -> Unit) {
+fun HomeScreen(onNavigate: (GoodTvKey) -> Unit, backToMenu: Flow<Unit> = emptyFlow()) {
     val vm = goodTvViewModel { HomeViewModel(it.repository, it.settings) }
     val tab by vm.tab.collectAsState()
+    val openTab = remember { FocusRequester() }
+    LaunchedEffect(backToMenu) { backToMenu.collect { openTab.requestFocus() } }
     val current = tab ?: return
 
     Column(
@@ -75,6 +83,7 @@ fun HomeScreen(onNavigate: (GoodTvKey) -> Unit) {
             selectedIndex = tabs.indexOf(current),
             onSelect = { vm.selectTab(tabs[it]) },
             modifier = Modifier.padding(start = 48.dp, top = 24.dp, bottom = 16.dp),
+            openTab = openTab,
         )
         Box(Modifier.fillMaxSize()) {
             when (current) {
