@@ -20,6 +20,8 @@ import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.printToLog
 import androidx.compose.ui.test.requestFocus
 import androidx.test.core.app.ApplicationProvider
+import androidx.test.platform.app.InstrumentationRegistry
+import android.view.KeyEvent
 import com.keyspaceapps.goodtv.MainActivity
 import com.keyspaceapps.goodtv.appGraph
 import com.keyspaceapps.goodtv.data.source.SourceConfig
@@ -33,6 +35,7 @@ import com.keyspaceapps.goodtv.domain.SourceRecord
 import com.keyspaceapps.goodtv.testing.clearDatabaseForTest
 import kotlinx.coroutines.runBlocking
 import org.junit.After
+import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
 
@@ -131,5 +134,50 @@ class HomeTabsTest {
         composeRule.onRoot().performKeyInput { pressKey(Key.DirectionCenter) }
         waitFor("Movie One")
         composeRule.onNodeWithText("Action").assertIsDisplayed()
+    }
+
+    /** Back on the main screen goes to the open tab in the menu, from anywhere in the page, and never leaves the app. */
+    /** Back as the remote sends it, through the window: unhandled, it reaches the activity's back dispatcher. */
+    private fun systemBack() {
+        InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        composeRule.waitForIdle()
+    }
+
+    @Test
+    fun backGoesToTheOpenTabAndNeverLeaves() {
+        seedAndLaunch()
+        waitFor("Channel One")
+        waitFocused(hasText("No guide info"))
+
+        systemBack()
+        waitFocused(tab("Live"))
+
+        // Already on the menu: Back keeps it there, and the app stays open.
+        composeRule.onRoot().performKeyInput { pressKey(Key.DirectionRight) }
+        composeRule.onNode(tab("Sports")).assertIsFocused()
+        systemBack()
+        waitFocused(tab("Live"))
+        systemBack()
+        composeRule.waitForIdle()
+        composeRule.onNode(tab("Live")).assertIsFocused()
+        scenario!!.onActivity { assertFalse("Back never closes the app", it.isFinishing) }
+    }
+
+    /** Back on a pushed screen still just goes back, to the row it was opened from, not to the menu. */
+    @Test
+    fun backOnAPushedScreenStillGoesBack() {
+        seedAndLaunch()
+        waitFor("Channel One")
+        composeRule.onNode(tab("Settings")).requestFocus()
+        composeRule.onRoot().performKeyInput { pressKey(Key.DirectionCenter) }
+        waitFor("Live previews off")
+        composeRule.onNodeWithText("Live TV").requestFocus()
+        composeRule.onRoot().performKeyInput { pressKey(Key.DirectionCenter) }
+        waitFor("Live previews")
+        waitFocused(hasText("Live previews"))
+
+        systemBack()
+        waitFocused(hasText("Live TV"))
+        composeRule.onNode(tab("Settings")).assertIsSelected()
     }
 }

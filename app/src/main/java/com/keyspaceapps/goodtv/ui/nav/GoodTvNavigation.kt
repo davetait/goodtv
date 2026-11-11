@@ -1,5 +1,6 @@
 package com.keyspaceapps.goodtv.ui.nav
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterExitState
@@ -53,6 +54,7 @@ import com.keyspaceapps.goodtv.ui.player.PlayerScreen
 import com.keyspaceapps.goodtv.ui.sources.EditSourceScreen
 import com.keyspaceapps.goodtv.ui.sources.SourcesScreen
 import com.keyspaceapps.goodtv.ui.watchlist.WatchListHost
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 
 @Composable
@@ -60,6 +62,9 @@ fun GoodTvNavigation() {
     val backStack = rememberNavBackStack(HomeKey)
     val pop: () -> Unit = { backStack.removeLastOrNull() }
     val stackKey: (Any) -> Any = { stackContentKey(backStack, it) }
+    // Back on the main screen goes to its menu instead of leaving the app; Back on a pushed screen pops it (NavDisplay).
+    val backToMenu = remember { MutableSharedFlow<Unit>(extraBufferCapacity = 1) }
+    BackHandler(enabled = backStack.size == 1) { backToMenu.tryEmit(Unit) }
 
     // Posters everywhere get the watch list's bookmark and hold-Select menu.
     WatchListHost(LocalContext.current.appGraph().watchList) {
@@ -74,7 +79,7 @@ fun GoodTvNavigation() {
                 rememberViewModelStoreNavEntryDecorator(),
             ),
             entryProvider = entryProvider {
-                entry<HomeKey> { HomeScreen(onNavigate = { backStack.add(it) }) }
+                entry<HomeKey> { HomeScreen(onNavigate = { backStack.add(it) }, backToMenu = backToMenu) }
                 entry<EditSourceKey>(stackKey) { key -> EditSourceScreen(sourceId = key.sourceId, onDone = pop) }
                 entry<CategoriesKey>(stackKey) { key -> CategoriesScreen(key = key) }
                 // A full screen now, not a tab: its own top padding replaces the tab row's.
