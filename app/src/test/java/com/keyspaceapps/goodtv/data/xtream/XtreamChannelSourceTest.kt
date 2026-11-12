@@ -1,9 +1,20 @@
 package com.keyspaceapps.goodtv.data.xtream
 
+import com.keyspaceapps.goodtv.data.repo.BufferingCatalogWriter
+import com.keyspaceapps.goodtv.data.repo.CatalogWriter
 import com.keyspaceapps.goodtv.data.source.SourceConfig
 import com.keyspaceapps.goodtv.data.source.SourceException
 import com.keyspaceapps.goodtv.data.source.SourceType
+import com.keyspaceapps.goodtv.domain.Catalog
+import com.keyspaceapps.goodtv.domain.Category
 import com.keyspaceapps.goodtv.domain.ContentKind
+import com.keyspaceapps.goodtv.domain.LiveChannel
+import com.keyspaceapps.goodtv.domain.Movie
+import com.keyspaceapps.goodtv.domain.Series
+import java.util.Collections
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import com.keyspaceapps.goodtv.domain.PlayableRef
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.Dispatcher
@@ -14,6 +25,7 @@ import okio.Buffer
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -179,5 +191,102 @@ class XtreamChannelSourceTest {
         assertEquals(count, catalog.live.size)
         assertEquals("60000", catalog.live.last().id)
         assertEquals("1", catalog.live.first().categoryId)
+    }
+
+    /** Records each list the source hands on, in order, as "kind:size". */
+    private class RecordingWriter(private val onWrite: (String) -> Unit = {}) : CatalogWriter {
+        val events: MutableList<String> = Collections.synchronizedList(mutableListOf())
+        private fun record(e: String) { events += e; onWrite(e) }
+        override suspend fun categories(kind: ContentKind, list: List<Category>) = record("categories-$kind:${list.size}")
+        override suspend fun live(list: List<LiveChannel>) = record("live:${list.size}")
+        override suspend fun movies(list: List<Movie>) = record("movies:${list.size}")
+        override suspend fun series(list: List<Series>) = record("series:${list.size}")
+        override suspend fun commit() = record("commit")
+        override suspend fun abandon() = record("abandon")
+    }
+
+    private val listActions = setOf("get_live_streams", "get_vod_streams", "get_series")
+
+    @Test
+    fun streamCatalogDownloadsAllListsAtOnce() = runTest {
+        val inFlight = AtomicInteger()
+        val maxInFlight = AtomicInteger()
+        val allThree = CountDownLatch(3)
+        val lists = catalogDispatcher()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                if (request.url.queryParameter("action") !in listActions) return lists.dispatch(request)
+                maxInFlight.accumulateAndGet(inFlight.incrementAndGet(), ::maxOf)
+                allThree.countDown()
+                allThree.await(5, TimeUnit.SECONDS) // Holds each list until all three are asked for, or gives up.
+                inFlight.decrementAndGet()
+                return lists.dispatch(request)
+            }
+        }
+        val writer = RecordingWriter()
+
+        val result = source.streamCatalog(7, cfg, writer)
+
+        assertTrue(result.exceptionOrNull()?.toString(), result.isSuccess)
+        assertEquals(3, maxInFlight.get())
+    }
+
+    @Test
+    fun streamCatalogHandsEachListToTheWriterAsItArrives() = runTest {
+        val liveWritten = CountDownLatch(1)
+        var seriesWaitedForLive = false
+        val lists = catalogDispatcher()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                if (request.url.queryParameter("action") == "get_series") {
+                    seriesWaitedForLive = liveWritten.await(5, TimeUnit.SECONDS)
+                }
+                return lists.dispatch(request)
+            }
+        }
+        val writer = RecordingWriter { if (it.startsWith("live:")) liveWritten.countDown() }
+
+        val result = source.streamCatalog(7, cfg, writer)
+
+        assertTrue(result.exceptionOrNull()?.toString(), result.isSuccess)
+        assertTrue("live was not written while series was still downloading", seriesWaitedForLive)
+        assertTrue(writer.events.toString(), writer.events.indexOfFirst { it.startsWith("live:") } < writer.events.indexOfFirst { it.startsWith("series:") })
+    }
+
+    @Test
+    fun streamCatalogWritesWhatFetchCatalogReturns() = runTest {
+        server.dispatcher = catalogDispatcher()
+        val fetched = source.fetchCatalog(7, cfg).getOrThrow()
+        var streamed: Catalog? = null
+        val writer = BufferingCatalogWriter { streamed = it }
+
+        source.streamCatalog(7, cfg, writer).getOrThrow()
+        writer.commit()
+
+        assertEquals(fetched, streamed)
+    }
+
+    @Test
+    fun streamCatalogWritesEveryKindsCategoriesEvenWhenEmpty() = runTest {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = json("[]")
+        }
+        val writer = RecordingWriter()
+
+        source.streamCatalog(7, cfg, writer).getOrThrow()
+
+        assertEquals(
+            setOf("categories-LIVE:0", "categories-MOVIE:0", "categories-SERIES:0", "live:0", "movies:0", "series:0"),
+            writer.events.toSet(),
+        )
+        assertFalse(writer.events.contains("commit"))
+    }
+
+    @Test
+    fun streamCatalogFailsIfAnyCallFails() = runTest {
+        server.dispatcher = catalogDispatcher(failAction = "get_vod_streams")
+        val result = source.streamCatalog(7, cfg, RecordingWriter())
+        assertTrue(result.isFailure)
+        assertEquals("Server returned HTTP 500", result.exceptionOrNull()!!.message)
     }
 }

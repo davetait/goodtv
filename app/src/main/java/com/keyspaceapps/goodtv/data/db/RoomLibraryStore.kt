@@ -1,6 +1,8 @@
 package com.keyspaceapps.goodtv.data.db
 
 import androidx.room.withTransaction
+import com.keyspaceapps.goodtv.data.repo.BufferingCatalogWriter
+import com.keyspaceapps.goodtv.data.repo.CatalogWriter
 import com.keyspaceapps.goodtv.data.repo.CategoryKey
 import com.keyspaceapps.goodtv.data.repo.LibraryStore
 import com.keyspaceapps.goodtv.domain.Catalog
@@ -76,6 +78,9 @@ class RoomLibraryStore(
             .forEach { kind -> hidden.pruneMissing(sourceId, kind.name) }
         lineup.bumpGeneration()
     }
+
+    // Interim: buffers in memory and commits through replaceCatalog; staging tables replace this.
+    override suspend fun beginCatalog(sourceId: Long): CatalogWriter = BufferingCatalogWriter { replaceCatalog(sourceId, it) }
 
     override suspend fun replaceLive(sourceId: Long, live: LiveCatalog) = db.withTransaction {
         library.deleteCategoriesOfKind(sourceId, ContentKind.LIVE.name)

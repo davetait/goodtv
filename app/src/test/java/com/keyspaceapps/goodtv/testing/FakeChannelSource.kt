@@ -1,5 +1,6 @@
 package com.keyspaceapps.goodtv.testing
 
+import com.keyspaceapps.goodtv.data.repo.CatalogWriter
 import com.keyspaceapps.goodtv.data.source.ChannelSource
 import com.keyspaceapps.goodtv.data.source.LiveCatalog
 import com.keyspaceapps.goodtv.data.source.SourceConfig
@@ -34,6 +35,12 @@ class FakeChannelSource : ChannelSource {
         fetchCatalogCalls += sourceId
         return catalogResults[sourceId]?.invoke() ?: Result.failure(SourceException("No script for $sourceId"))
     }
+
+    /** Per source, a script that writes lists into the sync's writer; sources without one stream fetchCatalog's result. */
+    val streamScripts = mutableMapOf<Long, suspend (CatalogWriter) -> Result<Unit>>()
+
+    override suspend fun streamCatalog(sourceId: Long, config: SourceConfig, writer: CatalogWriter): Result<Unit> =
+        streamScripts[sourceId]?.invoke(writer) ?: super.streamCatalog(sourceId, config, writer)
 
     val liveResults = mutableMapOf<Long, suspend () -> Result<LiveCatalog>>()
     val fetchLiveCalls = mutableListOf<Long>()

@@ -4,6 +4,12 @@ import com.keyspaceapps.goodtv.data.source.SourceConfig
 import com.keyspaceapps.goodtv.data.source.SourceException
 import com.keyspaceapps.goodtv.data.source.SourceRegistry
 import com.keyspaceapps.goodtv.data.source.SourceType
+import com.keyspaceapps.goodtv.domain.Catalog
+import com.keyspaceapps.goodtv.domain.Category
+import com.keyspaceapps.goodtv.domain.ContentKind
+import com.keyspaceapps.goodtv.domain.LiveChannel
+import com.keyspaceapps.goodtv.domain.Movie
+import com.keyspaceapps.goodtv.domain.Series
 import com.keyspaceapps.goodtv.domain.SourceRecord
 import com.keyspaceapps.goodtv.testing.FakeChannelSource
 import com.keyspaceapps.goodtv.testing.FakeLibraryStore
@@ -163,5 +169,85 @@ class SyncManagerTest {
         assertTrue(result.isFailure)
         assertEquals("Out of memory while loading the catalog; the provider's list is too large", store.getSource(id)!!.lastError)
         assertEquals(SyncState.Error(id, "Out of memory while loading the catalog; the provider's list is too large"), sync.state.value)
+    }
+
+    @Test
+    fun successfulSyncCommitsTheStreamedCatalog() = runTest {
+        val id = addSource("A")
+        val liveCats = listOf(Category(id, ContentKind.LIVE, "c1", "Sports"))
+        val movieCats = listOf(Category(id, ContentKind.MOVIE, "mc", "Films"))
+        val live = listOf(LiveChannel(id, "1", "c1", "Channel 1", null, 1))
+        val movies = listOf(Movie(id, "m1", "mc", "Movie 1", null, "mkv", null, null))
+        val series = listOf(Series(id, "s1", null, "Series 1", null, null, null))
+        // Lists arrive in whatever order their downloads finish.
+        source.streamScripts[id] = { w ->
+            w.series(series)
+            w.categories(ContentKind.MOVIE, movieCats)
+            w.live(live)
+            w.categories(ContentKind.SERIES, emptyList())
+            w.movies(movies)
+            w.categories(ContentKind.LIVE, liveCats)
+            Result.success(Unit)
+        }
+        val sync = SyncManager(store, registry, this, { now })
+
+        val result = sync.refreshNow(id)
+
+        assertTrue(result.isSuccess)
+        assertEquals(Catalog(liveCats + movieCats, live, movies, series), store.catalogs.value[id])
+        assertEquals(1, store.commitCalls)
+        assertEquals(now, store.getSource(id)!!.lastSyncAt)
+        assertEquals(null, store.getSource(id)!!.lastError)
+        assertEquals(SyncState.Idle, sync.state.value)
+    }
+
+    @Test
+    fun failedSyncAbandonsAndKeepsTheLibrary() = runTest {
+        val id = addSource("A", lastSyncAt = 5L)
+        val old = FakeChannelSource.catalog(id, "old")
+        store.replaceCatalog(id, old)
+        source.streamScripts[id] = { w ->
+            w.movies(listOf(Movie(id, "new", "mc", "New movie", null, "mkv", null, null)))
+            Result.failure(SourceException("Server returned HTTP 500"))
+        }
+        val sync = SyncManager(store, registry, this, { now })
+
+        val result = sync.refreshNow(id)
+
+        assertTrue(result.isFailure)
+        assertEquals(old, store.catalogs.value[id])
+        assertEquals(0, store.commitCalls)
+        assertEquals(1, store.abandonCalls)
+        assertEquals("Server returned HTTP 500", store.getSource(id)!!.lastError)
+        assertEquals(5L, store.getSource(id)!!.lastSyncAt)
+        assertEquals(SyncState.Error(id, "Server returned HTTP 500"), sync.state.value)
+    }
+
+    @Test
+    fun cancelledSyncAbandonsTheWriter() = runTest {
+        val id = addSource("A", lastSyncAt = 5L)
+        val old = FakeChannelSource.catalog(id, "old")
+        store.replaceCatalog(id, old)
+        val midStream = CompletableDeferred<Unit>()
+        val never = CompletableDeferred<Unit>()
+        source.streamScripts[id] = { w ->
+            w.movies(listOf(Movie(id, "new", "mc", "New movie", null, "mkv", null, null)))
+            midStream.complete(Unit)
+            never.await()
+            Result.success(Unit)
+        }
+        val sync = SyncManager(store, registry, this, { now })
+
+        val job = sync.refresh(id)
+        midStream.await()
+        sync.cancel(id)
+        job.join()
+
+        assertTrue(job.isCancelled)
+        assertEquals(old, store.catalogs.value[id])
+        assertEquals(0, store.commitCalls)
+        assertEquals(1, store.abandonCalls)
+        assertEquals(5L, store.getSource(id)!!.lastSyncAt)
+        assertEquals(SyncState.Idle, sync.state.value)
     }
 }

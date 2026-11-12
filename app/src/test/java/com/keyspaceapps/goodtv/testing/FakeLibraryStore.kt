@@ -1,5 +1,7 @@
 package com.keyspaceapps.goodtv.testing
 
+import com.keyspaceapps.goodtv.data.repo.BufferingCatalogWriter
+import com.keyspaceapps.goodtv.data.repo.CatalogWriter
 import com.keyspaceapps.goodtv.data.repo.CategoryKey
 import com.keyspaceapps.goodtv.data.repo.LibraryStore
 import com.keyspaceapps.goodtv.domain.Catalog
@@ -57,6 +59,18 @@ class FakeLibraryStore : LibraryStore {
     override suspend fun replaceCatalog(sourceId: Long, catalog: Catalog) {
         replaceCatalogError?.let { throw it }
         catalogs.value = catalogs.value + (sourceId to catalog)
+    }
+
+    /** How many sync writers were committed and abandoned (abandon counts every call). */
+    @Volatile var commitCalls = 0
+    @Volatile var abandonCalls = 0
+
+    override suspend fun beginCatalog(sourceId: Long): CatalogWriter {
+        val buffer = BufferingCatalogWriter { replaceCatalog(sourceId, it) }
+        return object : CatalogWriter by buffer {
+            override suspend fun commit() { commitCalls++; buffer.commit() }
+            override suspend fun abandon() { abandonCalls++; buffer.abandon() }
+        }
     }
 
     override suspend fun replaceLive(sourceId: Long, live: LiveCatalog) {

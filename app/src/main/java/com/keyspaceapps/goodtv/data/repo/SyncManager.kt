@@ -5,11 +5,13 @@ import com.keyspaceapps.goodtv.data.source.SourceRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Refreshes sources into the [LibraryStore]. One in-flight refresh per source; sources refresh
@@ -77,25 +79,32 @@ class SyncManager(
         return synchronized(lock) { results[sourceId] } ?: Result.failure(SourceException("Refresh did not run"))
     }
 
+    /** Streams the catalog into a writer: commits only on success, abandons on failure or cancellation. */
     private suspend fun doRefresh(sourceId: Long): Result<Unit> {
+        var writer: CatalogWriter? = null
         try {
             val record = store.getSource(sourceId) ?: return Result.failure(SourceException("Source not found"))
             val source = registry.forType(record.type)
-            return source.fetchCatalog(sourceId, record.config).fold(
-                onSuccess = { catalog ->
-                    store.replaceCatalog(sourceId, catalog)
+            val w = store.beginCatalog(sourceId).also { writer = it }
+            return source.streamCatalog(sourceId, record.config, w).fold(
+                onSuccess = {
+                    w.commit()
                     store.markSync(sourceId, clock(), null)
                     Result.success(Unit)
                 },
                 onFailure = { e ->
+                    w.abandon()
                     store.markSync(sourceId, null, e.message ?: "Unknown error")
                     Result.failure(e)
                 },
             )
         } catch (e: CancellationException) {
+            // The job is cancelled, so the clean-up must not be.
+            writer?.let { w -> withContext(NonCancellable) { runCatching { w.abandon() } } }
             throw e
         } catch (e: Throwable) {
             // Errors too (OutOfMemoryError on a huge catalog): the user must see why nothing synced.
+            runCatching { writer?.abandon() }
             val message = when (e) {
                 is OutOfMemoryError -> "Out of memory while loading the catalog; the provider's list is too large"
                 else -> e.message ?: e.javaClass.simpleName
