@@ -108,5 +108,17 @@ object XtreamMappers {
  * The provider's TMDB id, or null. Panels send "603", 603, "603.0", "43332-" (stray suffix), "" or 0
  * for unknown, and sometimes an IMDb id ("tt0079368"), which is not a TMDB id. TMDB ids start at 1.
  */
-internal fun tmdbIdOf(raw: String?): Long? =
-    raw?.trim()?.let { Regex("""^\d+""").find(it)?.value }?.toLongOrNull()?.takeIf { it > 0 }
+internal fun tmdbIdOf(raw: String?): Long? {
+    // Scanned by hand: a Regex per call cost 32 s for 235k values on a TV box. Only ASCII digits
+    // count, as `^\d+` did on the JVM, and an id too long for a Long is no id.
+    val s = raw?.trim() ?: return null
+    var id = 0L
+    var i = 0
+    while (i < s.length && s[i] in '0'..'9') {
+        val digit = s[i] - '0'
+        if (id > (Long.MAX_VALUE - digit) / 10) return null
+        id = id * 10 + digit
+        i++
+    }
+    return id.takeIf { it > 0 }
+}
