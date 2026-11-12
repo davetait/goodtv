@@ -64,12 +64,18 @@ class FakeLibraryStore : LibraryStore {
     /** How many sync writers were committed and abandoned (abandon counts every call). */
     @Volatile var commitCalls = 0
     @Volatile var abandonCalls = 0
+    /** When set, every abandon throws this after dropping the buffer (as a staging clean-up could). */
+    @Volatile var abandonError: Throwable? = null
 
     override suspend fun beginCatalog(sourceId: Long): CatalogWriter {
         val buffer = BufferingCatalogWriter { replaceCatalog(sourceId, it) }
         return object : CatalogWriter by buffer {
             override suspend fun commit() { commitCalls++; buffer.commit() }
-            override suspend fun abandon() { abandonCalls++; buffer.abandon() }
+            override suspend fun abandon() {
+                abandonCalls++
+                buffer.abandon()
+                abandonError?.let { throw it }
+            }
         }
     }
 

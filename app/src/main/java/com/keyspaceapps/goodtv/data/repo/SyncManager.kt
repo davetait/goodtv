@@ -93,7 +93,8 @@ class SyncManager(
                     Result.success(Unit)
                 },
                 onFailure = { e ->
-                    w.abandon()
+                    // A failed clean-up must not replace the provider's error; the next sync clears staging anyway.
+                    runCatching { w.abandon() }
                     store.markSync(sourceId, null, e.message ?: "Unknown error")
                     Result.failure(e)
                 },

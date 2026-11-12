@@ -273,3 +273,37 @@ data class TmdbPersonEntity(@PrimaryKey val personId: Long, val name: String, va
     indices = [Index("personId")],
 )
 data class TmdbPersonCreditEntity(val personId: Long, val kind: String, val tmdbId: Long, val date: String?)
+
+/*
+ * Sync staging: a sync writes each list here as it arrives, in short transactions, then swaps it into
+ * the real tables in one. Same columns as the real tables, plus [seq], a rowid alias that keeps arrival
+ * order and adds no index. No item keys and no foreign keys: the bulk writes stay cheap and the swap
+ * applies the real tables' rules (last row wins on a repeated id) in arrival order.
+ */
+@Entity(tableName = "staging_categories")
+data class StagingCategoryEntity(@PrimaryKey val seq: Long, val sourceId: Long, val kind: String, val id: String, val name: String)
+
+@Entity(tableName = "staging_live")
+data class StagingLiveEntity(
+    @PrimaryKey val seq: Long,
+    val sourceId: Long, val id: String, val categoryId: String?, val name: String, val logoUrl: String?, val number: Int?,
+    val title: String?, val language: String?, val quality: String?, val epgChannelId: String?,
+)
+
+@Entity(tableName = "staging_movies")
+data class StagingMovieEntity(
+    @PrimaryKey val seq: Long,
+    val sourceId: Long, val id: String, val categoryId: String?, val name: String, val posterUrl: String?,
+    val containerExtension: String, val rating: Double?, val addedAt: Long?, val tmdbId: Long?,
+    val title: String?, val language: String?, val quality: String?,
+)
+
+@Entity(tableName = "staging_series")
+data class StagingSeriesEntity(
+    @PrimaryKey val seq: Long,
+    val sourceId: Long, val id: String, val categoryId: String?, val name: String, val coverUrl: String?, val plot: String?, val rating: Double?,
+    val tmdbId: Long?, val title: String?, val language: String?, val quality: String?,
+)
+
+@Entity(tableName = "staging_series_genres")
+data class StagingSeriesGenreEntity(@PrimaryKey val seq: Long, val sourceId: Long, val seriesId: String, val genre: String)

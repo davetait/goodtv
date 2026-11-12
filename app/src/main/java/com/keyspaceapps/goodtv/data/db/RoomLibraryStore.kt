@@ -1,7 +1,8 @@
 package com.keyspaceapps.goodtv.data.db
 
 import androidx.room.withTransaction
-import com.keyspaceapps.goodtv.data.repo.BufferingCatalogWriter
+import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.sqlite.db.SupportSQLiteStatement
 import com.keyspaceapps.goodtv.data.repo.CatalogWriter
 import com.keyspaceapps.goodtv.data.repo.CategoryKey
 import com.keyspaceapps.goodtv.data.repo.LibraryStore
@@ -23,6 +24,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.util.EnumSet
 import kotlinx.serialization.json.Json
 
 class RoomLibraryStore(
@@ -79,8 +83,7 @@ class RoomLibraryStore(
         lineup.bumpGeneration()
     }
 
-    // Interim: buffers in memory and commits through replaceCatalog; staging tables replace this.
-    override suspend fun beginCatalog(sourceId: Long): CatalogWriter = BufferingCatalogWriter { replaceCatalog(sourceId, it) }
+    override suspend fun beginCatalog(sourceId: Long): CatalogWriter = StagingCatalogWriter(db, sourceId).also { it.start() }
 
     override suspend fun replaceLive(sourceId: Long, live: LiveCatalog) = db.withTransaction {
         library.deleteCategoriesOfKind(sourceId, ContentKind.LIVE.name)
@@ -186,3 +189,191 @@ class RoomLibraryStore(
 /** Escapes LIKE wildcards so a query such as "100%" matches literally (paired with `ESCAPE '\'`). */
 internal fun escapeLike(query: String): String =
     query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+/**
+ * Writes a sync's lists into the staging tables as they arrive, each chunk of at most [CHUNK] rows in
+ * its own short transaction, so no write lock is held across a download. [commit] then swaps staging
+ * into the real tables in one transaction and leaves the same rows, in the same order, as
+ * [RoomLibraryStore.replaceCatalog] given the lists as one catalog. Until then the library is untouched.
+ * One writer per source at a time (SyncManager runs one refresh per source).
+ */
+internal class StagingCatalogWriter(private val db: GoodTvDatabase, private val sourceId: Long) : CatalogWriter {
+    private val mutex = Mutex()
+    /** Kinds whose written category list was non-empty: only those prune hidden choices, as replaceCatalog does. */
+    private val listed = EnumSet.noneOf(ContentKind::class.java)
+    /** No more writes: committed or abandoned. */
+    private var closed = false
+    /** Staging holds nothing of this writer's: it committed, or abandon cleared it. A later abandon must not touch another sync's rows. */
+    private var finished = false
+
+    /** Clears what an earlier sync of this source left behind (the process died before it committed or abandoned). */
+    suspend fun start() = db.withTransaction { STAGING_TABLES.forEach { removeSourceRows(it) } }
+
+    override suspend fun categories(kind: ContentKind, list: List<Category>) = write {
+        if (list.isNotEmpty()) listed += kind
+        stage(CATEGORIES, list) { i, c -> val e = c.toEntity(); bindLong(i, e.sourceId); bindString(i + 1, e.kind); bindString(i + 2, e.id); bindString(i + 3, e.name) }
+    }
+
+    override suspend fun live(list: List<LiveChannel>) = write {
+        stage(LIVE, list) { i, l ->
+            val e = l.toEntity()
+            bindLong(i, e.sourceId); bindString(i + 1, e.id); bindText(i + 2, e.categoryId); bindString(i + 3, e.name); bindText(i + 4, e.logoUrl)
+            bindNumber(i + 5, e.number?.toLong()); bindText(i + 6, e.title); bindText(i + 7, e.language); bindText(i + 8, e.quality); bindText(i + 9, e.epgChannelId)
+        }
+    }
+
+    override suspend fun movies(list: List<Movie>) = write {
+        stage(MOVIES, list) { i, m ->
+            val e = m.toEntity()
+            bindLong(i, e.sourceId); bindString(i + 1, e.id); bindText(i + 2, e.categoryId); bindString(i + 3, e.name); bindText(i + 4, e.posterUrl)
+            bindString(i + 5, e.containerExtension); bindReal(i + 6, e.rating); bindNumber(i + 7, e.addedAt); bindNumber(i + 8, e.tmdbId)
+            bindText(i + 9, e.title); bindText(i + 10, e.language); bindText(i + 11, e.quality)
+        }
+    }
+
+    /** Series genres are derived per chunk, in replaceCatalog's order, so no catalog-wide list is built. */
+    override suspend fun series(list: List<Series>) = write {
+        forEachChunk(list) { chunk ->
+            db.withTransaction { insertRows(SERIES, chunk) { i, s -> bindSeries(i, s) } }
+            val genres = chunk.flatMap { s -> s.genres.map { SeriesGenreEntity(sourceId, s.id, it.name) } }
+            stage(SERIES_GENRES, genres) { i, g -> bindLong(i, g.sourceId); bindString(i + 1, g.seriesId); bindString(i + 2, g.genre) }
+        }
+    }
+
+    override suspend fun commit() = mutex.withLock {
+        check(!closed) { "Catalog writer already committed or abandoned" }
+        closed = true
+        db.withTransaction {
+            REAL_TABLES.forEach { removeSourceRows(it) }
+            val library = db.library()
+            library.deleteMovieDetails(sourceId)
+            library.deleteSeriesInfo(sourceId)
+            library.deleteSeasons(sourceId)
+            library.deleteEpisodes(sourceId)
+            // Categories in replaceCatalog's order: by kind, then as written.
+            val kindOrder = ContentKind.entries.joinToString(" ", "CASE kind ", " END") { "WHEN '${it.name}' THEN ${it.ordinal}" }
+            copy(CATEGORIES, "$kindOrder, seq")
+            copy(LIVE)
+            copy(MOVIES)
+            copy(SERIES)
+            copy(SERIES_GENRES)
+            // Prune hidden rows for categories that are gone, but only for kinds the panel actually
+            // listed this time: an empty list on a bad day must not wipe the user's choices.
+            ContentKind.entries.filter { it in listed }.forEach { db.hidden().pruneMissing(sourceId, it.name) }
+            db.lineup().bumpGeneration()
+            STAGING_TABLES.forEach { removeSourceRows(it) }
+        }
+        finished = true
+    }
+
+    override suspend fun abandon() = mutex.withLock {
+        closed = true
+        if (!finished) {
+            db.withTransaction { STAGING_TABLES.forEach { removeSourceRows(it) } }
+            finished = true
+        }
+    }
+
+    private suspend fun write(block: suspend () -> Unit) = mutex.withLock {
+        check(!closed) { "Catalog writer already committed or abandoned" }
+        block()
+    }
+
+    private val sql: SupportSQLiteDatabase get() = db.openHelper.writableDatabase
+
+    private suspend fun <T> forEachChunk(list: List<T>, block: suspend (List<T>) -> Unit) {
+        var from = 0
+        while (from < list.size) {
+            val to = minOf(from + CHUNK, list.size)
+            block(list.subList(from, to))
+            from = to
+        }
+    }
+
+    private suspend fun <T> stage(table: Table, list: List<T>, bind: SupportSQLiteStatement.(Int, T) -> Unit) =
+        forEachChunk(list) { chunk -> db.withTransaction { insertRows(table, chunk, bind) } }
+
+    /** Multi-row INSERTs, each within SQLite's 999 bound parameters. Call inside a transaction. */
+    private fun <T> insertRows(table: Table, rows: List<T>, bind: SupportSQLiteStatement.(Int, T) -> Unit) {
+        val perStatement = MAX_PARAMS / table.columns.size
+        var full: SupportSQLiteStatement? = null
+        try {
+            var from = 0
+            while (from < rows.size) {
+                val n = minOf(perStatement, rows.size - from)
+                val statement = if (n == perStatement) full ?: compileInsert(table, n).also { full = it } else compileInsert(table, n)
+                try {
+                    for (r in 0 until n) statement.bind(r * table.columns.size + 1, rows[from + r])
+                    statement.executeInsert()
+                } finally {
+                    if (statement !== full) statement.close()
+                }
+                from += n
+            }
+        } finally {
+            full?.close()
+        }
+    }
+
+    private fun compileInsert(table: Table, rows: Int): SupportSQLiteStatement {
+        val row = table.columns.joinToString(",", "(", ")") { "?" }
+        return sql.compileStatement(
+            "INSERT INTO ${table.staging} (${table.columnList}) VALUES " + List(rows) { row }.joinToString(","),
+        )
+    }
+
+    /** Today's DAO inserts are REPLACE: a repeated id keeps the last row, so staging is copied in arrival order. */
+    private fun copy(table: Table, orderBy: String = "seq") = sql.execSQL(
+        "INSERT OR REPLACE INTO ${table.real} (${table.columnList}) SELECT ${table.columnList} FROM ${table.staging} WHERE sourceId = ? ORDER BY $orderBy",
+        arrayOf<Any?>(sourceId),
+    )
+
+    /**
+     * When no other source has rows in [table], an unconditional DELETE skips the per-source lookup. On the
+     * staging tables SQLite truncates at once; the real tables' foreign keys make it delete row by row.
+     */
+    private fun removeSourceRows(table: String) {
+        val others = sql.query(
+            "SELECT EXISTS(SELECT 1 FROM $table WHERE sourceId < ?) OR EXISTS(SELECT 1 FROM $table WHERE sourceId > ?)",
+            arrayOf<Any?>(sourceId, sourceId),
+        ).use { it.moveToFirst() && it.getInt(0) != 0 }
+        if (others) sql.execSQL("DELETE FROM $table WHERE sourceId = ?", arrayOf<Any?>(sourceId)) else sql.execSQL("DELETE FROM $table")
+    }
+
+    private fun SupportSQLiteStatement.bindSeries(i: Int, s: Series) {
+        val e = s.toEntity()
+        bindLong(i, e.sourceId); bindString(i + 1, e.id); bindText(i + 2, e.categoryId); bindString(i + 3, e.name); bindText(i + 4, e.coverUrl)
+        bindText(i + 5, e.plot); bindReal(i + 6, e.rating); bindNumber(i + 7, e.tmdbId); bindText(i + 8, e.title); bindText(i + 9, e.language); bindText(i + 10, e.quality)
+    }
+
+    private fun SupportSQLiteStatement.bindText(i: Int, v: String?) = if (v == null) bindNull(i) else bindString(i, v)
+    private fun SupportSQLiteStatement.bindNumber(i: Int, v: Long?) = if (v == null) bindNull(i) else bindLong(i, v)
+    private fun SupportSQLiteStatement.bindReal(i: Int, v: Double?) = if (v == null) bindNull(i) else bindDouble(i, v)
+
+    /** A real table, its staging twin and their shared columns, in the order the binders above fill them. */
+    private class Table(val real: String, val staging: String, val columns: List<String>) {
+        val columnList = columns.joinToString(",")
+    }
+
+    private companion object {
+        const val CHUNK = 5_000
+        const val MAX_PARAMS = 999
+        val CATEGORIES = Table("categories", "staging_categories", listOf("sourceId", "kind", "id", "name"))
+        val LIVE = Table(
+            "live_channels", "staging_live",
+            listOf("sourceId", "id", "categoryId", "name", "logoUrl", "number", "title", "language", "quality", "epgChannelId"),
+        )
+        val MOVIES = Table(
+            "movies", "staging_movies",
+            listOf("sourceId", "id", "categoryId", "name", "posterUrl", "containerExtension", "rating", "addedAt", "tmdbId", "title", "language", "quality"),
+        )
+        val SERIES = Table(
+            "series", "staging_series",
+            listOf("sourceId", "id", "categoryId", "name", "coverUrl", "plot", "rating", "tmdbId", "title", "language", "quality"),
+        )
+        val SERIES_GENRES = Table("series_genres", "staging_series_genres", listOf("sourceId", "seriesId", "genre"))
+        val ALL = listOf(CATEGORIES, LIVE, MOVIES, SERIES, SERIES_GENRES)
+        val REAL_TABLES = ALL.map { it.real }
+        val STAGING_TABLES = ALL.map { it.staging }
+    }
+}

@@ -250,4 +250,25 @@ class SyncManagerTest {
         assertEquals(5L, store.getSource(id)!!.lastSyncAt)
         assertEquals(SyncState.Idle, sync.state.value)
     }
+
+    @Test
+    fun failedCleanUpStillRecordsTheProvidersError() = runTest {
+        val id = addSource("A", lastSyncAt = 5L)
+        val old = FakeChannelSource.catalog(id, "old")
+        store.replaceCatalog(id, old)
+        store.abandonError = IllegalStateException("disk I/O error")
+        source.streamScripts[id] = { w ->
+            w.movies(listOf(Movie(id, "new", "mc", "New movie", null, "mkv", null, null)))
+            Result.failure(SourceException("Server returned HTTP 500"))
+        }
+        val sync = SyncManager(store, registry, this, { now })
+
+        val result = sync.refreshNow(id)
+
+        assertEquals("Server returned HTTP 500", result.exceptionOrNull()?.message)
+        assertEquals(old, store.catalogs.value[id])
+        assertEquals("Server returned HTTP 500", store.getSource(id)!!.lastError)
+        assertEquals(5L, store.getSource(id)!!.lastSyncAt)
+        assertEquals(SyncState.Error(id, "Server returned HTTP 500"), sync.state.value)
+    }
 }
