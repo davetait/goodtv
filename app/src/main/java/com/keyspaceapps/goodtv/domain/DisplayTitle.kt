@@ -213,7 +213,11 @@ object DisplayTitle {
         return c == ')' || c.isLetterOrDigit()
     }
 
-    /** Length of the line break `$` may match before: "\r\n", or one of \n \r U+0085 U+2028 U+2029. */
+    /**
+     * Length of the line break `$` may match before: "\r\n", or one of \n \r U+0085 U+2028 U+2029.
+     * On Android (ICU) none reaches here, since [WIDE_SPACES]' Unicode \s already turned it into a
+     * space; kept so the JDK, whose \s misses U+0085, U+2028 and U+2029, gives the same result too.
+     */
     private fun lineBreakAtEnd(s: String): Int = when {
         s.endsWith("\r\n") -> 2
         s.isNotEmpty() && s.last().let { it == '\n' || it == '\r' || it == '\u0085' || it == '\u2028' || it == '\u2029' } -> 1
