@@ -50,7 +50,7 @@ object ConversionEquivalence {
      * One value per line, UTF-8. Split on '\n' only: a value may carry a carriage return
      * (genres.txt has "Drama\r"), which `readLines()` would strip.
      */
-    private fun corpus(name: String): List<String> {
+    fun corpus(name: String): List<String> {
         val stream = checkNotNull(javaClass.classLoader?.getResourceAsStream("xtream/corpus/$name")) { "no corpus $name" }
         val lines = stream.use { it.readBytes().toString(Charsets.UTF_8) }.split('\n')
         val values = if (lines.last().isEmpty()) lines.dropLast(1) else lines

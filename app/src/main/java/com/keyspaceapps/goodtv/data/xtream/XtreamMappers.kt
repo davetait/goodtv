@@ -13,6 +13,9 @@ import com.keyspaceapps.goodtv.domain.Season
 import com.keyspaceapps.goodtv.domain.Series
 import com.keyspaceapps.goodtv.domain.SeriesDetail
 import com.keyspaceapps.goodtv.domain.SourceInfo
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 
 /** DTO → domain. Entries without an id are dropped rather than failing the whole catalog. */
 object XtreamMappers {
@@ -56,6 +59,18 @@ object XtreamMappers {
                 Series(sourceId, it, s.category_id, name, s.cover, s.plot, s.rating, tmdbIdOf(s.tmdb), Genre.fromPanelText(s.genre), d.base, d.language, d.quality)
             }
         }
+
+    /** Same list, order and drops as [live], mapped in parallel chunks on the caller's dispatcher. */
+    suspend fun liveParallel(sourceId: Long, list: List<XtLiveStream>): List<LiveChannel> =
+        list.mapInChunks { live(sourceId, it) }
+
+    /** Same list, order and drops as [movies], mapped in parallel chunks on the caller's dispatcher. */
+    suspend fun moviesParallel(sourceId: Long, list: List<XtVodStream>): List<Movie> =
+        list.mapInChunks { movies(sourceId, it) }
+
+    /** Same list, order and drops as [series], mapped in parallel chunks on the caller's dispatcher. */
+    suspend fun seriesParallel(sourceId: Long, list: List<XtSeries>): List<Series> =
+        list.mapInChunks { series(sourceId, it) }
 
     fun toCatalog(
         sourceId: Long,
@@ -124,4 +139,29 @@ internal fun tmdbIdOf(raw: String?): Long? {
     // A digit outside the BMP ("𝟏") was part of ICU's match, and toLongOrNull rejected the whole match.
     if (i < s.length && Character.isDigit(s.codePointAt(i))) return null
     return id.takeIf { it > 0 }
+}
+
+private const val MIN_CHUNK = 2_000
+
+/**
+ * Maps [this] in at most [chunks] contiguous slices of at least [minChunk] items, each on its own `async`
+ * (so on the caller's dispatcher), and joins the results in slice order. [transform] may return fewer
+ * items than it gets; drops and order are the same as one call on the whole list.
+ */
+internal suspend fun <T, R> List<T>.mapInChunks(
+    chunks: Int = Runtime.getRuntime().availableProcessors(),
+    minChunk: Int = MIN_CHUNK,
+    transform: (List<T>) -> List<R>,
+): List<R> {
+    val count = minOf(chunks, size / maxOf(minChunk, 1)).coerceAtLeast(1)
+    if (count == 1) return transform(this)
+    val parts = coroutineScope {
+        (0 until count).map { i ->
+            val slice = subList(size.toLong().times(i).div(count).toInt(), size.toLong().times(i + 1).div(count).toInt())
+            async { transform(slice) }
+        }.awaitAll()
+    }
+    val out = ArrayList<R>(parts.sumOf { it.size })
+    parts.forEach { out.addAll(it) }
+    return out
 }

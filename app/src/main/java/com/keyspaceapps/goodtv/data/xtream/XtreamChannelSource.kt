@@ -59,9 +59,9 @@ class XtreamChannelSource(private val api: XtreamApi) : ChannelSource {
             launch { writer.categories(ContentKind.LIVE, mapped { XtreamMappers.categories(sourceId, ContentKind.LIVE, api.liveCategories(cfg)) }) }
             launch { writer.categories(ContentKind.MOVIE, mapped { XtreamMappers.categories(sourceId, ContentKind.MOVIE, api.vodCategories(cfg)) }) }
             launch { writer.categories(ContentKind.SERIES, mapped { XtreamMappers.categories(sourceId, ContentKind.SERIES, api.seriesCategories(cfg)) }) }
-            launch { writer.live(mapped { XtreamMappers.live(sourceId, api.liveStreams(cfg)) }) }
-            launch { writer.movies(mapped { XtreamMappers.movies(sourceId, api.vodStreams(cfg)) }) }
-            launch { writer.series(mapped { XtreamMappers.series(sourceId, api.series(cfg)) }) }
+            launch { writer.live(mapped { XtreamMappers.liveParallel(sourceId, api.liveStreams(cfg)) }) }
+            launch { writer.movies(mapped { XtreamMappers.moviesParallel(sourceId, api.vodStreams(cfg)) }) }
+            launch { writer.series(mapped { XtreamMappers.seriesParallel(sourceId, api.series(cfg)) }) }
         }
     }
 
