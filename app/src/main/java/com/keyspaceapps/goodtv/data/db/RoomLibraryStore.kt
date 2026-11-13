@@ -193,8 +193,10 @@ internal fun escapeLike(query: String): String =
 /**
  * Writes a sync's lists into the staging tables as they arrive, each chunk of at most [CHUNK] rows in
  * its own short transaction, so no write lock is held across a download. [commit] then swaps staging
- * into the real tables in one transaction and leaves the same rows, in the same order, as
- * [RoomLibraryStore.replaceCatalog] given the lists as one catalog. Until then the library is untouched.
+ * into the real tables in one transaction and leaves the same rows as [RoomLibraryStore.replaceCatalog]
+ * given the lists as one catalog. Categories keep its row order too; live channels, movies, series and
+ * series genres are diffed, so only new or changed rows are written and the rest keep their rowids
+ * (every list query on them orders explicitly). Until the commit the library is untouched.
  * One writer per source at a time (SyncManager runs one refresh per source).
  */
 internal class StagingCatalogWriter(private val db: GoodTvDatabase, private val sourceId: Long) : CatalogWriter {
@@ -244,7 +246,7 @@ internal class StagingCatalogWriter(private val db: GoodTvDatabase, private val 
         check(!closed) { "Catalog writer already committed or abandoned" }
         closed = true
         db.withTransaction {
-            REAL_TABLES.forEach { removeSourceRows(it) }
+            removeSourceRows(CATEGORIES.real)
             val library = db.library()
             library.deleteMovieDetails(sourceId)
             library.deleteSeriesInfo(sourceId)
@@ -253,10 +255,7 @@ internal class StagingCatalogWriter(private val db: GoodTvDatabase, private val 
             // Categories in replaceCatalog's order: by kind, then as written.
             val kindOrder = ContentKind.entries.joinToString(" ", "CASE kind ", " END") { "WHEN '${it.name}' THEN ${it.ordinal}" }
             copy(CATEGORIES, "$kindOrder, seq")
-            copy(LIVE)
-            copy(MOVIES)
-            copy(SERIES)
-            copy(SERIES_GENRES)
+            DIFFED.forEach { swapChanged(it) }
             // Prune hidden rows for categories that are gone, but only for kinds the panel actually
             // listed this time: an empty list on a bad day must not wipe the user's choices.
             ContentKind.entries.filter { it in listed }.forEach { db.hidden().pruneMissing(sourceId, it.name) }
@@ -329,6 +328,40 @@ internal class StagingCatalogWriter(private val db: GoodTvDatabase, private val 
     )
 
     /**
+     * Makes this source's rows of [table] equal its staged rows while writing only what differs. A temp
+     * table keyed like the real one takes the staged rows in arrival order with REPLACE, so it holds the
+     * last row per key, as a full copy would leave. Then real rows whose key is gone are deleted, and
+     * staged rows that are new or differ in any column (NULL-safe `IS`) are written. Call inside the
+     * commit's transaction.
+     */
+    private fun swapChanged(table: Table) {
+        val last = "temp.sync_${table.real}"
+        val key = table.columns.filter { it in table.key }
+        sql.execSQL("DROP TABLE IF EXISTS $last")
+        // No declared types: values keep the storage classes staging gave them, so `IS` compares like for like.
+        sql.execSQL("CREATE TABLE $last (${table.columnList}, PRIMARY KEY (${key.joinToString(",")})) WITHOUT ROWID")
+        sql.execSQL(
+            "INSERT OR REPLACE INTO $last SELECT ${table.columnList} FROM ${table.staging} WHERE sourceId = ? ORDER BY seq",
+            arrayOf<Any?>(sourceId),
+        )
+        // The outer row is named by its table, not an alias, in the subquery.
+        val keyGone = key.joinToString(" AND ") { "t.$it = ${table.real}.$it" }
+        sql.execSQL(
+            "DELETE FROM ${table.real} WHERE sourceId = ? AND NOT EXISTS (SELECT 1 FROM $last t WHERE $keyGone)",
+            arrayOf<Any?>(sourceId),
+        )
+        val sameKey = key.joinToString(" AND ") { "t.$it = r.$it" }
+        val sameRow = (listOf("r.sourceId = ?", sameKey) + table.columns.filter { it != "sourceId" && it !in key }.map { "r.$it IS t.$it" })
+            .joinToString(" AND ")
+        sql.execSQL(
+            "INSERT OR REPLACE INTO ${table.real} (${table.columnList}) SELECT ${table.columnList} FROM $last t " +
+                "WHERE NOT EXISTS (SELECT 1 FROM ${table.real} r WHERE $sameRow)",
+            arrayOf<Any?>(sourceId),
+        )
+        sql.execSQL("DROP TABLE $last")
+    }
+
+    /**
      * When no other source has rows in [table], an unconditional DELETE skips the per-source lookup. On the
      * staging tables SQLite truncates at once; the real tables' foreign keys make it delete row by row.
      */
@@ -350,15 +383,18 @@ internal class StagingCatalogWriter(private val db: GoodTvDatabase, private val 
     private fun SupportSQLiteStatement.bindNumber(i: Int, v: Long?) = if (v == null) bindNull(i) else bindLong(i, v)
     private fun SupportSQLiteStatement.bindReal(i: Int, v: Double?) = if (v == null) bindNull(i) else bindDouble(i, v)
 
-    /** A real table, its staging twin and their shared columns, in the order the binders above fill them. */
-    private class Table(val real: String, val staging: String, val columns: List<String>) {
+    /**
+     * A real table, its staging twin and their shared columns, in the order the binders above fill them;
+     * [key] is the real table's primary key within a source.
+     */
+    private class Table(val real: String, val staging: String, val columns: List<String>, val key: Set<String> = setOf("id")) {
         val columnList = columns.joinToString(",")
     }
 
     private companion object {
         const val CHUNK = 5_000
         const val MAX_PARAMS = 999
-        val CATEGORIES = Table("categories", "staging_categories", listOf("sourceId", "kind", "id", "name"))
+        val CATEGORIES = Table("categories", "staging_categories", listOf("sourceId", "kind", "id", "name"), setOf("kind", "id"))
         val LIVE = Table(
             "live_channels", "staging_live",
             listOf("sourceId", "id", "categoryId", "name", "logoUrl", "number", "title", "language", "quality", "epgChannelId"),
@@ -371,9 +407,10 @@ internal class StagingCatalogWriter(private val db: GoodTvDatabase, private val 
             "series", "staging_series",
             listOf("sourceId", "id", "categoryId", "name", "coverUrl", "plot", "rating", "tmdbId", "title", "language", "quality"),
         )
-        val SERIES_GENRES = Table("series_genres", "staging_series_genres", listOf("sourceId", "seriesId", "genre"))
+        val SERIES_GENRES = Table("series_genres", "staging_series_genres", listOf("sourceId", "seriesId", "genre"), setOf("seriesId", "genre"))
         val ALL = listOf(CATEGORIES, LIVE, MOVIES, SERIES, SERIES_GENRES)
-        val REAL_TABLES = ALL.map { it.real }
+        /** Swapped by diff; categories keep the full replace, which also keeps the panel's order (ruling R8). */
+        val DIFFED = listOf(LIVE, MOVIES, SERIES, SERIES_GENRES)
         val STAGING_TABLES = ALL.map { it.staging }
     }
 }

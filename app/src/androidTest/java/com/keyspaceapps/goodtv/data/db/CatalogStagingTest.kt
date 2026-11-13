@@ -25,8 +25,10 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * The staging writer must leave exactly the rows replaceCatalog leaves, all columns and in the same
- * order, and nothing of a sync may show (or stay behind) until it commits.
+ * The staging writer must leave exactly the rows replaceCatalog leaves, all columns, and nothing of a
+ * sync may show (or stay behind) until it commits. Categories keep replaceCatalog's row order; live
+ * channels, movies, series and series genres are compared by key, because the swap rewrites only rows
+ * that changed and so keeps the rowids of the rest.
  */
 class CatalogStagingTest {
     private lateinit var db: GoodTvDatabase
@@ -57,9 +59,15 @@ class CatalogStagingTest {
         config = SourceConfig.Xtream("http://s", "u", "p", listOf("ts")), enabled = true, lastSyncAt = null, lastError = null,
     )
 
-    /** Every row of [table], all columns with their SQLite types, in storage order. */
+    /** The key of each table the swap diffs; the other tables keep storage order. */
+    private val keys = mapOf(
+        "live_channels" to "sourceId, id", "movies" to "sourceId, id", "series" to "sourceId, id",
+        "series_genres" to "sourceId, seriesId, genre",
+    )
+
+    /** Every row of [table], all columns with their SQLite types, by key for the diffed tables, else in storage order. */
     private fun dump(d: GoodTvDatabase, table: String, where: String = ""): List<List<Any?>> =
-        d.openHelper.readableDatabase.query("SELECT * FROM $table $where ORDER BY rowid").use { c ->
+        d.openHelper.readableDatabase.query("SELECT * FROM $table $where ORDER BY ${keys[table] ?: "rowid"}").use { c ->
             buildList {
                 while (c.moveToNext()) add((0 until c.columnCount).map { i -> c.cell(i) })
             }
@@ -72,6 +80,12 @@ class CatalogStagingTest {
         Cursor.FIELD_TYPE_STRING -> getString(i)
         else -> getBlob(i).toList()
     }
+
+    /** Each row's rowid, by its key. */
+    private fun rowids(d: GoodTvDatabase, table: String): Map<String, Long> =
+        d.openHelper.readableDatabase.query("SELECT ${keys.getValue(table).replace(", ", " || '/' || ")}, rowid FROM $table").use { c ->
+            buildMap { while (c.moveToNext()) put(c.getString(0), c.getLong(1)) }
+        }
 
     private fun count(d: GoodTvDatabase, table: String): Int =
         d.openHelper.readableDatabase.query("SELECT COUNT(*) FROM $table").use { c -> c.moveToFirst(); c.getInt(0) }
@@ -140,6 +154,19 @@ class CatalogStagingTest {
         )
         return sid
     }
+
+    /** Writes [catalog] through a staging writer, each kind's categories then its list, and commits. */
+    private suspend fun commit(s: RoomLibraryStore, sid: Long, catalog: Catalog) {
+        val w = s.beginCatalog(sid)
+        for (kind in ContentKind.entries) w.categories(kind, catalog.categories.filter { it.kind == kind })
+        w.live(catalog.live)
+        w.movies(catalog.movies)
+        w.series(catalog.series)
+        w.commit()
+    }
+
+    private fun bigCatalog(sid: Long) =
+        Catalog(liveCats(sid) + moreLiveCats(sid) + movieCats(sid) + seriesCats(sid), newLive(sid), newMovies(sid), newSeries(sid))
 
     @Test
     fun commitGivesTheSameRowsAsReplaceCatalog() = runBlocking {
@@ -218,6 +245,70 @@ class CatalogStagingTest {
         assertEquals(bBefore, realTables.associateWith { dump(db, it, "WHERE sourceId = $b") })
         for (t in realTables) assertEquals(t, dump(refDb, t, "WHERE sourceId = $a"), dump(db, t, "WHERE sourceId = $a"))
         assertNotEquals(0, count(db, "movies"))
+        assertStagingEmpty(db)
+    }
+
+    @Test
+    fun commitWritesOnlyChangedRows() = runBlocking {
+        val sid = seed(store, db)
+        assertEquals(sid, seed(ref, refDb))
+        val before = bigCatalog(sid)
+        store.replaceCatalog(sid, before)
+        ref.replaceCatalog(sid, before)
+        val ids = keys.keys.associateWith { rowids(db, it) }
+
+        val movies = before.movies.filter { it.id != "M20" && it.id != "M21" }.map {
+            when (it.id) {
+                "M30" -> it.copy(name = "Renamed") // text
+                "M32" -> it.copy(language = null) // nullable text, "EN" to NULL
+                "M33" -> it.copy(rating = 9.9) // number
+                else -> it
+            }
+        } + listOf(Movie(sid, "M-new-1", "m1", "New one", null, "mkv", null, null), Movie(sid, "M-new-2", "m2", "New two", null, "mp4", 5.0, 1L))
+        val series = before.series.map { if (it.id == "S2") it.copy(genres = setOf(Genre.CRIME, Genre.HISTORY)) else it }
+        val live = before.live.map { if (it.id == "L4") it.copy(epgChannelId = "new.uk") else it }
+        val after = before.copy(live = live, movies = movies, series = series)
+        assertEquals("M32 really had a language", "EN", before.movies.first { it.id == "M32" }.language)
+        ref.replaceCatalog(sid, after)
+        commit(store, sid, after)
+
+        for (t in realTables) assertEquals(t, dump(refDb, t), dump(db, t))
+        val changed = mapOf(
+            "movies" to setOf("$sid/M30", "$sid/M32", "$sid/M33", "$sid/M-new-1", "$sid/M-new-2"),
+            "live_channels" to setOf("$sid/L4"),
+            "series" to emptySet(),
+            "series_genres" to setOf("$sid/S2/HISTORY"), // S2 keeps CRIME, loses THRILLER and MYSTERY
+        )
+        for ((t, old) in ids) {
+            val now = rowids(db, t)
+            for ((key, rowid) in now) if (key !in changed.getValue(t)) assertEquals("$t $key keeps its rowid", old[key], rowid)
+            // A written row gets a rowid above every old one (a rewrite of all rows would reuse the old rowids in order).
+            for (key in changed.getValue(t)) assertTrue("$t $key is written", now.getValue(key) > old.values.max())
+        }
+        assertTrue("M20, M21 are gone", rowids(db, "movies").keys.none { it == "$sid/M20" || it == "$sid/M21" })
+        assertTrue("S2's other genres are gone", rowids(db, "series_genres").keys.none { it.startsWith("$sid/S2/") && !it.endsWith("CRIME") && !it.endsWith("HISTORY") })
+        val m = db.library().getMovie(sid, "M32")!!
+        assertEquals(null, m.language)
+        assertEquals("Renamed", db.library().getMovie(sid, "M30")!!.name)
+        assertEquals(9.9, db.library().getMovie(sid, "M33")!!.rating!!, 0.0)
+        assertStagingEmpty(db)
+    }
+
+    @Test
+    fun aSecondIdenticalSyncChangesNothing() = runBlocking {
+        val sid = seed(store, db)
+        commit(store, sid, bigCatalog(sid))
+        // Another source's rows above this one's, so a rewrite could not land on the same rowids.
+        val other = store.insertSource(record("Other"))
+        store.replaceCatalog(other, oldCatalog(other, "other"))
+        val first = keys.keys.associateWith { rowids(db, it) }
+        val rows = library(db)
+        assertTrue(first.getValue("movies").size > 12_000)
+
+        commit(store, sid, bigCatalog(sid))
+
+        for ((t, ids) in first) assertEquals("$t rowids", ids, rowids(db, t))
+        assertEquals(rows - "categories", library(db) - "categories") // categories are fully replaced (ruling R8)
         assertStagingEmpty(db)
     }
 
