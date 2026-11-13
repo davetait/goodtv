@@ -34,6 +34,7 @@ import androidx.tv.material3.Button
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.keyspaceapps.goodtv.R
+import com.keyspaceapps.goodtv.ui.watchlist.ignoringTheHoldThatOpenedIt
 import com.keyspaceapps.goodtv.data.progress.ContinueItem
 import com.keyspaceapps.goodtv.data.progress.WatchKind
 import com.keyspaceapps.goodtv.data.progress.WatchProgressRepository
@@ -184,7 +185,7 @@ private fun RemoveDialog(item: ContinueItem, onRemove: () -> Unit, onDismiss: ()
         val first = remember { FocusRequester() }
         var requested by remember { mutableStateOf(false) }
         Column(
-            Modifier.width(520.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp)).padding(28.dp),
+            Modifier.ignoringTheHoldThatOpenedIt().width(520.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp)).padding(28.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(item.title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
