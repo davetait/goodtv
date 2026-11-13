@@ -4,8 +4,10 @@ import com.keyspaceapps.goodtv.data.source.SourceException
 import com.keyspaceapps.goodtv.data.source.SourceRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,13 +40,18 @@ class SyncManager(
      * but may still be running (a blocking download sees the cancel only when it returns), and its
      * clean-up clears the source's staging; so the new refresh first waits for it to finish. That keeps
      * one catalog writer per source at a time.
+     *
+     * The wait itself must not be cut short: if this refresh is cancelled too (two quick edits), a third
+     * refresh waits only for this one, so this one has to outlive the older one. Hence the wait is
+     * non-cancellable, and the job starts atomically so a cancel before it first runs still waits.
      */
     fun refresh(sourceId: Long): Job = synchronized(lock) {
         val previous = jobs[sourceId]
         previous?.takeIf { it.isActive }?.let { return it }
         lastError = null
-        val job = scope.launch {
-            previous?.join()
+        val job = scope.launch(start = CoroutineStart.ATOMIC) {
+            withContext(NonCancellable) { previous?.join() }
+            ensureActive()
             val result = doRefresh(sourceId)
             synchronized(lock) {
                 results[sourceId] = result

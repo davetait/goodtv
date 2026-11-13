@@ -17,6 +17,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
@@ -366,6 +367,79 @@ class SyncManagerTest {
         releaseSecond.complete(Unit)
         second.join()
 
+        assertEquals(Catalog(liveCats + movieCats, live, movies, series), store.catalogs.value[id])
+        assertEquals(now, store.getSource(id)!!.lastSyncAt)
+        assertEquals(null, store.getSource(id)!!.lastError)
+        assertEquals(SyncState.Idle, sync.state.value)
+    }
+
+    /**
+     * Two quick edits of a source: job A is cancelled mid-download, job B waits for it, B is cancelled
+     * too, and job C starts. A's late abandon must still land before C begins writing staging.
+     */
+    @Test
+    fun aCancelledWaitStillWaitsForTheOlderSync() = runTest {
+        cancelledWaitScenario(cancelSecondBeforeItStarts = false)
+    }
+
+    /** As above, but B is cancelled before it ever ran, so it never reached its wait. */
+    @Test
+    fun aSyncCancelledBeforeItStartsStillWaitsForTheOlderSync() = runTest {
+        cancelledWaitScenario(cancelSecondBeforeItStarts = true)
+    }
+
+    private suspend fun TestScope.cancelledWaitScenario(cancelSecondBeforeItStarts: Boolean) {
+        val id = addSource("A", lastSyncAt = 5L)
+        store.replaceCatalog(id, FakeChannelSource.catalog(id, "old"))
+        val shared = SharedStagingStore(store)
+        val liveCats = listOf(Category(id, ContentKind.LIVE, "c1", "Sports"))
+        val movieCats = listOf(Category(id, ContentKind.MOVIE, "mc", "Films"))
+        val live = listOf(LiveChannel(id, "1", "c1", "Channel 1", null, 1), LiveChannel(id, "2", "c1", "Channel 2", null, 2))
+        val movies = listOf(Movie(id, "m1", "mc", "Movie 1", null, "mkv", null, null))
+        val series = listOf(Series(id, "s1", null, "Series 1", null, null, null))
+        val firstMidStream = CompletableDeferred<Unit>()
+        val releaseFirst = CompletableDeferred<Unit>()
+        val releaseThird = CompletableDeferred<Unit>()
+        var calls = 0
+        source.streamScripts[id] = { w ->
+            if (++calls == 1) {
+                w.categories(ContentKind.LIVE, listOf(Category(id, ContentKind.LIVE, "x", "Stale")))
+                firstMidStream.complete(Unit)
+                // A blocking OkHttp download: cancellation is seen only once it returns.
+                withContext(NonCancellable) { releaseFirst.await() }
+                currentCoroutineContext().ensureActive()
+                Result.success(Unit)
+            } else {
+                w.categories(ContentKind.LIVE, liveCats)
+                w.live(live)
+                releaseThird.await()
+                w.categories(ContentKind.MOVIE, movieCats)
+                w.movies(movies)
+                w.categories(ContentKind.SERIES, emptyList())
+                w.series(series)
+                Result.success(Unit)
+            }
+        }
+        val sync = SyncManager(shared, registry, this, { now })
+
+        val first = sync.refresh(id)
+        firstMidStream.await()
+        sync.cancel(id)
+        val second = sync.refresh(id)
+        if (!cancelSecondBeforeItStarts) testScheduler.runCurrent()
+        sync.cancel(id)
+        val third = sync.refresh(id)
+        testScheduler.runCurrent()
+        assertTrue(second !== third)
+        // The first sync's downloads finish late, so its abandon runs now.
+        releaseFirst.complete(Unit)
+        testScheduler.runCurrent()
+        assertTrue(first.isCancelled)
+        assertTrue(second.isCancelled)
+        releaseThird.complete(Unit)
+        third.join()
+
+        assertEquals(2, calls)
         assertEquals(Catalog(liveCats + movieCats, live, movies, series), store.catalogs.value[id])
         assertEquals(now, store.getSource(id)!!.lastSyncAt)
         assertEquals(null, store.getSource(id)!!.lastError)

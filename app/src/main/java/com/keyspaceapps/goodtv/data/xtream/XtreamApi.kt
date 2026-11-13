@@ -4,7 +4,12 @@ import com.keyspaceapps.goodtv.USER_AGENT
 import com.keyspaceapps.goodtv.data.source.SourceConfig
 import com.keyspaceapps.goodtv.data.source.SourceException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -74,19 +79,39 @@ class XtreamApi(
         }
     }
 
+    /**
+     * A blocking OkHttp read ignores coroutine cancellation, so a watcher cancels the [okhttp3.Call]
+     * when this coroutine is cancelled: the read then fails at once, and that failure surfaces as
+     * cancellation, never as a [SourceException].
+     */
     private suspend fun <T> get(url: HttpUrl, strategy: DeserializationStrategy<T>): T = withContext(io) {
         val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).build()
+        val call = client.newCall(request)
+        val scopeJob = coroutineContext.job
+        val watcher = launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                awaitCancellation()
+            } finally {
+                // Cancelled with the call's coroutine, not merely released after a finished call.
+                if (!scopeJob.isActive) call.cancel()
+            }
+        }
         try {
-            client.newCall(request).execute().use { response ->
+            call.execute().use { response ->
                 if (!response.isSuccessful) throw SourceException("Server returned HTTP ${response.code}")
                 response.body.byteStream().use { stream -> json.decodeFromStream(strategy, stream) }
             }
         } catch (e: IOException) {
+            ensureActive()
             throw SourceException("Could not reach server: ${e.message ?: e.javaClass.simpleName}", e)
         } catch (e: SerializationException) {
+            ensureActive()
             throw SourceException("Server returned an unexpected response", e)
         } catch (e: IllegalArgumentException) {
+            ensureActive()
             throw SourceException("Server returned an unexpected response", e)
+        } finally {
+            watcher.cancel()
         }
     }
 }
