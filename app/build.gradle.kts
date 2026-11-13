@@ -23,8 +23,8 @@ android {
         applicationId = "com.keyspaceapps.goodtv"
         minSdk = 28
         targetSdk = 37
-        versionCode = 4
-        versionName = "0.4.0"
+        versionCode = 5
+        versionName = "0.4.1"
 
         testInstrumentationRunner = "com.keyspaceapps.goodtv.GoodTvTestRunner"
 
