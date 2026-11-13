@@ -47,6 +47,25 @@ class SportsCandidatesTest {
         assertEquals("US| NHL PPV", got.single().categoryName)
     }
 
+    // Ruling R9: a diff sync rewrites only changed rows, so storage order no longer follows the panel;
+    // tied same-name channels must still come back in one stable order, by (sourceId, id).
+    @Test fun candidatesComeBackByKeyAfterADiffSync() = runBlocking {
+        val a = store.insertSource(record("a"))
+        val cats = listOf(Category(a, ContentKind.LIVE, "nhl", "US| NHL PPV"))
+        val first = listOf(LiveChannel(a, "1", "nhl", "US: ESPN", null, null), LiveChannel(a, "2", "nhl", "US: ESPN", null, null))
+        store.replaceCatalog(a, Catalog(cats, first, emptyList(), emptyList()))
+        assertEquals(listOf("1", "2"), store.observeSportsCandidates().first().map { it.channel.id })
+
+        // Channel 1 changes (a new logo), so the diff swap rewrites only it, after channel 2.
+        val w = store.beginCatalog(a)
+        w.categories(ContentKind.LIVE, cats)
+        w.live(listOf(first[0].copy(logoUrl = "http://logo/new"), first[1]))
+        w.commit()
+
+        assertEquals(listOf("1", "2"), store.observeSportsCandidates().first().map { it.channel.id })
+        assertEquals("http://logo/new", store.observeSportsCandidates().first().first().channel.logoUrl)
+    }
+
     @Test fun replaceLiveTouchesOnlyLive() = runBlocking {
         val a = store.insertSource(record("a"))
         store.replaceCatalog(a, Catalog(

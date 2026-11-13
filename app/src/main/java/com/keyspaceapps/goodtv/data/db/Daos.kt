@@ -42,11 +42,14 @@ interface LibraryDao {
     @Query("DELETE FROM live_channels WHERE sourceId = :sourceId") suspend fun deleteLive(sourceId: Long)
     @Query("DELETE FROM categories WHERE sourceId = :sourceId AND kind = :kind") suspend fun deleteCategoriesOfKind(sourceId: Long, kind: String)
 
+    // By key: a sync rewrites only changed rows, so storage order no longer follows the panel, and the
+    // lineup's stable sort must see tied same-name channels in one order every time.
     @Query(
         """SELECT l.*, c.name AS categoryName FROM live_channels l
            JOIN sources s ON s.id = l.sourceId AND s.enabled = 1
            JOIN categories c ON c.sourceId = l.sourceId AND c.kind = 'LIVE' AND c.id = l.categoryId
-           WHERE NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = l.sourceId AND h.kind = 'LIVE' AND h.categoryId = l.categoryId)""",
+           WHERE NOT EXISTS (SELECT 1 FROM hidden_categories h WHERE h.sourceId = l.sourceId AND h.kind = 'LIVE' AND h.categoryId = l.categoryId)
+           ORDER BY l.sourceId, l.id""",
     )
     fun observeSportsCandidates(): Flow<List<SportsCandidateRow>>
     @Query("DELETE FROM movies WHERE sourceId = :sourceId") suspend fun deleteMovies(sourceId: Long)

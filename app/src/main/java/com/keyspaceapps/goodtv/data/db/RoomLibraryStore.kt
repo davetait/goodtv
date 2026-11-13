@@ -322,7 +322,7 @@ internal class StagingCatalogWriter(private val db: GoodTvDatabase, private val 
     }
 
     /** Today's DAO inserts are REPLACE: a repeated id keeps the last row, so staging is copied in arrival order. */
-    private fun copy(table: Table, orderBy: String = "seq") = sql.execSQL(
+    private fun copy(table: Table, orderBy: String) = sql.execSQL(
         "INSERT OR REPLACE INTO ${table.real} (${table.columnList}) SELECT ${table.columnList} FROM ${table.staging} WHERE sourceId = ? ORDER BY $orderBy",
         arrayOf<Any?>(sourceId),
     )
@@ -331,10 +331,14 @@ internal class StagingCatalogWriter(private val db: GoodTvDatabase, private val 
      * Makes this source's rows of [table] equal its staged rows while writing only what differs. A temp
      * table keyed like the real one takes the staged rows in arrival order with REPLACE, so it holds the
      * last row per key, as a full copy would leave. Then real rows whose key is gone are deleted, and
-     * staged rows that are new or differ in any column (NULL-safe `IS`) are written. Call inside the
-     * commit's transaction.
+     * staged rows that are new or differ in any column (NULL-safe `IS`) are written. When the source has
+     * no rows there yet (a first sync), a plain copy gives the same rows sooner. Call inside the commit's
+     * transaction.
      */
     private fun swapChanged(table: Table) {
+        val empty = sql.query("SELECT NOT EXISTS(SELECT 1 FROM ${table.real} WHERE sourceId = ?)", arrayOf<Any?>(sourceId))
+            .use { it.moveToFirst() && it.getInt(0) != 0 }
+        if (empty) return copy(table, "seq")
         val last = "temp.sync_${table.real}"
         val key = table.columns.filter { it in table.key }
         sql.execSQL("DROP TABLE IF EXISTS $last")
@@ -385,27 +389,30 @@ internal class StagingCatalogWriter(private val db: GoodTvDatabase, private val 
 
     /**
      * A real table, its staging twin and their shared columns, in the order the binders above fill them;
-     * [key] is the real table's primary key within a source.
+     * [key] is the real table's primary key within a source, for the diffed tables (categories are copied whole).
      */
-    private class Table(val real: String, val staging: String, val columns: List<String>, val key: Set<String> = setOf("id")) {
+    private class Table(val real: String, val staging: String, val columns: List<String>, val key: Set<String> = emptySet()) {
         val columnList = columns.joinToString(",")
     }
 
     private companion object {
         const val CHUNK = 5_000
         const val MAX_PARAMS = 999
-        val CATEGORIES = Table("categories", "staging_categories", listOf("sourceId", "kind", "id", "name"), setOf("kind", "id"))
+        val CATEGORIES = Table("categories", "staging_categories", listOf("sourceId", "kind", "id", "name"))
         val LIVE = Table(
             "live_channels", "staging_live",
             listOf("sourceId", "id", "categoryId", "name", "logoUrl", "number", "title", "language", "quality", "epgChannelId"),
+            setOf("id"),
         )
         val MOVIES = Table(
             "movies", "staging_movies",
             listOf("sourceId", "id", "categoryId", "name", "posterUrl", "containerExtension", "rating", "addedAt", "tmdbId", "title", "language", "quality"),
+            setOf("id"),
         )
         val SERIES = Table(
             "series", "staging_series",
             listOf("sourceId", "id", "categoryId", "name", "coverUrl", "plot", "rating", "tmdbId", "title", "language", "quality"),
+            setOf("id"),
         )
         val SERIES_GENRES = Table("series_genres", "staging_series_genres", listOf("sourceId", "seriesId", "genre"), setOf("seriesId", "genre"))
         val ALL = listOf(CATEGORIES, LIVE, MOVIES, SERIES, SERIES_GENRES)

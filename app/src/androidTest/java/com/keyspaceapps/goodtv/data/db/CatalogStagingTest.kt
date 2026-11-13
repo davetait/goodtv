@@ -262,6 +262,7 @@ class CatalogStagingTest {
                 "M30" -> it.copy(name = "Renamed") // text
                 "M32" -> it.copy(language = null) // nullable text, "EN" to NULL
                 "M33" -> it.copy(rating = 9.9) // number
+                "M40" -> it.copy(tmdbId = 123L) // NULL to a value
                 else -> it
             }
         } + listOf(Movie(sid, "M-new-1", "m1", "New one", null, "mkv", null, null), Movie(sid, "M-new-2", "m2", "New two", null, "mp4", 5.0, 1L))
@@ -269,12 +270,13 @@ class CatalogStagingTest {
         val live = before.live.map { if (it.id == "L4") it.copy(epgChannelId = "new.uk") else it }
         val after = before.copy(live = live, movies = movies, series = series)
         assertEquals("M32 really had a language", "EN", before.movies.first { it.id == "M32" }.language)
+        assertEquals("M40 really had no TMDB id", null, before.movies.first { it.id == "M40" }.tmdbId)
         ref.replaceCatalog(sid, after)
         commit(store, sid, after)
 
         for (t in realTables) assertEquals(t, dump(refDb, t), dump(db, t))
         val changed = mapOf(
-            "movies" to setOf("$sid/M30", "$sid/M32", "$sid/M33", "$sid/M-new-1", "$sid/M-new-2"),
+            "movies" to setOf("$sid/M30", "$sid/M32", "$sid/M33", "$sid/M40", "$sid/M-new-1", "$sid/M-new-2"),
             "live_channels" to setOf("$sid/L4"),
             "series" to emptySet(),
             "series_genres" to setOf("$sid/S2/HISTORY"), // S2 keeps CRIME, loses THRILLER and MYSTERY
@@ -291,6 +293,59 @@ class CatalogStagingTest {
         assertEquals(null, m.language)
         assertEquals("Renamed", db.library().getMovie(sid, "M30")!!.name)
         assertEquals(9.9, db.library().getMovie(sid, "M33")!!.rating!!, 0.0)
+        assertEquals(123L, db.library().getMovie(sid, "M40")!!.tmdbId)
+        assertStagingEmpty(db)
+    }
+
+    @Test
+    fun aFirstSyncIntoAnEmptyLibraryMatchesReplaceCatalog() = runBlocking {
+        // Another source has rows, so only this source starts empty.
+        val other = store.insertSource(record("Other"))
+        store.replaceCatalog(other, oldCatalog(other, "other"))
+        assertEquals(other, ref.insertSource(record("Other")))
+        ref.replaceCatalog(other, oldCatalog(other, "other"))
+        val sid = store.insertSource(record("Home"))
+        assertEquals(sid, ref.insertSource(record("Home")))
+        ref.replaceCatalog(sid, bigCatalog(sid))
+
+        commit(store, sid, bigCatalog(sid))
+
+        for (t in realTables) assertEquals(t, dump(refDb, t), dump(db, t))
+        assertTrue(count(db, "movies") > 12_000)
+        assertStagingEmpty(db)
+    }
+
+    @Test
+    fun aFailureDuringTheSwapKeepsTheLibrary() = runBlocking {
+        val sid = seed(store, db)
+        val before = library(db)
+        val generation = db.lineup().generation()
+        val sql = db.openHelper.writableDatabase
+        sql.execSQL("CREATE TRIGGER boom BEFORE INSERT ON movies WHEN NEW.id = 'boom' BEGIN SELECT RAISE(ABORT, 'boom'); END")
+
+        val w = store.beginCatalog(sid)
+        w.categories(ContentKind.LIVE, liveCats(sid))
+        w.categories(ContentKind.MOVIE, movieCats(sid))
+        w.live(newLive(sid))
+        w.movies(newMovies(sid) + Movie(sid, "boom", "m1", "Boom", null, "mkv", null, null))
+        w.series(newSeries(sid))
+        val failure = runCatching { w.commit() }.exceptionOrNull()
+        assertTrue("commit failed in the swap: $failure", failure?.message?.contains("boom") == true)
+
+        assertEquals(before, library(db))
+        assertEquals(generation, db.lineup().generation())
+        w.abandon()
+        assertStagingEmpty(db)
+        val temps = sql.query("SELECT name FROM sqlite_temp_master WHERE type = 'table' AND name LIKE 'sync_%'").use { c ->
+            buildList { while (c.moveToNext()) add(c.getString(0)) }
+        }
+        assertEquals("no temp table left behind", emptyList<String>(), temps)
+
+        sql.execSQL("DROP TRIGGER boom")
+        assertEquals(sid, seed(ref, refDb))
+        ref.replaceCatalog(sid, bigCatalog(sid))
+        commit(store, sid, bigCatalog(sid))
+        for (t in realTables) assertEquals(t, dump(refDb, t), dump(db, t))
         assertStagingEmpty(db)
     }
 
