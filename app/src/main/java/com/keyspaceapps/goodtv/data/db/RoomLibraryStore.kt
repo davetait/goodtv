@@ -197,7 +197,10 @@ internal fun escapeLike(query: String): String =
  * given the lists as one catalog. Categories keep its row order too; live channels, movies, series and
  * series genres are diffed, so only new or changed rows are written and the rest keep their rowids
  * (every list query on them orders explicitly). Until the commit the library is untouched.
- * One writer per source at a time (SyncManager runs one refresh per source).
+ * Staging is shared per source, so [start] and [abandon] clear whatever any writer of that source
+ * staged: callers must run one writer per source at a time. SyncManager does: a refresh returns the
+ * one in flight, and a refresh after a cancel joins the cancelled job (and so its abandon) before it
+ * begins a writer.
  */
 internal class StagingCatalogWriter(private val db: GoodTvDatabase, private val sourceId: Long) : CatalogWriter {
     private val mutex = Mutex()

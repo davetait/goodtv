@@ -14,7 +14,11 @@ import com.keyspaceapps.goodtv.domain.SourceRecord
 import com.keyspaceapps.goodtv.testing.FakeChannelSource
 import com.keyspaceapps.goodtv.testing.FakeLibraryStore
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -270,5 +274,101 @@ class SyncManagerTest {
         assertEquals("Server returned HTTP 500", store.getSource(id)!!.lastError)
         assertEquals(5L, store.getSource(id)!!.lastSyncAt)
         assertEquals(SyncState.Error(id, "Server returned HTTP 500"), sync.state.value)
+    }
+
+    /**
+     * Writers that share per-source staging, as Room's staging tables do: [beginCatalog] clears the
+     * source's staging, abandon clears it unless this writer already committed or abandoned, and commit
+     * replaces the catalog with whatever the source's staging holds when it runs.
+     */
+    private class SharedStagingStore(private val inner: FakeLibraryStore) : LibraryStore by inner {
+        private class Staged {
+            val categories = mutableListOf<Category>()
+            val live = mutableListOf<LiveChannel>()
+            val movies = mutableListOf<Movie>()
+            val series = mutableListOf<Series>()
+        }
+
+        private val staging = HashMap<Long, Staged>()
+
+        override suspend fun beginCatalog(sourceId: Long): CatalogWriter {
+            staging[sourceId] = Staged()
+            return object : CatalogWriter {
+                var finished = false
+                fun staged() = staging.getOrPut(sourceId) { Staged() }
+                override suspend fun categories(kind: ContentKind, list: List<Category>) { staged().categories += list }
+                override suspend fun live(list: List<LiveChannel>) { staged().live += list }
+                override suspend fun movies(list: List<Movie>) { staged().movies += list }
+                override suspend fun series(list: List<Series>) { staged().series += list }
+                override suspend fun commit() {
+                    val s = staged()
+                    inner.replaceCatalog(sourceId, Catalog(s.categories.sortedBy { it.kind.ordinal }, s.live, s.movies, s.series))
+                    staging.remove(sourceId)
+                    finished = true
+                }
+                override suspend fun abandon() {
+                    if (!finished) staging.remove(sourceId)
+                    finished = true
+                }
+            }
+        }
+    }
+
+    @Test
+    fun aRefreshAfterCancelWaitsForTheCancelledSyncToCleanUp() = runTest {
+        val id = addSource("A", lastSyncAt = 5L)
+        store.replaceCatalog(id, FakeChannelSource.catalog(id, "old"))
+        val shared = SharedStagingStore(store)
+        val liveCats = listOf(Category(id, ContentKind.LIVE, "c1", "Sports"))
+        val movieCats = listOf(Category(id, ContentKind.MOVIE, "mc", "Films"))
+        val live = listOf(LiveChannel(id, "1", "c1", "Channel 1", null, 1), LiveChannel(id, "2", "c1", "Channel 2", null, 2))
+        val movies = listOf(Movie(id, "m1", "mc", "Movie 1", null, "mkv", null, null))
+        val series = listOf(Series(id, "s1", null, "Series 1", null, null, null))
+        val firstMidStream = CompletableDeferred<Unit>()
+        val releaseFirst = CompletableDeferred<Unit>()
+        val secondMidStream = CompletableDeferred<Unit>()
+        val releaseSecond = CompletableDeferred<Unit>()
+        var calls = 0
+        source.streamScripts[id] = { w ->
+            if (++calls == 1) {
+                w.categories(ContentKind.LIVE, listOf(Category(id, ContentKind.LIVE, "x", "Stale")))
+                firstMidStream.complete(Unit)
+                // A blocking OkHttp download: cancellation is seen only once it returns.
+                withContext(NonCancellable) { releaseFirst.await() }
+                currentCoroutineContext().ensureActive()
+                Result.success(Unit)
+            } else {
+                w.categories(ContentKind.LIVE, liveCats)
+                w.live(live)
+                secondMidStream.complete(Unit)
+                releaseSecond.await()
+                w.categories(ContentKind.MOVIE, movieCats)
+                w.movies(movies)
+                w.categories(ContentKind.SERIES, emptyList())
+                w.series(series)
+                Result.success(Unit)
+            }
+        }
+        val sync = SyncManager(shared, registry, this, { now })
+
+        val first = sync.refresh(id)
+        firstMidStream.await()
+        sync.cancel(id)
+        val second = sync.refresh(id)
+        testScheduler.runCurrent()
+        assertTrue(first !== second)
+        assertEquals(SyncState.Syncing(setOf(id)), sync.state.value)
+        // The cancelled sync's downloads finish late, so its abandon runs now.
+        releaseFirst.complete(Unit)
+        testScheduler.runCurrent()
+        assertTrue(first.isCancelled)
+        assertEquals(SyncState.Syncing(setOf(id)), sync.state.value)
+        releaseSecond.complete(Unit)
+        second.join()
+
+        assertEquals(Catalog(liveCats + movieCats, live, movies, series), store.catalogs.value[id])
+        assertEquals(now, store.getSource(id)!!.lastSyncAt)
+        assertEquals(null, store.getSource(id)!!.lastError)
+        assertEquals(SyncState.Idle, sync.state.value)
     }
 }

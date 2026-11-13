@@ -33,10 +33,18 @@ class SyncManager(
     private val results = HashMap<Long, Result<Unit>>()
     private var lastError: SyncState.Error? = null
 
+    /**
+     * Starts a refresh, or returns the one already in flight. A cancelled refresh is no longer active
+     * but may still be running (a blocking download sees the cancel only when it returns), and its
+     * clean-up clears the source's staging; so the new refresh first waits for it to finish. That keeps
+     * one catalog writer per source at a time.
+     */
     fun refresh(sourceId: Long): Job = synchronized(lock) {
-        jobs[sourceId]?.takeIf { it.isActive }?.let { return it }
+        val previous = jobs[sourceId]
+        previous?.takeIf { it.isActive }?.let { return it }
         lastError = null
         val job = scope.launch {
+            previous?.join()
             val result = doRefresh(sourceId)
             synchronized(lock) {
                 results[sourceId] = result
