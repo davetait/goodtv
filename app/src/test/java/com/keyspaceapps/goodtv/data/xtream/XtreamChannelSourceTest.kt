@@ -255,15 +255,56 @@ class XtreamChannelSourceTest {
 
     @Test
     fun streamCatalogWritesWhatFetchCatalogReturns() = runTest {
-        server.dispatcher = catalogDispatcher()
+        for ((name, dispatcher) in listOf("fixtures" to catalogDispatcher(), "big lists" to bigListsDispatcher())) {
+            server.dispatcher = dispatcher
+            val fetched = source.fetchCatalog(7, cfg).getOrThrow()
+            var streamed: Catalog? = null
+            val writer = BufferingCatalogWriter { streamed = it }
+
+            source.streamCatalog(7, cfg, writer).getOrThrow()
+            writer.commit()
+
+            assertEquals(name, fetched, streamed)
+        }
+    }
+
+    /** Generated lists bigger than one piece, with dropped ids, odd names and both id types. */
+    private fun bigListsDispatcher(liveCount: Int = 7_001, movieCount: Int = 12_000, seriesCount: Int = 5_001) = object : Dispatcher() {
+        private fun id(i: Int, dropEvery: Int) = if (i % dropEvery == 0) "null" else if (i % 2 == 0) "\"$i\"" else "$i"
+        private fun list(count: Int, item: (Int) -> String) = (1..count).joinToString(",", "[", "]", transform = item)
+        private val live = list(liveCount) {
+            """{"num":$it,"name":"UK: Channel $it ᴴᴰ","stream_id":${id(it, 97)},"stream_icon":"http://x/$it.png","category_id":"${it % 3}","epg_channel_id":"${if (it % 5 == 0) "" else "c$it"}"}"""
+        }
+        private val movies = list(movieCount) {
+            """{"name":"EN - Film $it (19${it % 100}) [4K]","stream_id":${id(it, 89)},"category_id":"10","container_extension":${if (it % 3 == 0) "null" else "\"mkv\""},"rating":"${it % 10}.5","added":"${1_600_000_000 + it}","tmdb":${if (it % 4 == 0) "\"\"" else "$it"}}"""
+        }
+        private val series = list(seriesCount) {
+            """{"series_id":${id(it, 83)},"name":"FR - Show $it","cover":"http://c/$it.png","genre":"${if (it % 2 == 0) "Drama / Crime" else "Comedy"}","rating":${it % 10},"category_id":"20","tmdb":"$it"}"""
+        }
+        private val fixtures = catalogDispatcher()
+
+        override fun dispatch(request: RecordedRequest): MockResponse = when (request.url.queryParameter("action")) {
+            "get_live_streams" -> json(live)
+            "get_vod_streams" -> json(movies)
+            "get_series" -> json(series)
+            else -> fixtures.dispatch(request)
+        }
+    }
+
+    @Test
+    fun streamCatalogDeliversBigListsInPieces() = runTest {
+        server.dispatcher = bigListsDispatcher(liveCount = 10, movieCount = 12_000, seriesCount = 10)
         val fetched = source.fetchCatalog(7, cfg).getOrThrow()
-        var streamed: Catalog? = null
-        val writer = BufferingCatalogWriter { streamed = it }
+        val moviePieces = Collections.synchronizedList(mutableListOf<List<Movie>>())
+        val writer = object : CatalogWriter by RecordingWriter() {
+            override suspend fun movies(list: List<Movie>) { moviePieces += list }
+        }
 
         source.streamCatalog(7, cfg, writer).getOrThrow()
-        writer.commit()
 
-        assertEquals(fetched, streamed)
+        assertEquals(3, moviePieces.size)
+        assertTrue(moviePieces.map { it.size }.toString(), moviePieces.all { it.size <= 5_000 })
+        assertEquals(fetched.movies, moviePieces.flatten())
     }
 
     @Test

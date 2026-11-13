@@ -200,6 +200,32 @@ class CatalogStagingTest {
     }
 
     @Test
+    fun piecesGiveTheSameRowsAsOneList() = runBlocking {
+        val sid = seed(store, db)
+        assertEquals(sid, seed(ref, refDb))
+        val catalog = bigCatalog(sid)
+        commit(ref, sid, catalog)
+
+        // Each kind in pieces of 5,000 (as the sync streams them) and of an odd size that splits rows
+        // across staging chunks; kinds interleave, but each kind's pieces arrive in list order.
+        val w = store.beginCatalog(sid)
+        for (kind in ContentKind.entries) catalog.categories.filter { it.kind == kind }.chunked(3).forEach { w.categories(kind, it) }
+        val live = catalog.live.chunked(5_000).iterator()
+        val movies = catalog.movies.chunked(5_000).iterator()
+        val series = catalog.series.chunked(1_234).iterator()
+        while (live.hasNext() || movies.hasNext() || series.hasNext()) {
+            if (movies.hasNext()) w.movies(movies.next())
+            if (series.hasNext()) w.series(series.next())
+            if (live.hasNext()) w.live(live.next())
+        }
+        w.commit()
+
+        for (t in realTables) assertEquals(t, dump(refDb, t), dump(db, t))
+        assertTrue(count(db, "series_genres") > 5_000)
+        assertStagingEmpty(db)
+    }
+
+    @Test
     fun failureAfterStagingKeepsTheLibrary() = runBlocking {
         val sid = seed(store, db)
         val before = library(db)

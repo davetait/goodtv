@@ -4,6 +4,9 @@ import com.keyspaceapps.goodtv.data.source.SourceConfig
 import com.keyspaceapps.goodtv.data.source.SourceException
 import com.keyspaceapps.goodtv.data.source.SourceRegistry
 import com.keyspaceapps.goodtv.data.source.SourceType
+import com.keyspaceapps.goodtv.data.xtream.XtreamApi
+import com.keyspaceapps.goodtv.data.xtream.XtreamChannelSource
+import com.keyspaceapps.goodtv.data.xtream.XtreamJson
 import com.keyspaceapps.goodtv.domain.Catalog
 import com.keyspaceapps.goodtv.domain.Category
 import com.keyspaceapps.goodtv.domain.ContentKind
@@ -20,9 +23,18 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
+import mockwebserver3.Dispatcher
+import mockwebserver3.MockResponse
+import mockwebserver3.MockResponseBody
+import mockwebserver3.MockWebServer
+import mockwebserver3.RecordedRequest
+import okhttp3.OkHttpClient
+import okio.BufferedSink
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class SyncManagerTest {
     private val store = FakeLibraryStore()
@@ -444,5 +456,58 @@ class SyncManagerTest {
         assertEquals(now, store.getSource(id)!!.lastSyncAt)
         assertEquals(null, store.getSource(id)!!.lastError)
         assertEquals(SyncState.Idle, sync.state.value)
+    }
+
+    @Test
+    fun aBadElementMidStreamAbandonsTheSyncAfterEarlierPiecesWereStaged() = runTest {
+        val server = MockWebServer()
+        server.start()
+        try {
+            val good = (1..6_000).joinToString(",", "[") { """{"stream_id":$it,"name":"Movie $it"}""" }
+            val bad = ""","{"stream_id":6001,"name":]"""
+            val firstPieceWritten = CountDownLatch(1)
+            // The bad element is sent only once the first piece was written, so the test does not race the failure.
+            val movies = object : MockResponseBody {
+                override val contentLength = (good + bad).length.toLong()
+                override fun writeTo(sink: BufferedSink) {
+                    sink.writeUtf8(good).flush()
+                    firstPieceWritten.await(5, TimeUnit.SECONDS)
+                    sink.writeUtf8(bad).flush()
+                }
+            }
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse =
+                    if (request.url.queryParameter("action") == "get_vod_streams") MockResponse.Builder().body(movies).build()
+                    else MockResponse(code = 200, body = "[]")
+            }
+            val id = store.insertSource(
+                SourceRecord(0, SourceType.XTREAM, "A", SourceConfig.Xtream(server.url("/").toString(), "u", "p"), true, 5L, null),
+            )
+            val old = FakeChannelSource.catalog(id, "old")
+            store.replaceCatalog(id, old)
+            var moviesWritten = 0
+            val counting = object : LibraryStore by store {
+                override suspend fun beginCatalog(sourceId: Long): CatalogWriter {
+                    val w = store.beginCatalog(sourceId)
+                    return object : CatalogWriter by w {
+                        override suspend fun movies(list: List<Movie>) { moviesWritten += list.size; w.movies(list); firstPieceWritten.countDown() }
+                    }
+                }
+            }
+            val xtream = XtreamChannelSource(XtreamApi(OkHttpClient(), XtreamJson.instance))
+            val sync = SyncManager(counting, SourceRegistry(listOf(xtream)), this, { now })
+
+            val result = sync.refreshNow(id)
+
+            assertEquals("Server returned an unexpected response", result.exceptionOrNull()?.message)
+            assertEquals("the first piece reached the writer", 5_000, moviesWritten)
+            assertEquals(old, store.catalogs.value[id])
+            assertEquals(0, store.commitCalls)
+            assertEquals(1, store.abandonCalls)
+            assertEquals("Server returned an unexpected response", store.getSource(id)!!.lastError)
+            assertEquals(5L, store.getSource(id)!!.lastSyncAt)
+        } finally {
+            server.close()
+        }
     }
 }

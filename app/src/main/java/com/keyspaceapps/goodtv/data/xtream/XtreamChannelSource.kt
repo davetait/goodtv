@@ -13,13 +13,22 @@ import com.keyspaceapps.goodtv.domain.PlayableRef
 import com.keyspaceapps.goodtv.domain.SeriesDetail
 import com.keyspaceapps.goodtv.domain.SourceInfo
 import java.io.InputStream
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.KSerializer
+import okhttp3.HttpUrl
 
 class XtreamChannelSource(private val api: XtreamApi) : ChannelSource {
+    private companion object {
+        /** Items per piece of a streamed list: the same as one staging write. */
+        const val PIECE = 5_000
+    }
+
     override val type = SourceType.XTREAM
 
     private fun xtream(config: SourceConfig): SourceConfig.Xtream =
@@ -49,9 +58,9 @@ class XtreamChannelSource(private val api: XtreamApi) : ChannelSource {
     }
 
     /**
-     * All six calls start at once. Each list is converted on Dispatchers.Default as soon as it arrives and handed
-     * to [writer], so it can be dropped before the slower lists finish. Each kind's categories are
-     * written even when empty. The first failure cancels the other calls.
+     * All six calls start at once. Categories are converted on Dispatchers.Default when they arrive and written,
+     * even when empty. Each big list is a pipeline (see [pipe]), handed to [writer] in pieces as it downloads, so
+     * no stage holds a whole list. The first failure cancels the other calls.
      */
     override suspend fun streamCatalog(sourceId: Long, config: SourceConfig, writer: CatalogWriter): Result<Unit> = runCatchingSource {
         val cfg = xtream(config)
@@ -59,14 +68,38 @@ class XtreamChannelSource(private val api: XtreamApi) : ChannelSource {
             launch { writer.categories(ContentKind.LIVE, mapped { XtreamMappers.categories(sourceId, ContentKind.LIVE, api.liveCategories(cfg)) }) }
             launch { writer.categories(ContentKind.MOVIE, mapped { XtreamMappers.categories(sourceId, ContentKind.MOVIE, api.vodCategories(cfg)) }) }
             launch { writer.categories(ContentKind.SERIES, mapped { XtreamMappers.categories(sourceId, ContentKind.SERIES, api.seriesCategories(cfg)) }) }
-            launch { writer.live(mapped { XtreamMappers.liveParallel(sourceId, api.liveStreams(cfg)) }) }
-            launch { writer.movies(mapped { XtreamMappers.moviesParallel(sourceId, api.vodStreams(cfg)) }) }
-            launch { writer.series(mapped { XtreamMappers.seriesParallel(sourceId, api.series(cfg)) }) }
+            pipe(XtreamUrls.api(cfg, "get_live_streams"), XtLiveStream.serializer(), { XtreamMappers.live(sourceId, it) }, writer::live)
+            pipe(XtreamUrls.api(cfg, "get_vod_streams"), XtVodStream.serializer(), { XtreamMappers.movies(sourceId, it) }, writer::movies)
+            pipe(XtreamUrls.api(cfg, "get_series"), XtSeries.serializer(), { XtreamMappers.series(sourceId, it) }, writer::series)
         }
     }
 
     /** Downloads and converts inside one block, so the provider's raw list is garbage once converted. */
     private suspend fun <T> mapped(block: suspend () -> T): T = withContext(Dispatchers.Default) { block() }
+
+    /**
+     * One list as a pipeline. The download decodes pieces of [PIECE] items into a channel of two; one consumer
+     * converts each piece on Dispatchers.Default and hands it to [write], so pieces reach the writer in list
+     * order. At most four raw pieces of the list (one decoding, two queued, one converting) and one converted
+     * piece are alive at once.
+     * A failure on either side fails the caller's scope, which cancels the other side.
+     */
+    private fun <D, R> CoroutineScope.pipe(
+        url: HttpUrl,
+        element: KSerializer<D>,
+        convert: (List<D>) -> List<R>,
+        write: suspend (List<R>) -> Unit,
+    ) = launch {
+        val pieces = Channel<List<D>>(capacity = 2)
+        launch {
+            try {
+                api.streamList(url, element, PIECE) { pieces.send(it) }
+            } finally {
+                pieces.close()
+            }
+        }
+        for (piece in pieces) write(withContext(Dispatchers.Default) { convert(piece) })
+    }
 
     override suspend fun fetchLive(sourceId: Long, config: SourceConfig): Result<LiveCatalog> = runCatchingSource {
         val cfg = xtream(config)

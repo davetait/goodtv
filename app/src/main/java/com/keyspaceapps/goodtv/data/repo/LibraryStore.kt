@@ -18,7 +18,11 @@ import kotlinx.coroutines.flow.Flow
 
 data class CategoryKey(val sourceId: Long, val categoryId: String)
 
-/** One sync's writes: lists arrive in any order, from any thread; nothing is visible until [commit]. */
+/**
+ * One sync's writes; nothing is visible until [commit]. Calls arrive in any order, from any thread. A kind's
+ * list may arrive in several pieces: they append, and the pieces of one kind arrive in list order, one call
+ * at a time, so the result is as if the whole list had been written at once (later duplicates still win).
+ */
 interface CatalogWriter {
     suspend fun categories(kind: ContentKind, list: List<Category>)
     suspend fun live(list: List<LiveChannel>)
@@ -37,10 +41,10 @@ interface CatalogWriter {
  */
 class BufferingCatalogWriter(private val replace: suspend (Catalog) -> Unit) : CatalogWriter {
     private val lock = Any()
-    private val categories = java.util.EnumMap<ContentKind, List<Category>>(ContentKind::class.java)
-    private var live = emptyList<LiveChannel>()
-    private var movies = emptyList<Movie>()
-    private var series = emptyList<Series>()
+    private val categories = java.util.EnumMap<ContentKind, MutableList<Category>>(ContentKind::class.java)
+    private var live = ArrayList<LiveChannel>()
+    private var movies = ArrayList<Movie>()
+    private var series = ArrayList<Series>()
     private var closed = false
 
     private inline fun write(block: () -> Unit) = synchronized(lock) {
@@ -48,13 +52,10 @@ class BufferingCatalogWriter(private val replace: suspend (Catalog) -> Unit) : C
         block()
     }
 
-    override suspend fun categories(kind: ContentKind, list: List<Category>) = write { categories[kind] = categories[kind].orEmpty().append(list) }
-    override suspend fun live(list: List<LiveChannel>) = write { live = live.append(list) }
-    override suspend fun movies(list: List<Movie>) = write { movies = movies.append(list) }
-    override suspend fun series(list: List<Series>) = write { series = series.append(list) }
-
-    /** The first list is kept as it is: copying a provider's whole list would briefly double it. */
-    private fun <T> List<T>.append(more: List<T>): List<T> = if (isEmpty()) more else this + more
+    override suspend fun categories(kind: ContentKind, list: List<Category>) = write { categories.getOrPut(kind) { ArrayList() }.addAll(list) }
+    override suspend fun live(list: List<LiveChannel>) = write { live.addAll(list) }
+    override suspend fun movies(list: List<Movie>) = write { movies.addAll(list) }
+    override suspend fun series(list: List<Series>) = write { series.addAll(list) }
 
     override suspend fun commit() {
         val catalog = synchronized(lock) {
@@ -70,11 +71,12 @@ class BufferingCatalogWriter(private val replace: suspend (Catalog) -> Unit) : C
         clear()
     }
 
+    /** Lets go of the lists without emptying them: commit has handed them on. */
     private fun clear() {
         categories.clear()
-        live = emptyList()
-        movies = emptyList()
-        series = emptyList()
+        live = ArrayList()
+        movies = ArrayList()
+        series = ArrayList()
     }
 }
 
