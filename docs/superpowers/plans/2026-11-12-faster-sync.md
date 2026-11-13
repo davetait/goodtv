@@ -204,3 +204,73 @@ suspend fun streamCatalog(sourceId: Long, config: SourceConfig, writer: CatalogW
 2. Press Refresh and record the times: start to "synced", and per step.
 3. Install a clean build afterwards.
 4. If the result is over 35 s, report where the time goes and propose the diff-sync follow-up.
+
+---
+
+## Amendment, 2026-11-12: Tasks 4 and 5 (approved by Dave: "Yes, make those two changes")
+
+The box timing after Task 3 was 68 s, down from 202 s:
+- Downloads in parallel took about 14 s.
+- Mapping movies took 16 s, after their download.
+- Staging took 1–4 s per list.
+- The swap took 33 s: deleting real rows 13.9 s, copying movies 10 s, series 3 s, live 1.4 s, genres 1.2 s, clearing staging 0.9 s.
+
+These two tasks target the swap and the movie mapping. The goal stays the same: 25–35 s.
+
+### Task 4: Map each list across the cores
+
+**Files:**
+- Modify: `app/src/main/java/com/keyspaceapps/goodtv/data/xtream/XtreamMappers.kt` and/or `XtreamChannelSource.kt`
+- Test: `app/src/test/java/com/keyspaceapps/goodtv/data/xtream/XtreamMappersTest.kt` or a new `ParallelMappingTest.kt`
+
+**Interfaces:**
+- `XtreamMappers.live`, `movies` and `series` give exactly the same list, same order and same elements, as today.
+- `streamCatalog` maps each big list in parallel chunks on `Dispatchers.Default`: one chunk per available processor, never fewer than 2,000 items per chunk. The chunks are concatenated in order.
+- `fetchCatalog` may use the same path.
+
+- [ ] **Step 1: Write the test.**
+  - `parallelMappingGivesTheSameListAsSequential`: build 50,000 DTOs from the corpus names under `src/sharedTest/resources/xtream/corpus`, cycling through them, with ids `"1".."50000"` and some null fields.
+  - The parallel mapping of live, movies and series equals the sequential `XtreamMappers` result, element by element and in order.
+- [ ] **Step 2: Implement, then run** `./gradlew :app:testDebugUnitTest :app:lintDebug`.
+  - Expected: all pass.
+- [ ] **Step 3: Commit.**
+  - Message: `perf(sync): map each list in parallel chunks across the cores`.
+
+### Task 5: The swap writes only what changed
+
+**Files:**
+- Modify: `app/src/main/java/com/keyspaceapps/goodtv/data/db/RoomLibraryStore.kt` (the staging writer's `commit`). Add indexes on the staging tables only if the measurements justify them; a staging-table index needs a migration change, so only if necessary.
+- Test: `app/src/androidTest/java/com/keyspaceapps/goodtv/data/db/CatalogStagingTest.kt`
+
+**Interfaces:** `CatalogWriter` is unchanged. `commit()` is still one `db.withTransaction`, but for live channels, movies, series and series genres it now:
+1. Takes the last staged row per key, the highest `seq`, as today's REPLACE does. The keys are:
+   - live channels and movies: `(sourceId, id)`
+   - series: `(sourceId, id)`
+   - series genres: `(sourceId, seriesId, genre)`
+2. Deletes this source's real rows whose key is not among the staged keys.
+3. Writes, with `INSERT OR REPLACE`, only the staged rows that are new or differ from the real row in any column. Use NULL-safe comparison (`IS`/`IS NOT`).
+- **Categories** keep the full replace. They are 1,747 rows, take 19 ms, and the panel order is kept.
+- **The rest is unchanged:** movie details, series info, seasons and episodes are deleted as today, then pruning, the bump and clearing staging.
+- **Row order:** rowid order may change for new or changed rows. That is allowed only because every list query on these tables has an explicit `ORDER BY`. The implementer checks every query on `live_channels`, `movies`, `series` and `series_genres` in `Daos.kt`. Any query whose visible order would depend on rowid order (beyond ties) must be reported, not changed.
+
+- [ ] **Step 1: Update and add the tests in `CatalogStagingTest`.**
+  - `commitGivesTheSameRowsAsReplaceCatalog` now compares rows ordered by key (as sets). It still covers duplicates, nulls and chunk boundaries.
+  - Add `commitWritesOnlyChangedRows`:
+    - Seed a library, then commit a catalog where 3 movies changed (one per column type: text, nullable text, number), 2 were removed and 2 added.
+    - Unchanged rows keep their rowid. Changed and added rows hold the new values. Removed rows are gone.
+    - The result equals `replaceCatalog`'s as a set.
+  - Add `aSecondIdenticalSyncChangesNothing`: committing the same catalog twice leaves every rowid unchanged.
+  - The existing multi-source, failure, empty-kind and staging-cleanup tests still pass.
+- [ ] **Step 2: Run them through runclass and see them fail, then implement.**
+  - Run: `~/.goodtv-tools/runclass.sh com.keyspaceapps.goodtv.data.db.CatalogStagingTest`
+  - Include a synthetic full-size timing of `commit()` on the emulator in the report: the old full swap against the new diff swap, for an identical catalog and for one with 1% changed rows.
+- [ ] **Step 3: Run** `CatalogStagingTest`, `RoomLibraryStoreTest` and `MigrationTest` through runclass, then `./gradlew :app:testDebugUnitTest :app:lintDebug`, then the full instrumented suite once.
+  - Expected: all pass.
+- [ ] **Step 4: Commit.**
+  - Message: `perf(sync): the swap writes only rows that changed`.
+
+### After Tasks 4–5 (controller)
+
+1. Time a Refresh on the onn box again, using stash "faster-sync-box-timing" adapted to the new code.
+2. Install a clean branch build afterwards.
+3. Then run the final whole-branch review.
