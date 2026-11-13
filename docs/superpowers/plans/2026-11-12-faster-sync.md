@@ -274,3 +274,93 @@ These two tasks target the swap and the movie mapping. The goal stays the same: 
 1. Time a Refresh on the onn box again, using stash "faster-sync-box-timing" adapted to the new code.
 2. Install a clean branch build afterwards.
 3. Then run the final whole-branch review.
+
+---
+
+## Amendment 2, 2026-11-12: Tasks 6 and 7 (approved by Dave: "Yes, go ahead with both")
+
+These two tasks answer the final review's leftovers and the box's memory reading:
+- **Data loss after two quick edits.** Cancelling the job that waits on a cancelled predecessor ends its wait, so after two quick edits of one source a third sync can start before the first job's late abandon.
+- **Memory.** During a Refresh the box peaked at 627 MB PSS: native heap 358 MB, Java heap 208–236 MB. Whole lists of up to 185k items are held at each stage.
+
+### Task 6: A cancelled sync stops promptly, and the next one always waits for it
+
+**Files:**
+- Modify:
+  - `app/src/main/java/com/keyspaceapps/goodtv/data/repo/SyncManager.kt`
+  - `app/src/main/java/com/keyspaceapps/goodtv/data/xtream/XtreamApi.kt`
+- Tests:
+  - `app/src/test/java/com/keyspaceapps/goodtv/data/repo/SyncManagerTest.kt`
+  - `app/src/test/java/com/keyspaceapps/goodtv/data/xtream/XtreamApiTest.kt` (or the existing Xtream test file)
+
+**Interfaces:**
+- `SyncManager.refresh` waits for the previous job of the same source with `withContext(NonCancellable) { previous?.join() }`, and then checks its own cancellation (`ensureActive()`) before `doRefresh`.
+- `XtreamApi` list calls (`get`) cancel the OkHttp `Call` when their coroutine is cancelled. The blocking read then fails at once, and the failure surfaces as cancellation (`CancellationException`), never as a `SourceException`. The xmltv stream is out of scope.
+
+- [ ] **Step 1: Write the failing tests.**
+  - `SyncManagerTest.aCancelledWaitStillWaitsForTheOlderSync`:
+    1. Use the shared-staging fake store. Job A ignores cancellation until released, mimicking blocking I/O.
+    2. Cancel A, refresh (job B, which waits). Cancel B, refresh (job C).
+    3. Release A, so its abandon runs late.
+    4. Assert that C commits the full catalog and nothing is lost.
+  - Xtream test `cancellingAListCallStopsItsDownload`:
+    1. MockWebServer serves `get_vod_streams` with a body throttled to stream over at least 10 s.
+    2. Cancel the coroutine 200 ms in.
+    3. The call finishes within 2 s, with `CancellationException`, and the server sees the connection closed.
+- [ ] **Step 2: Run them and see them fail. Implement. Run** `./gradlew :app:testDebugUnitTest :app:lintDebug`.
+  - Expected: all pass.
+- [ ] **Step 3: Commit.**
+  - Message: `fix(sync): a cancelled sync stops its downloads, and the next one always waits for it`.
+
+### Task 7: Each list handled in pieces as it downloads
+
+**Files:**
+- Modify:
+  - `app/src/main/java/com/keyspaceapps/goodtv/data/xtream/XtreamApi.kt`
+  - `XtreamChannelSource.kt`
+  - `data/repo/LibraryStore.kt` (the `CatalogWriter` KDoc)
+  - `data/db/RoomLibraryStore.kt` (only if needed)
+  - `testing/FakeLibraryStore.kt` (only if needed)
+- Tests:
+  - the Xtream source tests
+  - `CatalogStagingTest`
+  - `SyncManagerTest`
+
+**Interfaces:**
+- `XtreamApi` gains a streaming list read:
+```kotlin
+/** Decodes a list response element by element, handing on pieces of at most [chunk] items as they are read. */
+suspend fun <T> streamList(url: HttpUrl, element: KSerializer<T>, chunk: Int, onChunk: suspend (List<T>) -> Unit)
+```
+  - It uses `Json.decodeToSequence(stream, element, DecodeSequenceMode.ARRAY_WRAPPED)` on the IO dispatcher.
+  - It is cancellable, as in Task 6.
+  - Errors map to `SourceException` as `get` does today. A mid-stream parse error, after earlier pieces were handed on, also maps to `SourceException`. The sync then abandons.
+- **`XtreamChannelSource.streamCatalog`** handles live, movies and series as pipelines:
+  - A producer decodes pieces of 5,000 DTOs into a bounded `Channel(capacity = 2)`.
+  - A consumer maps each piece on `Dispatchers.Default` with the sequential `XtreamMappers` function, then hands it to the writer.
+  - At most about 3 pieces per list are alive at once. Within a list, the order is kept.
+  - Categories stay single calls.
+  - The `mapInChunks` parallel helper is no longer used on this path. Remove it if nothing else uses it.
+- **The writer receives several calls per kind.**
+  - `CatalogWriter`'s KDoc says lists may arrive in several pieces per kind, in order within a kind, and that the pieces append.
+  - The staging writer already appends by `seq`. Verify that, and that series genres per piece stay in `replaceCatalog`'s order.
+  - `BufferingCatalogWriter` already appends.
+- **The library must stay identical.**
+  - `streamCatalogWritesWhatFetchCatalogReturns` must still pass, with lists bigger than one piece, so the test needs a fixture or generated list of more than 5,000 items.
+  - `commitGivesTheSameRowsAsReplaceCatalog` must pass with a catalog delivered in several pieces per kind.
+
+- [ ] **Step 1: Write the failing tests.**
+  - `streamListHandsOnPiecesInOrder`: 12,345 generated items, chunk 5,000. Pieces of 5,000, 5,000 and 2,345 arrive, in order.
+  - `streamListFailsAsSourceExceptionOnABadElementMidStream`
+  - `streamCatalogDeliversBigListsInPieces`: MockWebServer serves 12,000 movies. The writer sees 3 movie calls, and the concatenation equals `fetchCatalog`'s movies.
+  - The existing tests still pass, including the 3-in-flight and handed-on-as-it-arrives tests.
+  - In `CatalogStagingTest`: `piecesGiveTheSameRowsAsOneList`.
+- [ ] **Step 2: See them fail. Implement. Run the unit tests and lint, then** `CatalogStagingTest` and `RoomLibraryStoreTest` through runclass, **then the full suite once.**
+- [ ] **Step 3: Commit.**
+  - Message: `perf(sync): stream each list in pieces: decode, convert and stage 5,000 at a time`.
+
+### After Tasks 6–7 (controller)
+
+1. Time a Refresh on the box, and separately sample memory (`dumpsys meminfo` every 2 s). Target: under about 300 MB total PSS, and no slower than about 37 s.
+2. If native memory is still high, run one comparison with mapping on fewer threads, and rule on a cap.
+3. Then run a final whole-branch review of the Tasks 6–7 range.
