@@ -108,5 +108,20 @@ object XtreamMappers {
  * The provider's TMDB id, or null. Panels send "603", 603, "603.0", "43332-" (stray suffix), "" or 0
  * for unknown, and sometimes an IMDb id ("tt0079368"), which is not a TMDB id. TMDB ids start at 1.
  */
-internal fun tmdbIdOf(raw: String?): Long? =
-    raw?.trim()?.let { Regex("""^\d+""").find(it)?.value }?.toLongOrNull()?.takeIf { it > 0 }
+internal fun tmdbIdOf(raw: String?): Long? {
+    // Scanned by hand: a Regex per call cost 32 s for 235k values on a TV box. This matches what
+    // `^\d+` + toLongOrNull gave on Android, where ICU's \d is any Unicode decimal digit ("٣٤" is 34),
+    // and an id too long for a Long is no id.
+    val s = raw?.trim() ?: return null
+    var id = 0L
+    var i = 0
+    while (i < s.length && Character.isDigit(s[i])) {
+        val digit = Character.digit(s[i], 10)
+        if (id > (Long.MAX_VALUE - digit) / 10) return null
+        id = id * 10 + digit
+        i++
+    }
+    // A digit outside the BMP ("𝟏") was part of ICU's match, and toLongOrNull rejected the whole match.
+    if (i < s.length && Character.isDigit(s.codePointAt(i))) return null
+    return id.takeIf { it > 0 }
+}

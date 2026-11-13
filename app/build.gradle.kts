@@ -74,6 +74,18 @@ android {
     // Exported Room schemas feed the migration test.
     sourceSets.getByName("androidTest").assets.srcDirs("$projectDir/schemas")
 
+    // The conversion oracle and its corpus, so equivalence is checked on the JVM and on Android's ICU regex.
+    sourceSets {
+        getByName("test") {
+            kotlin.srcDir("src/sharedTest/java")
+            resources.srcDir("src/sharedTest/resources")
+        }
+        getByName("androidTest") {
+            kotlin.srcDir("src/sharedTest/java")
+            resources.srcDir("src/sharedTest/resources")
+        }
+    }
+
     // TmdbLiveTest calls the real TMDB API; it only runs with -PtmdbLive (and a key in local.properties).
     testOptions.unitTests.all { test ->
         if (project.hasProperty("tmdbLive")) {

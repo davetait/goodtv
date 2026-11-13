@@ -38,7 +38,7 @@ object DisplayTitle {
         var tagTokens = emptyList<String>()
         tagOf(s, live)?.let { (tag, rest) -> if (rest.isNotBlank()) { tagTokens = tokens(tag); s = rest.trim() } }
         // Panels sometimes repeat the tag: "NL - NL - Spotlight", "4K-AR - AR- The Green Mile".
-        if (!live && tagTokens.isNotEmpty()) {
+        if (!live && tagTokens.isNotEmpty() && mayRepeatTag(s)) {
             REPEAT_TAG.find(s)?.takeIf { m -> tokens(m.groupValues[1]).all(::isKnownToken) && s.length > m.value.length }?.let { m ->
                 tagTokens = (tagTokens + tokens(m.groupValues[1])).distinct(); s = s.substring(m.value.length).trim()
             }
@@ -47,17 +47,22 @@ object DisplayTitle {
         var year: Int? = null
         if (!live) {
             // Panels write a missing year as "None": "PREDICTION.None", "X (None)". Not "None Shall Escape".
-            s = s.removeSuffix(".None").replace(NONE_SUFFIX, "")
+            s = s.removeSuffix(".None")
+            if (s.contains("(None)")) s = s.replace(NONE_SUFFIX, "")
             if (' ' !in s && ('.' in s || '_' in s)) s = s.replace('.', ' ').replace('_', ' ')
-            PAREN_YEAR.find(s)?.let { m -> year = m.groupValues[1].toInt(); s = s.substring(0, m.range.first) }
-                ?: TRAILING_YEAR.find(s)?.takeIf { it.groupValues[1].toInt() <= latestYear() && !EVENT_DATE.containsMatchIn(s) }?.let { m ->
+            (if (s.indexOf('(') >= 0 || s.indexOf('[') >= 0) PAREN_YEAR.find(s) else null)
+                ?.let { m -> year = m.groupValues[1].toInt(); s = s.substring(0, m.range.first) }
+                ?: (if (mayEndWithYear(s)) TRAILING_YEAR.find(s) else null)
+                    ?.takeIf { it.groupValues[1].toInt() <= LATEST_YEAR && !EVENT_DATE.containsMatchIn(s) }?.let { m ->
                     year = m.groupValues[1].toInt(); s = s.substring(0, m.range.first)
                 }
         }
 
         var trailing4k = false
         while (true) {
-            val m = TRAILING_TAG.find(s.trim()) ?: break
+            val t = s.trim()
+            if (!mayEndWithTag(t)) break
+            val m = TRAILING_TAG.find(t) ?: break
             if (m.value.trim().uppercase().let { it == "4K" || it == "UHD" || it.startsWith("2160") || it.startsWith("3840") }) trailing4k = true
             s = s.trim().substring(0, m.range.first)
         }
@@ -157,13 +162,70 @@ object DisplayTitle {
     private val EPISODE_CODE = Regex("""\b[Ss]\d{1,2}\s?[Ee]\d{1,3}\b""")
 
     /** Superscript/small-capital decorations ("ᴿᴬᵂ", "³⁸⁴⁰ᴾ", "◉") removed, spaces collapsed. */
-    private fun stripDecorations(raw: String): String = raw
-        .replace(DECORATIONS, "")
+    private fun stripDecorations(raw: String): String {
+        var s = raw
+        if (s.any(::isDecoration)) s = s.replace(DECORATIONS, "")
         // Non-breaking spaces (some panels put them after the tag) count as spaces; plain \s misses them.
-        .replace(WIDE_SPACES, " ")
-        .trim()
+        if (mayHaveWideSpace(s)) s = s.replace(WIDE_SPACES, " ")
+        return s.trim()
+    }
 
-    private fun latestYear() = java.time.Year.now().value + 1
+    // ---- cheap checks ----
+    // A sync parses ~290k names, and on a TV box's ICU regex each find costs far more than a scan.
+    // Each check below is true whenever its regex could match, on the JVM's or on Android's regex
+    // engine (which reads \s and \d as Unicode, and case-folds IGNORE_CASE beyond ASCII), so skipping
+    // the regex when it is false never changes the result.
+
+    /** A character of [DECORATIONS]. */
+    private fun isDecoration(c: Char) =
+        c in '\u1D00'..'\u1DBF' || c in '\u2070'..'\u209F' || c == '²' || c == '³' || c == '¹' || c == '◉' || c == '●'
+
+    /** [WIDE_SPACES] would change [s]: a whitespace character other than a lone ' '. */
+    private fun mayHaveWideSpace(s: String): Boolean {
+        for (i in s.indices) {
+            val c = s[i]
+            if (c == ' ') {
+                if (i > 0 && s[i - 1] == ' ') return true
+            } else if (c.isWhitespace() || c in '\u0080'..'\u00A0') {
+                return true
+            }
+        }
+        return false
+    }
+
+    /** [REPEAT_TAG] needs a leading caps letter or digit and a '-'. */
+    private fun mayRepeatTag(s: String) = s.isNotEmpty() && (s[0] in 'A'..'Z' || s[0] in '0'..'9') && s.indexOf('-') > 0
+
+    /** [TRAILING_YEAR] needs "19dd" or "20dd" at the end, which `$` also allows before one final line break. */
+    private fun mayEndWithYear(s: String): Boolean {
+        val end = s.length - lineBreakAtEnd(s)
+        if (end < 5) return false
+        val a = s[end - 4]
+        val b = s[end - 3]
+        return ((a == '1' && b == '9') || (a == '2' && b == '0')) && s[end - 2].isDigit() && s[end - 1].isDigit()
+    }
+
+    /** Every [TRAILING_TAG] form ends with ')' or a letter or digit, or that before one final line break. */
+    private fun mayEndWithTag(s: String): Boolean {
+        val end = s.length - lineBreakAtEnd(s)
+        if (end < 1) return false
+        val c = s[end - 1]
+        return c == ')' || c.isLetterOrDigit()
+    }
+
+    /**
+     * Length of the line break `$` may match before: "\r\n", or one of \n \r U+0085 U+2028 U+2029.
+     * On Android (ICU) none reaches here, since [WIDE_SPACES]' Unicode \s already turned it into a
+     * space; kept so the JDK, whose \s misses U+0085, U+2028 and U+2029, gives the same result too.
+     */
+    private fun lineBreakAtEnd(s: String): Int = when {
+        s.endsWith("\r\n") -> 2
+        s.isNotEmpty() && s.last().let { it == '\n' || it == '\r' || it == '\u0085' || it == '\u2028' || it == '\u2029' } -> 1
+        else -> 0
+    }
+
+    /** Release years run to next year at most; fixed for the life of the process. */
+    private val LATEST_YEAR = java.time.Year.now().value + 1
 
     private val FOUR_K = setOf("4K", "UHD", "2160P", "3840P")
     private val SUB = setOf("SUB", "SUBS")

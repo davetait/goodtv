@@ -1,6 +1,7 @@
 package com.keyspaceapps.goodtv.domain
 
 import java.text.Normalizer
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * One genre list for both screens. Movies get theirs from TMDB genre ids ([fromTmdbMovieGenre]);
@@ -28,6 +29,19 @@ enum class Genre {
          */
         fun fromPanelText(text: String?): Set<Genre> {
             if (text.isNullOrBlank()) return emptySet()
+            // A panel reuses a few thousand genre texts across tens of thousands of series.
+            MEMO[text]?.let { return it }
+            return genresOf(text).also {
+                if (MEMO.size >= MEMO_LIMIT) MEMO.clear()
+                MEMO[text] = it
+            }
+        }
+
+        /** Bounded so a panel with endless distinct texts can't grow it without limit; safe across threads. */
+        private const val MEMO_LIMIT = 20_000
+        private val MEMO = ConcurrentHashMap<String, Set<Genre>>()
+
+        private fun genresOf(text: String): Set<Genre> {
             val parts = text.split(',', '/', '&', '|', '،', ';').map(::fold).filter { it.isNotEmpty() }
             return buildSet {
                 for (part in parts) {
@@ -40,11 +54,34 @@ enum class Genre {
         }
 
         /** Lower case, accents and punctuation removed, so "Comédie" and "comedie" compare equal. */
-        private fun fold(s: String): String =
-            Normalizer.normalize(s.lowercase(), Normalizer.Form.NFD)
-                .replace(Regex("""\p{M}+"""), "")
-                .replace(Regex("""[^\p{L}\p{N}]+"""), " ")
+        private fun fold(s: String): String {
+            if (s.all { it < '\u0080' }) return foldAscii(s)
+            return Normalizer.normalize(s.lowercase(), Normalizer.Form.NFD)
+                .replace(MARKS, "")
+                .replace(NOT_LETTER_OR_DIGIT, " ")
                 .trim()
+        }
+
+        /** [fold] for ASCII text, which has no accents to remove: the same result without Normalizer or a regex. */
+        private fun foldAscii(s: String): String {
+            val out = StringBuilder(s.length)
+            var gap = false
+            for (c in s) {
+                val lower = if (c in 'A'..'Z') c + ('a' - 'A') else c
+                if (lower in 'a'..'z' || lower in '0'..'9') {
+                    if (gap && out.isNotEmpty()) out.append(' ')
+                    gap = false
+                    out.append(lower)
+                } else {
+                    gap = true
+                }
+            }
+            return out.toString()
+        }
+
+        // Compiled once, not per call: a sync folds every genre text of ~50k series.
+        private val MARKS = Regex("""\p{M}+""")
+        private val NOT_LETTER_OR_DIGIT = Regex("""[^\p{L}\p{N}]+""")
 
         // Written naturally and folded once below, so "عائلي" or "семейн" compare like the folded input.
         // "=word" must match a whole word: short words like Turkish "suç" (crime) or "aile" (family)

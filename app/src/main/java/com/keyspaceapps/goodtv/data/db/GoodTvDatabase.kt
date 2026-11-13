@@ -185,6 +185,26 @@ val MIGRATION_12_13 = object : Migration(12, 13) {
     }
 }
 
+/** v13 → v14: empty sync staging tables (see StagingCategoryEntity); the library is untouched. DDL matches schemas/14.json. */
+val MIGRATION_13_14 = object : Migration(13, 14) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS `staging_categories` (`seq` INTEGER NOT NULL, `sourceId` INTEGER NOT NULL, `kind` TEXT NOT NULL, `id` TEXT NOT NULL, `name` TEXT NOT NULL, PRIMARY KEY(`seq`))")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `staging_live` (`seq` INTEGER NOT NULL, `sourceId` INTEGER NOT NULL, `id` TEXT NOT NULL, `categoryId` TEXT, `name` TEXT NOT NULL, " +
+                "`logoUrl` TEXT, `number` INTEGER, `title` TEXT, `language` TEXT, `quality` TEXT, `epgChannelId` TEXT, PRIMARY KEY(`seq`))",
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `staging_movies` (`seq` INTEGER NOT NULL, `sourceId` INTEGER NOT NULL, `id` TEXT NOT NULL, `categoryId` TEXT, `name` TEXT NOT NULL, " +
+                "`posterUrl` TEXT, `containerExtension` TEXT NOT NULL, `rating` REAL, `addedAt` INTEGER, `tmdbId` INTEGER, `title` TEXT, `language` TEXT, `quality` TEXT, PRIMARY KEY(`seq`))",
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `staging_series` (`seq` INTEGER NOT NULL, `sourceId` INTEGER NOT NULL, `id` TEXT NOT NULL, `categoryId` TEXT, `name` TEXT NOT NULL, " +
+                "`coverUrl` TEXT, `plot` TEXT, `rating` REAL, `tmdbId` INTEGER, `title` TEXT, `language` TEXT, `quality` TEXT, PRIMARY KEY(`seq`))",
+        )
+        db.execSQL("CREATE TABLE IF NOT EXISTS `staging_series_genres` (`seq` INTEGER NOT NULL, `sourceId` INTEGER NOT NULL, `seriesId` TEXT NOT NULL, `genre` TEXT NOT NULL, PRIMARY KEY(`seq`))")
+    }
+}
+
 @Database(
     entities = [
         SourceEntity::class, CategoryEntity::class, LiveChannelEntity::class, MovieEntity::class, SeriesEntity::class,
@@ -195,8 +215,9 @@ val MIGRATION_12_13 = object : Migration(12, 13) {
         GuideChannelEntity::class, GuideProgrammeEntity::class, ChannelGuideEntity::class, FavouriteChannelEntity::class, GuideMetaEntity::class,
         LineupRowEntity::class, LineupFeedEntity::class, LineupMetaEntity::class, LineupStateEntity::class,
         TmdbTitlePeopleEntity::class, TmdbPersonEntity::class, TmdbPersonCreditEntity::class,
+        StagingCategoryEntity::class, StagingLiveEntity::class, StagingMovieEntity::class, StagingSeriesEntity::class, StagingSeriesGenreEntity::class,
     ],
-    version = 13,
+    version = 14,
     exportSchema = true, // schemas/ holds the baseline every future migration is written against
 )
 abstract class GoodTvDatabase : RoomDatabase() {
@@ -215,7 +236,7 @@ abstract class GoodTvDatabase : RoomDatabase() {
     companion object {
         fun create(context: Context): GoodTvDatabase =
             Room.databaseBuilder(context, GoodTvDatabase::class.java, "goodtv.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
                 .fallbackToDestructiveMigration(dropAllTables = true) // last resort for an unknown version only
                 .build()
     }

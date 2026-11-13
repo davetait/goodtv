@@ -252,4 +252,26 @@ class MigrationTest {
         }
         db.close()
     }
+
+    /** v13 → v14 adds the empty sync staging tables and leaves the library as it was. */
+    @Test
+    fun migrate13To14AddsStagingTables() {
+        helper.createDatabase(dbName, 13).apply {
+            execSQL("INSERT INTO sources (id, type, nickname, configJson, enabled, lastSyncAt, lastError, createdAt) VALUES (1, 'XTREAM', 'Home', '{\"type\":\"xtream\",\"server\":\"http://s\",\"username\":\"u\",\"password\":\"p\"}', 1, 1700000000000, NULL, 0)")
+            execSQL("INSERT INTO movies (sourceId, id, categoryId, name, posterUrl, containerExtension, rating, addedAt, tmdbId, title, language, quality) VALUES (1, 'm1', 'c', 'Heat', NULL, 'mkv', NULL, NULL, 949, 'Heat (1995)', NULL, NULL)")
+            close()
+        }
+        val db = helper.runMigrationsAndValidate(dbName, 14, true, MIGRATION_13_14)
+        db.query("SELECT title, tmdbId FROM movies").use { c -> c.moveToFirst(); assertEquals("Heat (1995)", c.getString(0)); assertEquals(949L, c.getLong(1)) }
+        db.query("SELECT lastSyncAt FROM sources").use { c -> c.moveToFirst(); assertEquals(1700000000000L, c.getLong(0)) }
+        for (t in listOf("staging_categories", "staging_live", "staging_movies", "staging_series", "staging_series_genres")) {
+            db.query("SELECT COUNT(*) FROM $t").use { c -> c.moveToFirst(); assertEquals(0, c.getInt(0)) }
+            // Staging is written in bulk and read once: no secondary indexes.
+            db.query("PRAGMA index_list('$t')").use { c -> assertEquals("$t indexes", 0, c.count) }
+        }
+        db.execSQL("INSERT INTO staging_movies (sourceId, id, categoryId, name, posterUrl, containerExtension, rating, addedAt, tmdbId, title, language, quality) VALUES (1, 'm1', NULL, 'Heat', NULL, 'mkv', NULL, NULL, NULL, NULL, NULL, NULL)")
+        db.execSQL("INSERT INTO staging_movies (sourceId, id, categoryId, name, posterUrl, containerExtension, rating, addedAt, tmdbId, title, language, quality) VALUES (1, 'm1', NULL, 'Heat', NULL, 'mkv', NULL, NULL, NULL, NULL, NULL, NULL)")
+        db.query("SELECT COUNT(*) FROM staging_movies").use { c -> c.moveToFirst(); assertEquals("no key on the item id", 2, c.getInt(0)) }
+        db.close()
+    }
 }
