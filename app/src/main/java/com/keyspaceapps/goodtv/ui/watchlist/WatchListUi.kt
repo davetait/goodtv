@@ -19,6 +19,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -33,6 +34,7 @@ import com.keyspaceapps.goodtv.data.watchlist.WatchListRef
 import com.keyspaceapps.goodtv.data.watchlist.WatchListRepository
 import com.keyspaceapps.goodtv.domain.ContentKind
 import kotlinx.coroutines.launch
+import android.view.KeyEvent as AndroidKeyEvent
 
 /** A poster that can go on the watch list, with the title its menu shows. */
 data class WatchTarget(val ref: WatchListRef, val title: String)
@@ -94,6 +96,27 @@ fun WatchListHost(repo: WatchListRepository, content: @Composable () -> Unit) {
     }
 }
 
+private val SELECT_KEYS = setOf(AndroidKeyEvent.KEYCODE_DPAD_CENTER, AndroidKeyEvent.KEYCODE_ENTER, AndroidKeyEvent.KEYCODE_NUMPAD_ENTER)
+
+/**
+ * For a menu opened by holding Select: the hold carries on into the menu, and tv-material buttons
+ * click on a Select release they never saw pressed, so letting go would choose the focused button.
+ * Select's repeats and release are ignored until a new press starts inside the menu; an ordinary
+ * press (a menu opened with the Menu key) chooses at once.
+ */
+@Composable
+fun Modifier.ignoringTheHoldThatOpenedIt(): Modifier {
+    val pressed = remember { booleanArrayOf(false) }
+    return onPreviewKeyEvent { e ->
+        val native = e.nativeKeyEvent
+        when {
+            native.keyCode !in SELECT_KEYS -> false
+            native.action == AndroidKeyEvent.ACTION_DOWN && native.repeatCount == 0 -> { pressed[0] = true; false }
+            else -> !pressed[0]
+        }
+    }
+}
+
 /** The title, one action button (focused first) and Cancel. */
 @Composable
 fun WatchListDialog(title: String, action: String, onAction: () -> Unit, onDismiss: () -> Unit) {
@@ -101,7 +124,7 @@ fun WatchListDialog(title: String, action: String, onAction: () -> Unit, onDismi
         val first = remember { FocusRequester() }
         var requested by remember { mutableStateOf(false) }
         Column(
-            Modifier.width(520.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp)).padding(28.dp),
+            Modifier.ignoringTheHoldThatOpenedIt().width(520.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp)).padding(28.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
