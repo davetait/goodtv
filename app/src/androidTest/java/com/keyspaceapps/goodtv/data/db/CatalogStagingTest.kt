@@ -426,4 +426,42 @@ class CatalogStagingTest {
         assertEquals(0, count(db, "series_genres"))
         assertStagingEmpty(db)
     }
+
+    @Test
+    fun stagedRowsBelongToTheWritersSource() = runBlocking {
+        val sid = store.insertSource(record("Home"))
+        val other = sid + 100
+        val w = store.beginCatalog(sid)
+        w.categories(ContentKind.LIVE, listOf(Category(other, ContentKind.LIVE, "c1", "Sports")))
+        w.categories(ContentKind.MOVIE, listOf(Category(other, ContentKind.MOVIE, "m1", "Films")))
+        w.live(listOf(LiveChannel(other, "L1", "c1", "Channel 1", null, 1)))
+        w.movies(listOf(Movie(other, "M1", "m1", "Movie 1", null, "mkv", null, null)))
+        w.series(listOf(Series(other, "S1", null, "Series 1", null, null, null, genres = setOf(Genre.DRAMA))))
+        w.commit()
+
+        assertEquals(listOf("c1", "m1"), dump(db, "categories", "WHERE sourceId = $sid").map { it[2] })
+        assertEquals(listOf("L1"), dump(db, "live_channels", "WHERE sourceId = $sid").map { it[1] })
+        assertEquals(listOf("M1"), dump(db, "movies", "WHERE sourceId = $sid").map { it[1] })
+        assertEquals(listOf("S1"), dump(db, "series", "WHERE sourceId = $sid").map { it[1] })
+        assertEquals(1, dump(db, "series_genres", "WHERE sourceId = $sid").size)
+        assertStagingEmpty(db)
+    }
+
+    @Test
+    fun deletingASourceClearsItsStaging() = runBlocking {
+        val gone = seed(store, db)
+        val kept = store.insertSource(record("Kept"))
+        for (sid in listOf(gone, kept)) {
+            val w = store.beginCatalog(sid)
+            w.categories(ContentKind.LIVE, liveCats(sid))
+            w.live(newLive(sid).take(10))
+            w.movies(newMovies(sid).take(10))
+            w.series(newSeries(sid).take(10))
+        }
+
+        store.deleteSource(gone)
+
+        stagingTables.forEach { assertEquals("$it has none of the deleted source's rows", 0, dump(db, it, "WHERE sourceId = $gone").size) }
+        stagingTables.forEach { assertTrue("$it keeps the other source's rows", dump(db, it, "WHERE sourceId = $kept").isNotEmpty()) }
+    }
 }

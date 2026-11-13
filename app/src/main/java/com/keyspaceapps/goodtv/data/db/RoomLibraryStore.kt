@@ -57,6 +57,8 @@ class RoomLibraryStore(
 
     override suspend fun deleteSource(id: Long) = db.withTransaction {
         sources.deleteById(id)
+        // Staging has no foreign key to cascade: an interrupted sync's rows would outlive the source.
+        StagingCatalogWriter.clearStaging(db, id)
         lineup.bumpGeneration()
     }
 
@@ -216,13 +218,13 @@ internal class StagingCatalogWriter(private val db: GoodTvDatabase, private val 
 
     override suspend fun categories(kind: ContentKind, list: List<Category>) = write {
         if (list.isNotEmpty()) listed += kind
-        stage(CATEGORIES, list) { i, c -> val e = c.toEntity(); bindLong(i, e.sourceId); bindString(i + 1, e.kind); bindString(i + 2, e.id); bindString(i + 3, e.name) }
+        stage(CATEGORIES, list) { i, c -> val e = c.toEntity(); bindLong(i, sourceId); bindString(i + 1, e.kind); bindString(i + 2, e.id); bindString(i + 3, e.name) }
     }
 
     override suspend fun live(list: List<LiveChannel>) = write {
         stage(LIVE, list) { i, l ->
             val e = l.toEntity()
-            bindLong(i, e.sourceId); bindString(i + 1, e.id); bindText(i + 2, e.categoryId); bindString(i + 3, e.name); bindText(i + 4, e.logoUrl)
+            bindLong(i, sourceId); bindString(i + 1, e.id); bindText(i + 2, e.categoryId); bindString(i + 3, e.name); bindText(i + 4, e.logoUrl)
             bindNumber(i + 5, e.number?.toLong()); bindText(i + 6, e.title); bindText(i + 7, e.language); bindText(i + 8, e.quality); bindText(i + 9, e.epgChannelId)
         }
     }
@@ -230,7 +232,7 @@ internal class StagingCatalogWriter(private val db: GoodTvDatabase, private val 
     override suspend fun movies(list: List<Movie>) = write {
         stage(MOVIES, list) { i, m ->
             val e = m.toEntity()
-            bindLong(i, e.sourceId); bindString(i + 1, e.id); bindText(i + 2, e.categoryId); bindString(i + 3, e.name); bindText(i + 4, e.posterUrl)
+            bindLong(i, sourceId); bindString(i + 1, e.id); bindText(i + 2, e.categoryId); bindString(i + 3, e.name); bindText(i + 4, e.posterUrl)
             bindString(i + 5, e.containerExtension); bindReal(i + 6, e.rating); bindNumber(i + 7, e.addedAt); bindNumber(i + 8, e.tmdbId)
             bindText(i + 9, e.title); bindText(i + 10, e.language); bindText(i + 11, e.quality)
         }
@@ -241,7 +243,7 @@ internal class StagingCatalogWriter(private val db: GoodTvDatabase, private val 
         forEachChunk(list) { chunk ->
             db.withTransaction { insertRows(SERIES, chunk) { i, s -> bindSeries(i, s) } }
             val genres = chunk.flatMap { s -> s.genres.map { SeriesGenreEntity(sourceId, s.id, it.name) } }
-            stage(SERIES_GENRES, genres) { i, g -> bindLong(i, g.sourceId); bindString(i + 1, g.seriesId); bindString(i + 2, g.genre) }
+            stage(SERIES_GENRES, genres) { i, g -> bindLong(i, sourceId); bindString(i + 1, g.seriesId); bindString(i + 2, g.genre) }
         }
     }
 
@@ -382,7 +384,7 @@ internal class StagingCatalogWriter(private val db: GoodTvDatabase, private val 
 
     private fun SupportSQLiteStatement.bindSeries(i: Int, s: Series) {
         val e = s.toEntity()
-        bindLong(i, e.sourceId); bindString(i + 1, e.id); bindText(i + 2, e.categoryId); bindString(i + 3, e.name); bindText(i + 4, e.coverUrl)
+        bindLong(i, sourceId); bindString(i + 1, e.id); bindText(i + 2, e.categoryId); bindString(i + 3, e.name); bindText(i + 4, e.coverUrl)
         bindText(i + 5, e.plot); bindReal(i + 6, e.rating); bindNumber(i + 7, e.tmdbId); bindText(i + 8, e.title); bindText(i + 9, e.language); bindText(i + 10, e.quality)
     }
 
@@ -398,29 +400,33 @@ internal class StagingCatalogWriter(private val db: GoodTvDatabase, private val 
         val columnList = columns.joinToString(",")
     }
 
-    private companion object {
-        const val CHUNK = 5_000
-        const val MAX_PARAMS = 999
-        val CATEGORIES = Table("categories", "staging_categories", listOf("sourceId", "kind", "id", "name"))
-        val LIVE = Table(
+    companion object {
+        /** Deletes [sourceId]'s staged rows from every staging table. Call inside a transaction. */
+        internal fun clearStaging(db: GoodTvDatabase, sourceId: Long) =
+            STAGING_TABLES.forEach { db.openHelper.writableDatabase.execSQL("DELETE FROM $it WHERE sourceId = ?", arrayOf<Any?>(sourceId)) }
+
+        private const val CHUNK = 5_000
+        private const val MAX_PARAMS = 999
+        private val CATEGORIES = Table("categories", "staging_categories", listOf("sourceId", "kind", "id", "name"))
+        private val LIVE = Table(
             "live_channels", "staging_live",
             listOf("sourceId", "id", "categoryId", "name", "logoUrl", "number", "title", "language", "quality", "epgChannelId"),
             setOf("id"),
         )
-        val MOVIES = Table(
+        private val MOVIES = Table(
             "movies", "staging_movies",
             listOf("sourceId", "id", "categoryId", "name", "posterUrl", "containerExtension", "rating", "addedAt", "tmdbId", "title", "language", "quality"),
             setOf("id"),
         )
-        val SERIES = Table(
+        private val SERIES = Table(
             "series", "staging_series",
             listOf("sourceId", "id", "categoryId", "name", "coverUrl", "plot", "rating", "tmdbId", "title", "language", "quality"),
             setOf("id"),
         )
-        val SERIES_GENRES = Table("series_genres", "staging_series_genres", listOf("sourceId", "seriesId", "genre"), setOf("seriesId", "genre"))
-        val ALL = listOf(CATEGORIES, LIVE, MOVIES, SERIES, SERIES_GENRES)
+        private val SERIES_GENRES = Table("series_genres", "staging_series_genres", listOf("sourceId", "seriesId", "genre"), setOf("seriesId", "genre"))
+        private val ALL = listOf(CATEGORIES, LIVE, MOVIES, SERIES, SERIES_GENRES)
         /** Swapped by diff; categories keep the full replace, which also keeps the panel's order (ruling R8). */
-        val DIFFED = listOf(LIVE, MOVIES, SERIES, SERIES_GENRES)
-        val STAGING_TABLES = ALL.map { it.staging }
+        private val DIFFED = listOf(LIVE, MOVIES, SERIES, SERIES_GENRES)
+        private val STAGING_TABLES = ALL.map { it.staging }
     }
 }
